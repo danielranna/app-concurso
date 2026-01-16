@@ -1,7 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import AddErrorModal from "@/components/AddErrorModal"
 
 type Subject = {
   id: string
@@ -9,13 +11,15 @@ type Subject = {
 }
 
 export default function Home() {
+  const router = useRouter()
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [message, setMessage] = useState("")
+  const [isAddErrorOpen, setIsAddErrorOpen] = useState(false)
 
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [newSubject, setNewSubject] = useState("")
 
   // 🔐 LOGIN
   async function handleLogin() {
@@ -27,25 +31,11 @@ export default function Home() {
     if (error) {
       setMessage(error.message)
     } else {
-      setMessage("Login realizado com sucesso!")
+      setMessage("")
       loadUser()
     }
   }
 
-  async function handleSignup() {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password
-    })
-
-    if (error) {
-      setMessage(error.message)
-    } else {
-      setMessage("Usuário criado! Verifique o email.")
-    }
-  }
-
-  // 👤 CARREGAR USUÁRIO LOGADO
   async function loadUser() {
     const {
       data: { user }
@@ -57,85 +47,99 @@ export default function Home() {
     }
   }
 
-  // 📚 LISTAR MATÉRIAS
+  // 📚 MATÉRIAS
   async function loadSubjects(user_id: string) {
     const res = await fetch(`/api/subjects?user_id=${user_id}`)
     const data = await res.json()
     setSubjects(data)
   }
 
-  // ➕ CRIAR MATÉRIA
-  async function createSubject() {
-    if (!newSubject || !userId) return
-
-    await fetch("/api/subjects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        name: newSubject
-      })
-    })
-
-    setNewSubject("")
-    loadSubjects(userId)
-  }
-
-  // 🔄 tenta recuperar sessão ao abrir a página
   useEffect(() => {
     loadUser()
   }, [])
 
   return (
-    <main style={{ padding: 40 }}>
-      <h1>🧠 Mapa de Correção de Erros</h1>
+    <main className="min-h-screen bg-slate-50 px-6 py-6">
+      {/* HEADER */}
+      <header className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-slate-800">
+          Mapa de correção de erros
+        </h1>
 
+        <div className="flex gap-3">
+          <button 
+            onClick={() => setIsAddErrorOpen(true)}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-white hover:bg-slate-800">
+            +
+          </button>
+          <button className="rounded-lg border border-slate-300 px-3 py-2 text-slate-700 hover:bg-slate-100">
+            ⚙️
+          </button>
+        </div>
+      </header>
+
+      {/* LOGIN */}
       {!userId && (
-        <>
-          <h2>🔐 Login</h2>
-
+        <div className="mx-auto max-w-sm rounded-xl bg-white p-6 shadow">
           <input
+            className="mb-3 w-full rounded border p-2"
             placeholder="Email"
-            value={email}
             onChange={e => setEmail(e.target.value)}
-          /><br /><br />
-
+          />
           <input
+            className="mb-3 w-full rounded border p-2"
             type="password"
             placeholder="Senha"
-            value={password}
             onChange={e => setPassword(e.target.value)}
-          /><br /><br />
-
-          <button onClick={handleLogin}>Entrar</button>
-          <button onClick={handleSignup} style={{ marginLeft: 10 }}>
-            Criar conta
+          />
+          <button
+            className="w-full rounded bg-slate-900 py-2 text-white"
+            onClick={handleLogin}
+          >
+            Entrar
           </button>
-
-          <p>{message}</p>
-        </>
+          <p className="mt-2 text-sm text-red-600">{message}</p>
+        </div>
       )}
 
       {userId && (
         <>
-          <h2>📚 Matérias</h2>
+          {/* CHARTS */}
+          <section className="mb-8 grid gap-4 md:grid-cols-2">
+            <div className="h-32 rounded-xl border border-dashed border-slate-300 bg-white" />
+            <div className="h-32 rounded-xl border border-dashed border-slate-300 bg-white" />
+          </section>
 
-          <input
-            placeholder="Nova matéria (ex: ICMS)"
-            value={newSubject}
-            onChange={e => setNewSubject(e.target.value)}
-          />
-          <button onClick={createSubject} style={{ marginLeft: 10 }}>
-            Adicionar
-          </button>
+          {/* GRID DE MATÉRIAS */}
+          <section>
+            <h2 className="mb-4 text-lg font-semibold text-slate-700">
+              Matérias
+            </h2>
 
-          <ul style={{ marginTop: 20 }}>
-            {subjects.map(subject => (
-              <li key={subject.id}>{subject.name}</li>
-            ))}
-          </ul>
+            <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {subjects.map(subject => (
+                <button
+                  key={subject.id}
+                  onClick={() => router.push(`/subject/${subject.id}`)}
+                  className="flex h-24 items-center justify-center rounded-xl bg-white text-slate-800 shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-slate-300"
+                >
+                  <span className="text-base font-medium">
+                    {subject.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
         </>
-      )}
+      )}  
+      <AddErrorModal
+        isOpen={isAddErrorOpen}
+        onClose={() => setIsAddErrorOpen(false)}
+        onSuccess={() => {
+          // por enquanto não faz nada
+          // depois podemos atualizar gráficos
+        }}
+      />
     </main>
   )
 }
