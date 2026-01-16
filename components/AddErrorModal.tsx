@@ -21,17 +21,32 @@ type ErrorType =
   | "legislação"
   | "procedimental"
 
+type InitialError = {
+  id: string
+  topic_id: string
+  subject_id: string
+  error_text: string
+  correction_text: string
+  description?: string
+  reference_link?: string
+  error_type?: ErrorType
+}
+
 type Props = {
   isOpen: boolean
   onClose: () => void
   onSuccess?: () => void
+  initialData?: InitialError | null
 }
 
 export default function AddErrorModal({
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  initialData
 }: Props) {
+  console.log("🟢 RENDER MODAL", { isOpen, initialData })
+
   const [userId, setUserId] = useState<string | null>(null)
 
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -44,17 +59,23 @@ export default function AddErrorModal({
   const [correctionText, setCorrectionText] = useState("")
   const [description, setDescription] = useState("")
   const [referenceLink, setReferenceLink] = useState("")
-
-  const [errorType, setErrorType] = useState<ErrorType>("conceitual")
+  const [errorType, setErrorType] =
+    useState<ErrorType>("conceitual")
 
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
 
-  // 🔐 carrega usuário + matérias
+  /* =====================
+     LOAD USER + SUBJECTS
+  ===================== */
   async function loadUserAndSubjects() {
+    console.log("🔐 loadUserAndSubjects")
+
     const {
       data: { user }
     } = await supabase.auth.getUser()
+
+    console.log("👤 usuário:", user)
 
     if (!user) return
 
@@ -62,22 +83,35 @@ export default function AddErrorModal({
 
     const res = await fetch(`/api/subjects?user_id=${user.id}`)
     const data = await res.json()
+
+    console.log("📚 subjects:", data)
+
     setSubjects(data)
   }
 
-  // 🧩 carrega temas
-  async function loadTopics(subjectId: string) {
-    if (!userId) return
+  async function loadTopics(subjectId: string): Promise<Topic[]> {
+    console.log("🔵 loadTopics chamado", { subjectId, userId })
+
+    if (!userId) {
+      console.log("❌ userId ainda não definido")
+      return []
+    }
 
     const res = await fetch(
       `/api/topics?user_id=${userId}&subject_id=${subjectId}`
     )
+
     const data = await res.json()
+
+    console.log("🟣 topics retornados da API:", data)
+
     setTopics(data)
+    return data
   }
 
-  // 🧼 reset
   function resetForm() {
+    console.log("🧼 resetForm")
+
     setSelectedSubject("")
     setSelectedTopic("")
     setTopics([])
@@ -89,8 +123,49 @@ export default function AddErrorModal({
     setMessage("")
   }
 
-  // ➕ salvar erro
+  /* =====================
+     PRELOAD EDIT
+  ===================== */
+  async function preloadEdit(data: InitialError) {
+    console.log("🟠 preloadEdit iniciado", data)
+
+    setSelectedSubject(data.subject_id)
+    setErrorText(data.error_text)
+    setCorrectionText(data.correction_text)
+    setDescription(data.description ?? "")
+    setReferenceLink(data.reference_link ?? "")
+    setErrorType(data.error_type ?? "conceitual")
+
+    console.log("🟡 carregando topics do subject:", data.subject_id)
+
+    const loadedTopics = await loadTopics(data.subject_id)
+
+    console.log("🟢 topics carregados:", loadedTopics)
+    console.log("🟢 tentando selecionar topic_id:", data.topic_id)
+
+    const exists = loadedTopics.find(
+      t => t.id === data.topic_id
+    )
+
+    console.log("🔎 topic existe?", exists)
+
+    if (exists) {
+      setSelectedTopic(data.topic_id)
+    }
+  }
+
+  /* =====================
+     SUBMIT (CREATE / EDIT)
+  ===================== */
   async function handleSubmit() {
+    console.log("🚀 handleSubmit", {
+      userId,
+      selectedSubject,
+      selectedTopic,
+      errorText,
+      correctionText
+    })
+
     if (!userId || !selectedTopic || !errorText || !correctionText) {
       setMessage("Preencha os campos obrigatórios.")
       return
@@ -98,21 +173,28 @@ export default function AddErrorModal({
 
     setLoading(true)
 
-    const res = await fetch("/api/errors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        topic_id: selectedTopic,
-        error_text: errorText,
-        correction_text: correctionText,
-        description,
-        reference_link: referenceLink,
-        error_type: errorType
-      })
-    })
+    const isEdit = Boolean(initialData?.id)
+
+    const res = await fetch(
+      isEdit ? `/api/errors/${initialData!.id}` : "/api/errors",
+      {
+        method: isEdit ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          topic_id: selectedTopic,
+          error_text: errorText,
+          correction_text: correctionText,
+          description,
+          reference_link: referenceLink,
+          error_type: errorType
+        })
+      }
+    )
 
     setLoading(false)
+
+    console.log("📡 resposta salvar:", res.status)
 
     if (!res.ok) {
       setMessage("Erro ao salvar.")
@@ -124,13 +206,38 @@ export default function AddErrorModal({
     onClose()
   }
 
-  // 🔄 abrir modal
+  /* =====================
+     OPEN MODAL
+  ===================== */
   useEffect(() => {
-    if (isOpen) {
-      resetForm()
-      loadUserAndSubjects()
+    if (!isOpen) return
+
+    console.log("🔓 MODAL ABERTO", { initialData })
+
+    async function init() {
+      await loadUserAndSubjects()
+
+      if (initialData) {
+        await preloadEdit(initialData)
+      } else {
+        resetForm()
+      }
     }
-  }, [isOpen])
+
+    init()
+  }, [isOpen, initialData])
+
+  /* =====================
+     WATCH STATES
+  ===================== */
+  useEffect(() => {
+    console.log("📦 ESTADO ATUAL", {
+      userId,
+      selectedSubject,
+      selectedTopic,
+      topics
+    })
+  }, [userId, selectedSubject, selectedTopic, topics])
 
   if (!isOpen) return null
 
@@ -140,7 +247,7 @@ export default function AddErrorModal({
         {/* HEADER */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-800">
-            Adicionar erro
+            {initialData ? "Editar erro" : "Adicionar erro"}
           </h2>
           <button
             onClick={onClose}
@@ -152,11 +259,11 @@ export default function AddErrorModal({
 
         {/* FORM */}
         <div className="space-y-3">
-          {/* MATÉRIA */}
           <select
             className="w-full rounded border p-2"
             value={selectedSubject}
             onChange={e => {
+              console.log("📘 subject selecionado", e.target.value)
               setSelectedSubject(e.target.value)
               setSelectedTopic("")
               loadTopics(e.target.value)
@@ -170,11 +277,13 @@ export default function AddErrorModal({
             ))}
           </select>
 
-          {/* TEMA */}
           <select
             className="w-full rounded border p-2"
             value={selectedTopic}
-            onChange={e => setSelectedTopic(e.target.value)}
+            onChange={e => {
+              console.log("📙 topic selecionado", e.target.value)
+              setSelectedTopic(e.target.value)
+            }}
             disabled={!selectedSubject}
           >
             <option value="">Selecionar tema</option>
@@ -213,7 +322,7 @@ export default function AddErrorModal({
             onChange={e => setDescription(e.target.value)}
           />
 
-          {/* TIPO DE ERRO */}
+          {/* TIPO */}
           <div className="flex flex-wrap gap-2">
             {[
               "conceitual",
@@ -227,7 +336,7 @@ export default function AddErrorModal({
                 key={type}
                 type="button"
                 onClick={() => setErrorType(type as ErrorType)}
-                className={`rounded px-3 py-1 text-sm transition ${
+                className={`rounded px-3 py-1 text-sm ${
                   errorType === type
                     ? "bg-purple-600 text-white"
                     : "border border-slate-300 text-slate-700 hover:bg-slate-100"
@@ -256,7 +365,7 @@ export default function AddErrorModal({
             disabled={loading}
             className="rounded bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
           >
-            {loading ? "Salvando..." : "OK"}
+            {loading ? "Salvando..." : "Salvar"}
           </button>
         </div>
       </div>
