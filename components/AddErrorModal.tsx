@@ -13,6 +13,14 @@ type Topic = {
   name: string
 }
 
+type ErrorType =
+  | "conceitual"
+  | "interpretação"
+  | "cálculo"
+  | "atenção"
+  | "legislação"
+  | "procedimental"
+
 type Props = {
   isOpen: boolean
   onClose: () => void
@@ -37,9 +45,7 @@ export default function AddErrorModal({
   const [description, setDescription] = useState("")
   const [referenceLink, setReferenceLink] = useState("")
 
-  const [errorStatus, setErrorStatus] = useState<
-    "normal" | "critico" | "reincidente" | "aprendido"
-  >("normal")
+  const [errorType, setErrorType] = useState<ErrorType>("conceitual")
 
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
@@ -59,7 +65,7 @@ export default function AddErrorModal({
     setSubjects(data)
   }
 
-  // 🧩 carrega temas ao selecionar matéria
+  // 🧩 carrega temas
   async function loadTopics(subjectId: string) {
     if (!userId) return
 
@@ -70,7 +76,7 @@ export default function AddErrorModal({
     setTopics(data)
   }
 
-  // 🧼 limpa formulário
+  // 🧼 reset
   function resetForm() {
     setSelectedSubject("")
     setSelectedTopic("")
@@ -79,7 +85,7 @@ export default function AddErrorModal({
     setCorrectionText("")
     setDescription("")
     setReferenceLink("")
-    setErrorStatus("normal")
+    setErrorType("conceitual")
     setMessage("")
   }
 
@@ -102,7 +108,7 @@ export default function AddErrorModal({
         correction_text: correctionText,
         description,
         reference_link: referenceLink,
-        error_status: errorStatus
+        error_type: errorType
       })
     })
 
@@ -118,7 +124,7 @@ export default function AddErrorModal({
     onClose()
   }
 
-  // 🔄 ao abrir modal
+  // 🔄 abrir modal
   useEffect(() => {
     if (isOpen) {
       resetForm()
@@ -136,7 +142,10 @@ export default function AddErrorModal({
           <h2 className="text-lg font-semibold text-slate-800">
             Adicionar erro
           </h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-800">
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-800"
+          >
             ✕
           </button>
         </div>
@@ -204,23 +213,27 @@ export default function AddErrorModal({
             onChange={e => setDescription(e.target.value)}
           />
 
-          {/* STATUS */}
-          <div className="flex gap-2">
-            {["normal", "critico", "reincidente", "aprendido"].map(status => (
+          {/* TIPO DE ERRO */}
+          <div className="flex flex-wrap gap-2">
+            {[
+              "conceitual",
+              "interpretação",
+              "cálculo",
+              "atenção",
+              "legislação",
+              "procedimental"
+            ].map(type => (
               <button
-                key={status}
-                onClick={() =>
-                  setErrorStatus(
-                    status as "normal" | "critico" | "reincidente" | "aprendido"
-                  )
-                }
-                className={`rounded px-3 py-1 text-sm ${
-                  errorStatus === status
-                    ? "bg-slate-900 text-white"
-                    : "border text-slate-700"
+                key={type}
+                type="button"
+                onClick={() => setErrorType(type as ErrorType)}
+                className={`rounded px-3 py-1 text-sm transition ${
+                  errorType === type
+                    ? "bg-purple-600 text-white"
+                    : "border border-slate-300 text-slate-700 hover:bg-slate-100"
                 }`}
               >
-                {status}
+                {type}
               </button>
             ))}
           </div>
@@ -241,7 +254,7 @@ export default function AddErrorModal({
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="rounded bg-slate-900 px-4 py-2 text-white"
+            className="rounded bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
           >
             {loading ? "Salvando..." : "OK"}
           </button>

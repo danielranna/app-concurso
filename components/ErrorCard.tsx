@@ -4,21 +4,25 @@ type ErrorCardProps = {
     correction_text: string
     description?: string
     reference_link?: string
-    error_type: string
+    error_status: string
     topics: {
       name: string
       subjects: {
         name: string
-      }
-    }
+      } | null
+    } | null
   }
 }
 
-const typeStyles: Record<string, {
-  label: string
-  badge: string
-  border: string
-}> = {
+
+const typeStyles: Record<
+  string,
+  {
+    label: string
+    badge: string
+    border: string
+  }
+> = {
   normal: {
     label: "Normal",
     badge: "bg-slate-100 text-slate-700",
@@ -42,16 +46,21 @@ const typeStyles: Record<string, {
 }
 
 export default function ErrorCard({ error }: ErrorCardProps) {
-  const style = typeStyles[error.error_type] || typeStyles.normal
+  if (!error) return null
+
+  const style = typeStyles[error.error_status] || typeStyles.normal
+
+  const subjectName = error.topics?.subjects?.name ?? "Sem matéria"
+  const topicName = error.topics?.name ?? "Sem tema"
 
   return (
     <div
       className={`rounded-xl border ${style.border} bg-white p-5 shadow-sm transition hover:shadow-md`}
     >
       {/* Cabeçalho */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="mb-3 flex items-center justify-between">
         <p className="text-sm text-slate-500">
-          {error.topics.subjects.name} • {error.topics.name}
+          {subjectName} • {topicName}
         </p>
 
         <span

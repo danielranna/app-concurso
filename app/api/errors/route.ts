@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 
+/* =========================
+   GET /api/errors
+========================= */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
 
   const user_id = searchParams.get("user_id")
   const topic_id = searchParams.get("topic_id")
+  const subject_id = searchParams.get("subject_id")
   const error_status = searchParams.get("error_status")
 
   if (!user_id) {
@@ -17,28 +21,36 @@ export async function GET(req: Request) {
 
   let query = supabaseServer
     .from("errors")
-    .select(`
+    .select(
+      `
       id,
       error_text,
       correction_text,
       description,
       reference_link,
       error_status,
+      error_type,
       created_at,
-      topics (
+      topics!inner (
         id,
         name,
+        subject_id,
         subjects (
           id,
           name
         )
       )
-    `)
+    `
+    )
     .eq("user_id", user_id)
     .order("created_at", { ascending: false })
 
   if (topic_id) {
     query = query.eq("topic_id", topic_id)
+  }
+
+  if (subject_id) {
+    query = query.eq("topics.subject_id", subject_id)
   }
 
   if (error_status) {
@@ -54,9 +66,12 @@ export async function GET(req: Request) {
     )
   }
 
-  return NextResponse.json(data)
+  return NextResponse.json(data ?? [])
 }
 
+/* =========================
+   POST /api/errors
+========================= */
 export async function POST(req: Request) {
   const body = await req.json()
 
@@ -67,7 +82,7 @@ export async function POST(req: Request) {
     correction_text,
     description,
     reference_link,
-    error_status
+    error_type
   } = body
 
   if (!user_id || !topic_id || !error_text || !correction_text) {
@@ -85,9 +100,10 @@ export async function POST(req: Request) {
         topic_id,
         error_text,
         correction_text,
-        description,
-        reference_link,
-        error_status
+        description: description || null,
+        reference_link: reference_link || null,
+        error_type,
+        error_status: "normal"
       }
     ])
 

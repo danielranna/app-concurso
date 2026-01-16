@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import AddErrorModal from "@/components/AddErrorModal"
+import SettingsModal from "@/components/SettingsModal"
 
 type Subject = {
   id: string
@@ -17,6 +18,8 @@ export default function Home() {
   const [password, setPassword] = useState("")
   const [message, setMessage] = useState("")
   const [isAddErrorOpen, setIsAddErrorOpen] = useState(false)
+  const [openSettings, setOpenSettings] = useState(false)
+
 
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -72,7 +75,9 @@ export default function Home() {
             className="rounded-lg bg-slate-900 px-3 py-2 text-white hover:bg-slate-800">
             +
           </button>
-          <button className="rounded-lg border border-slate-300 px-3 py-2 text-slate-700 hover:bg-slate-100">
+          <button 
+            onClick={() => setOpenSettings(true)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-slate-700 hover:bg-slate-100"          >
             ⚙️
           </button>
         </div>
@@ -131,6 +136,7 @@ export default function Home() {
             </div>
           </section>
         </>
+
       )}  
       <AddErrorModal
         isOpen={isAddErrorOpen}
@@ -140,6 +146,16 @@ export default function Home() {
           // depois podemos atualizar gráficos
         }}
       />
+      {userId && (
+        <SettingsModal
+          open={openSettings}
+          onClose={() => setOpenSettings(false)}
+          userId={userId}
+        />
+        )
+      }
+
+      
     </main>
   )
 }
