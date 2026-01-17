@@ -12,6 +12,11 @@ type Topic = {
   name: string
 }
 
+type ErrorType = {
+  id: string
+  name: string
+}
+
 type Props = {
   open: boolean
   onClose: () => void
@@ -19,13 +24,17 @@ type Props = {
 }
 
 export default function SettingsModal({ open, onClose, userId }: Props) {
-  const [tab, setTab] = useState<"subjects" | "topics">("subjects")
+  const [tab, setTab] = useState<"subjects" | "topics" | "errorTypes" | "status">("subjects")
 
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [topics, setTopics] = useState<Topic[]>([])
+  const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
+  const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string }>>([])
 
   const [newSubject, setNewSubject] = useState("")
   const [newTopic, setNewTopic] = useState("")
+  const [newErrorType, setNewErrorType] = useState("")
+  const [newErrorStatus, setNewErrorStatus] = useState("")
 
   const [selectedSubject, setSelectedSubject] = useState("")
 
@@ -43,8 +52,50 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     setTopics(await res.json())
   }
 
+  async function loadErrorTypes() {
+    try {
+      const res = await fetch(`/api/error-types?user_id=${userId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setErrorTypes(data ?? [])
+      } else {
+        console.error("Erro ao carregar tipos de erro:", res.status)
+        setErrorTypes([])
+      }
+    } catch (error) {
+      console.error("Erro ao carregar tipos de erro:", error)
+      setErrorTypes([])
+    }
+  }
+
+  async function loadErrorStatuses() {
+    try {
+      const res = await fetch(`/api/error-statuses?user_id=${userId}`)
+      if (res.ok) {
+        const data = await res.json()
+        // Garante que sempre temos array de objetos com id e name
+        const statuses = (data ?? []).map((item: any, index: number) => {
+          if (typeof item === 'string') {
+            return { id: `status-${index}`, name: item }
+          }
+          return { id: item.id || `status-${index}`, name: item.name || item }
+        })
+        setErrorStatuses(statuses)
+      } else {
+        setErrorStatuses([])
+      }
+    } catch (error) {
+      console.error("Erro ao carregar status de erro:", error)
+      setErrorStatuses([])
+    }
+  }
+
   useEffect(() => {
-    if (open) loadSubjects()
+    if (open) {
+      loadSubjects()
+      loadErrorTypes()
+      loadErrorStatuses()
+    }
   }, [open])
 
   /* ---------- CRUD SUBJECT ---------- */
@@ -95,6 +146,51 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     loadTopics(selectedSubject)
   }
 
+  /* ---------- CRUD ERROR TYPE ---------- */
+
+  async function createErrorType() {
+    if (!newErrorType) return
+
+    await fetch("/api/error-types", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, name: newErrorType })
+    })
+
+    setNewErrorType("")
+    loadErrorTypes()
+  }
+
+  async function deleteErrorType(id: string) {
+    if (!confirm("Deseja realmente excluir este tipo de erro?")) return
+
+    await fetch(`/api/error-types/${id}`, { method: "DELETE" })
+    loadErrorTypes()
+  }
+
+  /* ---------- CRUD ERROR STATUS ---------- */
+
+  async function createErrorStatus() {
+    if (!newErrorStatus) return
+
+    await fetch("/api/error-statuses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, name: newErrorStatus })
+    })
+
+    setNewErrorStatus("")
+    loadErrorStatuses()
+  }
+
+  async function deleteErrorStatus(id: string) {
+    if (!confirm("Deseja realmente excluir este status?")) return
+
+    await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
+    loadErrorStatuses()
+  }
+
+
   if (!open) return null
 
   return (
@@ -129,6 +225,28 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
               }`}
             >
               Temas
+            </button>
+
+            <button
+              onClick={() => setTab("errorTypes")}
+              className={`w-full rounded px-3 py-2 text-left ${
+                tab === "errorTypes"
+                  ? "bg-violet-100 text-violet-700"
+                  : "hover:bg-slate-100"
+              }`}
+            >
+              Tipos de Erro
+            </button>
+
+            <button
+              onClick={() => setTab("status")}
+              className={`w-full rounded px-3 py-2 text-left ${
+                tab === "status"
+                  ? "bg-violet-100 text-violet-700"
+                  : "hover:bg-slate-100"
+              }`}
+            >
+              Status
             </button>
           </aside>
 
@@ -223,6 +341,109 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
                     </div>
                   </>
                 )}
+              </>
+            )}
+
+            {tab === "errorTypes" && (
+              <>
+                <div className="mb-4 flex gap-2">
+                  <input
+                    className="flex-1 rounded border p-2"
+                    placeholder="Nome do tipo de erro"
+                    value={newErrorType}
+                    onChange={e => setNewErrorType(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") createErrorType()
+                    }}
+                  />
+                  <button
+                    onClick={createErrorType}
+                    className="rounded bg-violet-600 px-4 text-white"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {errorTypes.length === 0 ? (
+                    <p className="col-span-3 text-sm text-slate-500">
+                      Nenhum tipo de erro cadastrado ainda.
+                    </p>
+                  ) : (
+                    errorTypes.map(et => (
+                      <div
+                        key={et.id}
+                        className="flex items-center justify-between rounded border p-3"
+                      >
+                        <span className="capitalize">{et.name}</span>
+                        {!et.id.startsWith("type-") && (
+                          <button
+                            onClick={() => deleteErrorType(et.id)}
+                            className="text-red-500"
+                            title="Excluir"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
+            {tab === "status" && (
+              <>
+                <div className="mb-4 flex gap-2">
+                  <input
+                    className="flex-1 rounded border p-2"
+                    placeholder="Nome do status"
+                    value={newErrorStatus}
+                    onChange={e => setNewErrorStatus(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") createErrorStatus()
+                    }}
+                  />
+                  <button
+                    onClick={createErrorStatus}
+                    className="rounded bg-violet-600 px-4 text-white"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {errorStatuses.length === 0 ? (
+                    <p className="col-span-3 text-sm text-slate-500">
+                      Nenhum status cadastrado ainda.
+                    </p>
+                  ) : (
+                    errorStatuses.map(status => {
+                      const isDefault = ["normal", "critico", "reincidente", "aprendido"].includes(status.name)
+                      const canDelete = !isDefault && !status.id.startsWith("status-")
+                      
+                      return (
+                        <div
+                          key={status.id}
+                          className={`flex items-center justify-between rounded border p-3 ${
+                            isDefault ? "bg-slate-50" : ""
+                          }`}
+                        >
+                          <span className="capitalize">{status.name}</span>
+                          {canDelete && (
+                            <button
+                              onClick={() => deleteErrorStatus(status.id)}
+                              className="text-red-500"
+                              title="Excluir"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
               </>
             )}
           </main>

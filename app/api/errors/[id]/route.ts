@@ -6,9 +6,9 @@ import { supabaseServer } from "@/lib/supabase-server"
 ========================= */
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id
+  const { id } = await params
 
   if (!id) {
     return NextResponse.json(
@@ -37,9 +37,9 @@ export async function DELETE(
 ========================= */
 export async function PUT(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id
+  const { id } = await params
 
   if (!id) {
     return NextResponse.json(

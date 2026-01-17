@@ -8,9 +8,10 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
 
   const user_id = searchParams.get("user_id")
-  const topic_id = searchParams.get("topic_id")
+  const topic_ids = searchParams.getAll("topic_id")
   const subject_id = searchParams.get("subject_id")
-  const error_status = searchParams.get("error_status")
+  const error_statuses = searchParams.getAll("error_status")
+  const error_types = searchParams.getAll("error_type")
 
   if (!user_id) {
     return NextResponse.json(
@@ -45,16 +46,20 @@ export async function GET(req: Request) {
     .eq("user_id", user_id)
     .order("created_at", { ascending: false })
 
-  if (topic_id) {
-    query = query.eq("topic_id", topic_id)
+  if (topic_ids.length > 0) {
+    query = query.in("topic_id", topic_ids)
   }
 
   if (subject_id) {
     query = query.eq("topics.subject_id", subject_id)
   }
 
-  if (error_status) {
-    query = query.eq("error_status", error_status)
+  if (error_statuses.length > 0) {
+    query = query.in("error_status", error_statuses)
+  }
+
+  if (error_types.length > 0) {
+    query = query.in("error_type", error_types)
   }
 
   const { data, error } = await query
@@ -82,7 +87,8 @@ export async function POST(req: Request) {
     correction_text,
     description,
     reference_link,
-    error_type
+    error_type,
+    error_status
   } = body
 
   if (!user_id || !topic_id || !error_text || !correction_text) {
@@ -103,7 +109,7 @@ export async function POST(req: Request) {
         description: description || null,
         reference_link: reference_link || null,
         error_type,
-        error_status: "normal"
+        error_status: error_status || "normal"
       }
     ])
 
