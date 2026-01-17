@@ -102,6 +102,7 @@ export default function ErrorsBySubjectChart({ errors }: Props) {
                 type="number"
                 stroke="#64748b"
                 style={{ fontSize: "12px" }}
+                allowDecimals={false}
               />
               <YAxis 
                 type="category"

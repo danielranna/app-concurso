@@ -38,16 +38,13 @@ export async function GET(req: Request) {
     return NextResponse.json([])
   }
 
-  // Extrai valores únicos de error_status e adiciona status padrão
+  // Extrai valores únicos de error_status (sem adicionar status padrão)
   const uniqueStatuses = Array.from(
     new Set(errorsData?.map(item => item.error_status).filter(Boolean) || [])
   )
 
-  // Adiciona status padrão se não existirem
-  const defaultStatuses = ["normal", "critico", "reincidente", "aprendido"]
-  const allStatuses = Array.from(new Set([...defaultStatuses, ...uniqueStatuses]))
-
-  return NextResponse.json(allStatuses.map((name, index) => ({
+  // Retorna apenas os status que realmente existem (sem adicionar padrão)
+  return NextResponse.json(uniqueStatuses.map((name, index) => ({
     id: `status-${index}`,
     name
   })))

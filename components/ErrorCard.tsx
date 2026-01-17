@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Eye } from "lucide-react"
 import ErrorOptionsMenu from "@/components/ErrorOptionsMenu"
 
@@ -22,45 +22,64 @@ type ErrorCardProps = {
   }
   onEdit: () => void
   onDeleted: () => void
+  allCardsExpanded?: boolean
+  availableStatuses?: Array<{ id: string; name: string }>
+  onStatusChange?: (errorId: string, newStatus: string) => void
 }
 
-const statusStyles: Record<
-  string,
-  { label: string; badge: string; border: string }
-> = {
-  normal: {
-    label: "Normal",
-    badge: "bg-slate-100 text-slate-700",
-    border: "border-slate-200"
-  },
-  critico: {
-    label: "Crítico",
-    badge: "bg-red-100 text-red-700",
-    border: "border-red-300"
-  },
-  reincidente: {
-    label: "Reincidente",
-    badge: "bg-yellow-100 text-yellow-800",
-    border: "border-yellow-300"
-  },
-  aprendido: {
-    label: "Aprendido",
-    badge: "bg-green-100 text-green-700",
-    border: "border-green-300"
+function getStatusStyle(status: string): { label: string; badge: string; border: string } {
+  const defaultStyles: Record<
+    string,
+    { label: string; badge: string; border: string }
+  > = {
+    normal: {
+      label: "Normal",
+      badge: "bg-slate-100 text-slate-700",
+      border: "border-slate-200"
+    },
+    critico: {
+      label: "Crítico",
+      badge: "bg-red-100 text-red-700",
+      border: "border-red-300"
+    },
+    reincidente: {
+      label: "Reincidente",
+      badge: "bg-yellow-100 text-yellow-800",
+      border: "border-yellow-300"
+    },
+    aprendido: {
+      label: "Aprendido",
+      badge: "bg-green-100 text-green-700",
+      border: "border-green-300"
+    }
+  }
+
+  return defaultStyles[status] || {
+    label: status.charAt(0).toUpperCase() + status.slice(1),
+    badge: "bg-blue-100 text-blue-700",
+    border: "border-blue-300"
   }
 }
 
 export default function ErrorCard({
   error,
   onEdit,
-  onDeleted
+  onDeleted,
+  allCardsExpanded = false,
+  availableStatuses = [],
+  onStatusChange
 }: ErrorCardProps) {
   const [open, setOpen] = useState(false)
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
+
+  // Sincroniza com allCardsExpanded
+  useEffect(() => {
+    setOpen(allCardsExpanded)
+  }, [allCardsExpanded])
 
   if (!error) return null
 
-  const style =
-    statusStyles[error.error_status] || statusStyles.normal
+  const style = getStatusStyle(error.error_status)
 
   const subjectName =
     error.topics?.subjects?.name ?? "Sem matéria"
@@ -94,15 +113,54 @@ export default function ErrorCard({
 
         {/* AÇÕES */}
         <div className="flex shrink-0 items-center gap-2">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}
-          >
-            {style.label}
-          </span>
+          {/* Status clicável */}
+          <div className="relative">
+            {onStatusChange && availableStatuses.length > 0 ? (
+              <>
+                <button
+                  onClick={() => setStatusMenuOpen(!statusMenuOpen)}
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition ${style.badge}`}
+                  title="Clique para alterar status"
+                >
+                  {style.label}
+                </button>
+                {statusMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setStatusMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 z-20 mt-2 w-40 rounded-md border bg-white shadow-lg">
+                      {availableStatuses.map(status => (
+                        <button
+                          key={status.id}
+                          onClick={() => {
+                            onStatusChange(error.id, status.name)
+                            setStatusMenuOpen(false)
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 ${
+                            error.error_status === status.name ? "bg-slate-100" : ""
+                          }`}
+                        >
+                          <span className="capitalize">{status.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}
+              >
+                {style.label}
+              </span>
+            )}
+          </div>
 
           <button
             onClick={() => setOpen(v => !v)}
-            className="rounded-md p-1 text-purple-600 hover:bg-purple-50"
+            className="rounded-md p-1 text-slate-700 hover:bg-slate-100"
             title="Visualizar"
           >
             <Eye size={16} />
@@ -145,8 +203,11 @@ export default function ErrorCard({
 
           {error.reference_link && (
             <a
-              href={error.reference_link}
+              href={error.reference_link.startsWith('http://') || error.reference_link.startsWith('https://') 
+                ? error.reference_link 
+                : `https://${error.reference_link}`}
               target="_blank"
+              rel="noopener noreferrer"
               className="inline-block text-sm font-medium text-blue-600 hover:underline"
             >
               🔗 Ir para questão

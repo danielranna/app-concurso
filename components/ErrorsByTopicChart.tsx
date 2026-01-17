@@ -101,6 +101,7 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
                 type="number"
                 stroke="#64748b"
                 style={{ fontSize: "12px" }}
+                allowDecimals={false}
               />
               <YAxis 
                 type="category"
@@ -120,7 +121,7 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
               />
               <Bar 
                 dataKey="quantidade" 
-                fill="#6366f1"
+                fill="#0f172a"
                 radius={[0, 8, 8, 0]}
               />
             </BarChart>

@@ -153,6 +153,7 @@ export default function ErrorsByPeriodChart({ errors }: Props) {
               <YAxis 
                 stroke="#64748b"
                 style={{ fontSize: "12px" }}
+                allowDecimals={false}
               />
               <Tooltip
                 contentStyle={{

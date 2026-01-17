@@ -6,7 +6,7 @@
     import ErrorCard from "@/components/ErrorCard"
     import AddErrorModal from "@/components/AddErrorModal"
     import ErrorsByTopicChart from "@/components/ErrorsByTopicChart"
-    import { ArrowLeft, Filter } from "lucide-react"
+    import { ArrowLeft, Filter, Eye } from "lucide-react"
 
     type ErrorItem = {
     id: string
@@ -42,10 +42,12 @@
     // 🔧 filtros
     const [topics, setTopics] = useState<Array<{ id: string; name: string }>>([])
     const [errorTypes, setErrorTypes] = useState<Array<{ id: string; name: string }>>([])
+    const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string }>>([])
     const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
     const [selectedErrorTypes, setSelectedErrorTypes] = useState<string[]>([])
     const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
     const [openFilterMenu, setOpenFilterMenu] = useState<"topics" | "errorTypes" | "statuses" | null>(null)
+    const [allCardsExpanded, setAllCardsExpanded] = useState(false)
 
     // 🔧 modal edição
     const [openModal, setOpenModal] = useState(false)
@@ -110,6 +112,27 @@
         } catch (error) {
             console.error("Erro ao carregar tipos de erro:", error)
             setErrorTypes([])
+        }
+    }
+
+    async function loadErrorStatuses(uid: string) {
+        try {
+            const res = await fetch(`/api/error-statuses?user_id=${uid}`)
+            if (res.ok) {
+                const data = await res.json()
+                const statuses = data.map((item: any, index: number) => {
+                    if (typeof item === 'string') {
+                        return { id: `status-${index}`, name: item }
+                    }
+                    return { id: item.id || `status-${index}`, name: item.name || item }
+                })
+                setErrorStatuses(statuses)
+            } else {
+                setErrorStatuses([])
+            }
+        } catch (error) {
+            console.error("Erro ao carregar status de erro:", error)
+            setErrorStatuses([])
         }
     }
 
@@ -182,6 +205,7 @@
         if (userId && subjectId) {
         loadTopics(userId)
         loadErrorTypes(userId)
+        loadErrorStatuses(userId)
         }
     }, [userId, subjectId])
 
@@ -213,6 +237,20 @@
             <ErrorsByTopicChart errors={errors} subjectId={subjectId} />
         </section>
 
+        {/* Botão Expandir Todos */}
+        {errors.length > 0 && (
+            <div className="mb-4 flex justify-end">
+            <button
+                onClick={() => setAllCardsExpanded(!allCardsExpanded)}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                title={allCardsExpanded ? "Ocultar todos" : "Mostrar todos"}
+            >
+                <Eye className="h-4 w-4" />
+                {allCardsExpanded ? "Ocultar todos" : "Mostrar todos"}
+            </button>
+            </div>
+        )}
+
         {/* FILTROS */}
         <section className="mb-6 flex gap-3 relative">
             {/* Filtro Tema */}
@@ -225,14 +263,14 @@
                 }
                 className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
                     selectedTopicIds.length > 0
-                    ? "bg-purple-100 border-purple-300 text-purple-700"
+                    ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4" />
                 Tema
                 {selectedTopicIds.length > 0 && (
-                    <span className="bg-purple-600 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
                     {selectedTopicIds.length}
                     </span>
                 )}
@@ -296,14 +334,14 @@
                 }
                 className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
                     selectedErrorTypes.length > 0
-                    ? "bg-purple-100 border-purple-300 text-purple-700"
+                    ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4" />
                 Tipo de erro
                 {selectedErrorTypes.length > 0 && (
-                    <span className="bg-purple-600 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
                     {selectedErrorTypes.length}
                     </span>
                 )}
@@ -370,52 +408,59 @@
                 }
                 className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
                     selectedStatuses.length > 0
-                    ? "bg-purple-100 border-purple-300 text-purple-700"
+                    ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4" />
                 Status
                 {selectedStatuses.length > 0 && (
-                    <span className="bg-purple-600 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
                     {selectedStatuses.length}
                     </span>
                 )}
                 </button>
 
-                {openFilterMenu === "statuses" && (
+                {mounted && openFilterMenu === "statuses" && (
                 <>
                     <div
                     className="fixed inset-0 z-10"
                     onClick={() => setOpenFilterMenu(null)}
                     />
                     <div className="absolute top-full left-0 mt-2 z-20 w-64 rounded-lg border bg-white shadow-lg p-3">
-                    {(["normal", "critico", "reincidente", "aprendido"] as const).map(
-                        status => (
+                    {errorStatuses.length === 0 ? (
+                        <p className="text-sm text-slate-500">
+                        Nenhum status cadastrado
+                        </p>
+                    ) : (
+                        errorStatuses.map(status => (
                         <label
-                            key={status}
+                            key={status.id}
+                            htmlFor={`status-checkbox-${status.id}`}
                             className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer"
                         >
                             <input
+                            id={`status-checkbox-${status.id}`}
                             type="checkbox"
-                            checked={selectedStatuses.includes(status)}
+                            checked={selectedStatuses.includes(status.name)}
                             onChange={e => {
                                 if (e.target.checked) {
-                                setSelectedStatuses([...selectedStatuses, status])
+                                setSelectedStatuses([...selectedStatuses, status.name])
                                 } else {
                                 setSelectedStatuses(
-                                    selectedStatuses.filter(s => s !== status)
+                                    selectedStatuses.filter(s => s !== status.name)
                                 )
                                 }
                             }}
                             className="rounded"
                             />
-                            <span className="text-sm capitalize">{status}</span>
+                            <span className="text-sm capitalize">{status.name}</span>
                         </label>
-                        )
+                        ))
                     )}
                     {selectedStatuses.length > 0 && (
                         <button
+                        type="button"
                         onClick={() => setSelectedStatuses([])}
                         className="mt-2 w-full text-xs text-red-600 hover:underline"
                         >
@@ -449,6 +494,29 @@
                 error={error}
                 onEdit={() => handleEdit(error)}
                 onDeleted={() => handleDelete(error.id)}
+                allCardsExpanded={allCardsExpanded}
+                availableStatuses={errorStatuses}
+                onStatusChange={async (errorId, newStatus) => {
+                    // Atualiza o status do erro
+                    const res = await fetch(`/api/errors/${errorId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            user_id: userId,
+                            topic_id: error.topics.id,
+                            error_text: error.error_text,
+                            correction_text: error.correction_text,
+                            description: error.description,
+                            reference_link: error.reference_link,
+                            error_type: error.error_type,
+                            error_status: newStatus
+                        })
+                    })
+                    
+                    if (res.ok) {
+                        loadErrors(userId!)
+                    }
+                }}
                 />
             ))}
             </section>
@@ -465,6 +533,7 @@
             onSuccess={() => {
                 loadErrors(userId!)
                 loadErrorTypes(userId!)
+                loadErrorStatuses(userId!)
             }}
         />
         </main>

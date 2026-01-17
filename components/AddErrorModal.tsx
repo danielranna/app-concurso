@@ -52,6 +52,7 @@ export default function AddErrorModal({
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [topics, setTopics] = useState<Topic[]>([])
   const [errorTypes, setErrorTypes] = useState<ErrorTypeItem[]>([])
+  const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string }>>([])
 
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedTopic, setSelectedTopic] = useState("")
@@ -61,7 +62,7 @@ export default function AddErrorModal({
   const [description, setDescription] = useState("")
   const [referenceLink, setReferenceLink] = useState("")
   const [errorType, setErrorType] = useState("")
-  const [errorStatus, setErrorStatus] = useState<ErrorStatus>("normal")
+  const [errorStatus, setErrorStatus] = useState<string>("")
 
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
@@ -82,15 +83,19 @@ export default function AddErrorModal({
 
     setUserId(user.id)
 
-    const [subjectsRes, errorTypesRes] = await Promise.all([
+    const [subjectsRes, errorTypesRes, errorStatusesRes] = await Promise.all([
       fetch(`/api/subjects?user_id=${user.id}`),
       fetch(`/api/error-types?user_id=${user.id}`).catch(() => 
+        new Response(JSON.stringify([]), { status: 200 })
+      ),
+      fetch(`/api/error-statuses?user_id=${user.id}`).catch(() => 
         new Response(JSON.stringify([]), { status: 200 })
       )
     ])
 
     const subjectsData = await subjectsRes.json()
     let errorTypesData = []
+    let errorStatusesData = []
     
     if (errorTypesRes.ok) {
       errorTypesData = await errorTypesRes.json()
@@ -99,11 +104,26 @@ export default function AddErrorModal({
       errorTypesData = []
     }
 
+    if (errorStatusesRes.ok) {
+      const statusesData = await errorStatusesRes.json()
+      errorStatusesData = statusesData.map((item: any, index: number) => {
+        if (typeof item === 'string') {
+          return { id: `status-${index}`, name: item }
+        }
+        return { id: item.id || `status-${index}`, name: item.name || item }
+      })
+    } else {
+      // Se não conseguir carregar, retorna vazio (sem status padrão)
+      errorStatusesData = []
+    }
+
     console.log("📚 subjects:", subjectsData)
     console.log("📋 error types:", errorTypesData)
+    console.log("📊 error statuses:", errorStatusesData)
 
     setSubjects(subjectsData ?? [])
     setErrorTypes(errorTypesData ?? [])
+    setErrorStatuses(errorStatusesData)
     
     return user.id
   }
@@ -141,7 +161,7 @@ export default function AddErrorModal({
     setDescription("")
     setReferenceLink("")
     setErrorType("")
-    setErrorStatus("normal")
+    setErrorStatus(errorStatuses.length > 0 ? errorStatuses[0].name : "")
     setMessage("")
   }
 
@@ -157,7 +177,18 @@ export default function AddErrorModal({
     setDescription(data.description ?? "")
     setReferenceLink(data.reference_link ?? "")
     setErrorType(data.error_type ?? "")
-    setErrorStatus(data.error_status ?? "normal")
+    // Usa o status do erro se existir, senão usa o primeiro disponível ou "normal"
+    if (data.error_status) {
+      const statusExists = errorStatuses.find(s => s.name === data.error_status)
+      if (statusExists) {
+        setErrorStatus(data.error_status)
+      } else {
+        // Se não existe na lista, ainda usa o valor do erro
+        setErrorStatus(data.error_status)
+      }
+    } else {
+      setErrorStatus(errorStatuses.length > 0 ? errorStatuses[0].name : "")
+    }
 
     console.log("🟡 carregando topics do subject:", data.subject_id)
 
@@ -227,12 +258,29 @@ export default function AddErrorModal({
 
     // Recarrega tipos e status após criar/editar erro
     if (userId) {
-      const errorTypesRes = await fetch(`/api/error-types?user_id=${userId}`).catch(() => 
-        new Response(JSON.stringify([]), { status: 200 })
-      )
+      const [errorTypesRes, errorStatusesRes] = await Promise.all([
+        fetch(`/api/error-types?user_id=${userId}`).catch(() => 
+          new Response(JSON.stringify([]), { status: 200 })
+        ),
+        fetch(`/api/error-statuses?user_id=${userId}`).catch(() => 
+          new Response(JSON.stringify([]), { status: 200 })
+        )
+      ])
+      
       if (errorTypesRes.ok) {
         const errorTypesData = await errorTypesRes.json()
         setErrorTypes(errorTypesData ?? [])
+      }
+      
+      if (errorStatusesRes.ok) {
+        const statusesData = await errorStatusesRes.json()
+        const statuses = statusesData.map((item: any, index: number) => {
+          if (typeof item === 'string') {
+            return { id: `status-${index}`, name: item }
+          }
+          return { id: item.id || `status-${index}`, name: item.name || item }
+        })
+        setErrorStatuses(statuses)
       }
     }
 
@@ -277,10 +325,10 @@ export default function AddErrorModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-2xl max-h-[90vh] rounded-xl bg-white shadow-lg flex flex-col">
         {/* HEADER */}
-        <div className="mb-4 flex items-center justify-between">
+        <div className="flex-shrink-0 flex items-center justify-between p-6 border-b">
           <h2 className="text-lg font-semibold text-slate-800">
             {initialData ? "Editar erro" : "Adicionar erro"}
           </h2>
@@ -292,70 +340,103 @@ export default function AddErrorModal({
           </button>
         </div>
 
-        {/* FORM */}
-        <div className="space-y-3">
-          <select
-            className="w-full rounded border p-2"
-            value={selectedSubject}
-            onChange={e => {
-              console.log("📘 subject selecionado", e.target.value)
-              setSelectedSubject(e.target.value)
-              setSelectedTopic("")
-              loadTopics(e.target.value)
-            }}
-          >
-            <option value="">Selecionar matéria</option>
-            {subjects.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+        {/* FORM - Scrollable */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Matéria
+            </label>
+            <select
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              value={selectedSubject}
+              onChange={e => {
+                console.log("📘 subject selecionado", e.target.value)
+                setSelectedSubject(e.target.value)
+                setSelectedTopic("")
+                loadTopics(e.target.value)
+              }}
+            >
+              <option value="">Selecionar matéria</option>
+              {subjects.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="w-full rounded border p-2"
-            value={selectedTopic}
-            onChange={e => {
-              console.log("📙 topic selecionado", e.target.value)
-              setSelectedTopic(e.target.value)
-            }}
-            disabled={!selectedSubject}
-          >
-            <option value="">Selecionar tema</option>
-            {topics.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Tema
+            </label>
+            <select
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 disabled:bg-slate-100 disabled:cursor-not-allowed"
+              value={selectedTopic}
+              onChange={e => {
+                console.log("📙 topic selecionado", e.target.value)
+                setSelectedTopic(e.target.value)
+              }}
+              disabled={!selectedSubject}
+            >
+              <option value="">Selecionar tema</option>
+              {topics.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          <textarea
-            className="w-full rounded border p-2"
-            placeholder="Erro"
-            value={errorText}
-            onChange={e => setErrorText(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Erro <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              placeholder="Digite o erro cometido"
+              value={errorText}
+              onChange={e => setErrorText(e.target.value)}
+              rows={3}
+            />
+          </div>
 
-          <textarea
-            className="w-full rounded border p-2"
-            placeholder="Correção"
-            value={correctionText}
-            onChange={e => setCorrectionText(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Correção <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              placeholder="Digite a correção"
+              value={correctionText}
+              onChange={e => setCorrectionText(e.target.value)}
+              rows={3}
+            />
+          </div>
 
-          <input
-            className="w-full rounded border p-2"
-            placeholder="Link para questão (opcional)"
-            value={referenceLink}
-            onChange={e => setReferenceLink(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Link para questão <span className="text-slate-400 text-xs">(opcional)</span>
+            </label>
+            <input
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              placeholder="Cole o link da questão aqui"
+              value={referenceLink}
+              onChange={e => setReferenceLink(e.target.value)}
+            />
+          </div>
 
-          <textarea
-            className="w-full rounded border p-2"
-            placeholder="Descrição (opcional)"
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-600">
+              Descrição <span className="text-slate-400 text-xs">(opcional)</span>
+            </label>
+            <textarea
+              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              placeholder="Adicione informações adicionais sobre o erro"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+            />
+          </div>
 
           {/* TIPO DE ERRO */}
           <div>
@@ -375,7 +456,7 @@ export default function AddErrorModal({
                     onClick={() => setErrorType(type.name)}
                     className={`rounded px-3 py-1 text-sm ${
                       errorType === type.name
-                        ? "bg-purple-600 text-white"
+                        ? "bg-slate-900 text-white"
                         : "border border-slate-300 text-slate-700 hover:bg-slate-100"
                     }`}
                   >
@@ -392,20 +473,26 @@ export default function AddErrorModal({
               Status do erro
             </label>
             <div className="flex flex-wrap gap-2">
-              {(["normal", "critico", "reincidente", "aprendido"] as ErrorStatus[]).map(status => (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => setErrorStatus(status)}
-                  className={`rounded px-3 py-1 text-sm capitalize ${
-                    errorStatus === status
-                      ? "bg-purple-600 text-white"
-                      : "border border-slate-300 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
+              {errorStatuses.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Nenhum status cadastrado. Adicione status em Configurações.
+                </p>
+              ) : (
+                errorStatuses.map(status => (
+                  <button
+                    key={status.id}
+                    type="button"
+                    onClick={() => setErrorStatus(status.name)}
+                    className={`rounded px-3 py-1 text-sm capitalize ${
+                      errorStatus === status.name
+                        ? "bg-slate-900 text-white"
+                        : "border border-slate-300 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    {status.name}
+                  </button>
+                ))
+              )}
             </div>
           </div>
 
@@ -415,7 +502,7 @@ export default function AddErrorModal({
         </div>
 
         {/* FOOTER */}
-        <div className="mt-6 flex justify-between">
+        <div className="flex-shrink-0 flex justify-between p-6 border-t bg-white rounded-b-xl">
           <button
             onClick={onClose}
             className="rounded border px-4 py-2 text-slate-700"
@@ -425,7 +512,7 @@ export default function AddErrorModal({
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="rounded bg-purple-600 px-4 py-2 text-white hover:bg-purple-700"
+            className="rounded bg-slate-900 px-4 py-2 text-white hover:bg-slate-800"
           >
             {loading ? "Salvando..." : "Salvar"}
           </button>
