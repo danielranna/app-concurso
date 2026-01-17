@@ -30,7 +30,7 @@ type InitialError = {
   description?: string
   reference_link?: string
   error_type?: string
-  error_status?: ErrorStatus
+  error_status?: string // Aceita qualquer string para suportar status personalizados
 }
 
 type Props = {
