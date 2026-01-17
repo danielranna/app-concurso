@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Plus } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 type Subject = {
@@ -56,6 +57,9 @@ export default function AddErrorModal({
 
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedTopic, setSelectedTopic] = useState("")
+  const [showNewTopicModal, setShowNewTopicModal] = useState(false)
+  const [newTopicName, setNewTopicName] = useState("")
+  const [creatingTopic, setCreatingTopic] = useState(false)
 
   const [errorText, setErrorText] = useState("")
   const [correctionText, setCorrectionText] = useState("")
@@ -148,6 +152,42 @@ export default function AddErrorModal({
 
     setTopics(data)
     return data
+  }
+
+  async function createNewTopic() {
+    if (!newTopicName.trim() || !selectedSubject || !userId || creatingTopic) return
+
+    setCreatingTopic(true)
+    try {
+      const res = await fetch("/api/topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          subject_id: selectedSubject,
+          name: newTopicName.trim()
+        })
+      })
+
+      if (res.ok) {
+        const newTopics = await loadTopics(selectedSubject)
+        // Seleciona o tema recém-criado
+        const newTopic = newTopics.find(t => t.name === newTopicName.trim())
+        if (newTopic) {
+          setSelectedTopic(newTopic.id)
+        }
+        setNewTopicName("")
+        setShowNewTopicModal(false)
+      } else {
+        const error = await res.json()
+        alert("Erro ao criar tema: " + (error.error || "Erro desconhecido"))
+      }
+    } catch (error) {
+      console.error("Erro ao criar tema:", error)
+      alert("Erro ao criar tema. Tente novamente.")
+    } finally {
+      setCreatingTopic(false)
+    }
   }
 
   function resetForm() {
@@ -369,22 +409,38 @@ export default function AddErrorModal({
             <label className="mb-1 block text-sm font-medium text-slate-600">
               Tema
             </label>
-            <select
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 disabled:bg-slate-100 disabled:cursor-not-allowed"
-              value={selectedTopic}
-              onChange={e => {
-                console.log("📙 topic selecionado", e.target.value)
-                setSelectedTopic(e.target.value)
-              }}
-              disabled={!selectedSubject}
-            >
-              <option value="">Selecionar tema</option>
-              {topics.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <select
+                className="flex-1 rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                value={selectedTopic}
+                onChange={e => {
+                  console.log("📙 topic selecionado", e.target.value)
+                  setSelectedTopic(e.target.value)
+                }}
+                disabled={!selectedSubject}
+              >
+                <option value="">Selecionar tema</option>
+                {topics.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {selectedSubject && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewTopicModal(true)
+                    setNewTopicName("")
+                  }}
+                  className="flex items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!selectedSubject}
+                  title="Criar novo tema"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div>
@@ -500,6 +556,72 @@ export default function AddErrorModal({
             <p className="text-sm text-red-600">{message}</p>
           )}
         </div>
+
+        {/* MODAL CRIAR TEMA */}
+        {showNewTopicModal && (
+          <>
+            <div
+              className="fixed inset-0 z-[60] bg-black/40"
+              onClick={() => {
+                if (!creatingTopic) {
+                  setShowNewTopicModal(false)
+                  setNewTopicName("")
+                }
+              }}
+            />
+            <div className="fixed left-1/2 top-1/2 z-[70] w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+              <h3 className="mb-4 text-lg font-semibold text-slate-800">
+                Criar Novo Tema
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-600">
+                    Nome do Tema
+                  </label>
+                  <input
+                    type="text"
+                    value={newTopicName}
+                    onChange={e => setNewTopicName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !creatingTopic) {
+                        createNewTopic()
+                      }
+                      if (e.key === "Escape") {
+                        setShowNewTopicModal(false)
+                        setNewTopicName("")
+                      }
+                    }}
+                    placeholder="Digite o nome do tema"
+                    className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    autoFocus
+                    disabled={creatingTopic}
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewTopicModal(false)
+                      setNewTopicName("")
+                    }}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                    disabled={creatingTopic}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={createNewTopic}
+                    disabled={!newTopicName.trim() || creatingTopic}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {creatingTopic ? "Criando..." : "OK"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* FOOTER */}
         <div className="flex-shrink-0 flex justify-between p-6 border-t bg-white rounded-b-xl">

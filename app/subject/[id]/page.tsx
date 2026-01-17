@@ -122,9 +122,13 @@
                 const data = await res.json()
                 const statuses = data.map((item: any, index: number) => {
                     if (typeof item === 'string') {
-                        return { id: `status-${index}`, name: item }
+                        return { id: `status-${index}`, name: item, color: null }
                     }
-                    return { id: item.id || `status-${index}`, name: item.name || item }
+                    return { 
+                        id: item.id || `status-${index}`, 
+                        name: item.name || item,
+                        color: item.color || null
+                    }
                 })
                 setErrorStatuses(statuses)
             } else {
@@ -514,7 +518,11 @@
                     })
                     
                     if (res.ok) {
-                        loadErrors(userId!)
+                        // Recarrega erros e status para garantir que as cores estejam atualizadas
+                        await Promise.all([
+                            loadErrors(userId!),
+                            loadErrorStatuses(userId!)
+                        ])
                     }
                 }}
                 />

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import { Calendar } from "lucide-react"
 
 type Error = {
   id: string
@@ -18,27 +19,68 @@ type ChartData = {
 }
 
 export default function ErrorsByPeriodChart({ errors }: Props) {
-  const [period, setPeriod] = useState<"week" | "month">("week")
+  const [period, setPeriod] = useState<"week" | "month" | "custom">("week")
+  const [showCustomPicker, setShowCustomPicker] = useState(false)
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
 
   const chartData = useMemo<ChartData[]>(() => {
     if (errors.length === 0) return []
+    
+    // Se período customizado mas sem datas, retorna vazio
+    if (period === "custom" && (!startDate || !endDate)) return []
 
     const now = new Date()
     const periods: { [key: string]: number } = {}
 
-    // Determina o número de períodos a mostrar e a função de agrupamento
-    const periodCount = period === "week" ? 8 : 6 // 8 semanas ou 6 meses
-    const periodMs = period === "week" 
-      ? 7 * 24 * 60 * 60 * 1000 
-      : 30 * 24 * 60 * 60 * 1000
-    const cutoffDate = new Date(now.getTime() - periodCount * periodMs)
+    let cutoffDate: Date
+    let periodCount: number
+    let periodMs: number
+    let isCustom = false
+
+    // Se período customizado
+    if (period === "custom" && startDate && endDate) {
+      cutoffDate = new Date(startDate)
+      cutoffDate.setHours(0, 0, 0, 0)
+      const end = new Date(endDate)
+      end.setHours(23, 59, 59, 999)
+      const diffTime = end.getTime() - cutoffDate.getTime()
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
+      
+      // Limita a 90 dias para evitar sobrecarga
+      periodCount = Math.min(diffDays, 90)
+      periodMs = 1 * 24 * 60 * 60 * 1000 // 1 dia
+      isCustom = true
+    } else {
+      // Período padrão (semana/mês)
+      periodCount = period === "week" ? 8 : 6 // 8 semanas ou 6 meses
+      periodMs = period === "week" 
+        ? 7 * 24 * 60 * 60 * 1000 
+        : 30 * 24 * 60 * 60 * 1000
+      cutoffDate = new Date(now.getTime() - periodCount * periodMs)
+    }
 
     // Inicializa os períodos com 0
-    for (let i = periodCount - 1; i >= 0; i--) {
-      const periodDate = new Date(now.getTime() - i * periodMs)
+    for (let i = 0; i < periodCount; i++) {
+      let periodDate: Date
+      
+      if (isCustom && startDate) {
+        // Para período customizado, começa da data inicial
+        periodDate = new Date(new Date(startDate).getTime() + i * periodMs)
+      } else {
+        // Para período padrão, calcula a partir de agora
+        periodDate = new Date(now.getTime() - (periodCount - 1 - i) * periodMs)
+      }
+      
       let key: string
       
-      if (period === "week") {
+      if (isCustom) {
+        // Para período customizado (dia a dia)
+        key = periodDate.toLocaleDateString("pt-BR", { 
+          day: "2-digit", 
+          month: "short" 
+        })
+      } else if (period === "week") {
         // Para semanas: mostra a data de início da semana (Segunda-feira)
         const dayOfWeek = periodDate.getDay()
         const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1 // Segunda = 0
@@ -62,16 +104,29 @@ export default function ErrorsByPeriodChart({ errors }: Props) {
     }
 
     // Filtra erros do período selecionado e agrupa por período
+    let filterEndDate: Date
+    if (isCustom && endDate) {
+      filterEndDate = new Date(endDate)
+      filterEndDate.setHours(23, 59, 59, 999)
+    } else {
+      filterEndDate = now
+    }
 
     errors.forEach(error => {
       const errorDate = new Date(error.created_at)
       
       // Filtra apenas erros dentro do período selecionado
-      if (errorDate < cutoffDate) return
+      if (errorDate < cutoffDate || errorDate > filterEndDate) return
       
       let periodKey: string
       
-      if (period === "week") {
+      if (isCustom) {
+        // Para período customizado, agrupa por dia
+        periodKey = errorDate.toLocaleDateString("pt-BR", { 
+          day: "2-digit", 
+          month: "short" 
+        })
+      } else if (period === "week") {
         const dayOfWeek = errorDate.getDay()
         const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
         const weekStart = new Date(errorDate)
@@ -98,7 +153,7 @@ export default function ErrorsByPeriodChart({ errors }: Props) {
       period,
       quantidade
     }))
-  }, [errors, period])
+  }, [errors, period, startDate, endDate])
 
   return (
     <div>
@@ -106,37 +161,103 @@ export default function ErrorsByPeriodChart({ errors }: Props) {
         <h3 className="text-lg font-semibold text-slate-800">
           Erros por Período
         </h3>
-        <div className="flex gap-2 rounded-lg border border-slate-200 p-1">
-          <button
-            onClick={() => setPeriod("week")}
-            className={`rounded px-3 py-1 text-sm font-medium transition ${
-              period === "week"
-                ? "bg-slate-900 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            Semana
-          </button>
-          <button
-            onClick={() => setPeriod("month")}
-            className={`rounded px-3 py-1 text-sm font-medium transition ${
-              period === "month"
-                ? "bg-slate-900 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-          >
-            Mês
-          </button>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-2 rounded-lg border border-slate-200 p-1">
+            <button
+              onClick={() => {
+                setPeriod("week")
+                setShowCustomPicker(false)
+              }}
+              className={`rounded px-3 py-1 text-sm font-medium transition ${
+                period === "week"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              Semana
+            </button>
+            <button
+              onClick={() => {
+                setPeriod("month")
+                setShowCustomPicker(false)
+              }}
+              className={`rounded px-3 py-1 text-sm font-medium transition ${
+                period === "month"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              Mês
+            </button>
+          </div>
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowCustomPicker(!showCustomPicker)
+                if (!showCustomPicker) {
+                  setPeriod("custom")
+                }
+              }}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1 text-sm font-medium transition ${
+                period === "custom"
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Calendar className="h-4 w-4" />
+              Período
+            </button>
+            {showCustomPicker && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowCustomPicker(false)}
+                />
+                <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Data Início
+                      </label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={e => setStartDate(e.target.value)}
+                        className="w-full rounded border border-slate-300 p-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Data Fim
+                      </label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => setEndDate(e.target.value)}
+                        className="w-full rounded border border-slate-300 p-2 text-sm"
+                      />
+                    </div>
+                    <button
+                      onClick={() => setShowCustomPicker(false)}
+                      className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-white transition hover:bg-slate-800"
+                    >
+                      Aplicar
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      <div style={{ width: "100%", height: 300 }}>
+      <div style={{ width: "100%", height: 300, minHeight: 300 }}>
         {chartData.length === 0 ? (
           <div className="flex h-full items-center justify-center text-slate-500">
             Nenhum dado disponível
           </div>
         ) : (
-          <ResponsiveContainer>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="colorQuantidade" x1="0" y1="0" x2="0" y2="1">

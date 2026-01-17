@@ -24,7 +24,11 @@ export async function GET(req: Request) {
     .order("created_at", { ascending: true })
 
   if (!statusesError && statusesData && statusesData.length > 0) {
-    return NextResponse.json(statusesData.map(s => ({ id: s.id, name: s.name })))
+    return NextResponse.json(statusesData.map(s => ({ 
+      id: s.id, 
+      name: s.name,
+      color: s.color || null
+    })))
   }
 
   // Se não tem tabela ou está vazia, busca valores únicos da tabela errors
@@ -56,7 +60,7 @@ export async function GET(req: Request) {
 ========================= */
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, name } = body
+  const { user_id, name, color } = body
 
   if (!user_id || !name) {
     return NextResponse.json(
@@ -71,7 +75,8 @@ export async function POST(req: Request) {
     .insert([
       {
         user_id,
-        name
+        name,
+        color: color || null
       }
     ])
     .select()

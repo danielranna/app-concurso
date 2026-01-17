@@ -23,7 +23,7 @@ type ErrorCardProps = {
   onEdit: () => void
   onDeleted: () => void
   allCardsExpanded?: boolean
-  availableStatuses?: Array<{ id: string; name: string }>
+  availableStatuses?: Array<{ id: string; name: string; color?: string | null }>
   onStatusChange?: (errorId: string, newStatus: string) => void
 }
 
@@ -81,6 +81,14 @@ export default function ErrorCard({
 
   const style = getStatusStyle(error.error_status)
 
+  // Busca a cor do status se disponível
+  const statusColor = availableStatuses?.find(s => s.name === error.error_status)?.color
+  
+  // Se tem cor customizada, usa ela diretamente no style
+  const borderStyle = statusColor 
+    ? { borderColor: statusColor, borderWidth: "2px" }
+    : {}
+
   const subjectName =
     error.topics?.subjects?.name ?? "Sem matéria"
 
@@ -93,7 +101,8 @@ export default function ErrorCard({
 
   return (
     <div
-      className={`relative rounded-xl border ${style.border} bg-white p-4 shadow-sm transition hover:shadow-md`}
+      className={`relative rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md ${!statusColor ? style.border : ""}`}
+      style={borderStyle}
     >
       {/* TOPO */}
       <div className="mb-2 flex items-start justify-between gap-3">
@@ -119,7 +128,11 @@ export default function ErrorCard({
               <>
                 <button
                   onClick={() => setStatusMenuOpen(!statusMenuOpen)}
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition ${style.badge}`}
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition ${statusColor ? "" : style.badge}`}
+                  style={statusColor ? {
+                    backgroundColor: statusColor,
+                    color: "#ffffff"
+                  } : {}}
                   title="Clique para alterar status"
                 >
                   {style.label}
@@ -151,7 +164,11 @@ export default function ErrorCard({
               </>
             ) : (
               <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor ? "" : style.badge}`}
+                style={statusColor ? {
+                  backgroundColor: statusColor,
+                  color: "#ffffff"
+                } : {}}
               >
                 {style.label}
               </span>
@@ -185,33 +202,40 @@ export default function ErrorCard({
 
       {/* CONTEÚDO OCULTO */}
       {open && (
-        <div className="mt-4 space-y-3 border-t pt-3">
-          <div>
-            <p className="text-xs font-semibold text-green-600">
+        <div className="mt-4 space-y-4">
+          <div className="rounded-lg bg-green-50 p-3">
+            <p className="mb-2 text-xs font-semibold text-green-700">
               Correção
             </p>
-            <p className="max-h-24 overflow-auto break-words text-sm text-slate-800">
+            <p className="max-h-32 overflow-auto break-words text-sm text-slate-800 leading-relaxed">
               {error.correction_text}
             </p>
           </div>
 
           {error.description && (
-            <p className="text-sm text-slate-500">
-              {error.description}
-            </p>
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="mb-1 text-xs font-semibold text-slate-600">
+                Descrição
+              </p>
+              <p className="text-sm text-slate-700 leading-relaxed">
+                {error.description}
+              </p>
+            </div>
           )}
 
           {error.reference_link && (
-            <a
-              href={error.reference_link.startsWith('http://') || error.reference_link.startsWith('https://') 
-                ? error.reference_link 
-                : `https://${error.reference_link}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block text-sm font-medium text-blue-600 hover:underline"
-            >
-              🔗 Ir para questão
-            </a>
+            <div className="pt-2">
+              <a
+                href={error.reference_link.startsWith('http://') || error.reference_link.startsWith('https://') 
+                  ? error.reference_link 
+                  : `https://${error.reference_link}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 transition hover:text-blue-700 hover:underline"
+              >
+                🔗 Ir para questão
+              </a>
+            </div>
           )}
         </div>
       )}

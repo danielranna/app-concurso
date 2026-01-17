@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Trash2, LogOut } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -33,7 +33,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [topics, setTopics] = useState<Topic[]>([])
   const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
-  const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string }>>([])
+  const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string; color?: string | null }>>([])
 
   const [newSubject, setNewSubject] = useState("")
   const [newTopic, setNewTopic] = useState("")
@@ -41,6 +41,8 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
   const [newErrorStatus, setNewErrorStatus] = useState("")
 
   const [selectedSubject, setSelectedSubject] = useState("")
+  const [editingColor, setEditingColor] = useState<{ [key: string]: string }>({})
+  const [showColorPicker, setShowColorPicker] = useState<{ [key: string]: boolean }>({})
 
   /* ---------- LOADERS ---------- */
 
@@ -80,9 +82,13 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
         // Garante que sempre temos array de objetos com id e name
         const statuses = (data ?? []).map((item: any, index: number) => {
           if (typeof item === 'string') {
-            return { id: `status-${index}`, name: item }
+            return { id: `status-${index}`, name: item, color: null }
           }
-          return { id: item.id || `status-${index}`, name: item.name || item }
+          return { 
+            id: item.id || `status-${index}`, 
+            name: item.name || item,
+            color: item.color || null
+          }
         })
         setErrorStatuses(statuses)
       } else {
@@ -192,6 +198,74 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
 
     await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
     loadErrorStatuses()
+  }
+
+  async function saveStatusColor(id: string, color: string) {
+    console.log("🎨 saveStatusColor chamado:", { id, color })
+    
+    // Verifica se o ID é válido (não é um status gerado automaticamente)
+    if (id.startsWith("status-")) {
+      console.warn("⚠️ Não é possível salvar cor para status gerado automaticamente:", id)
+      alert("Não é possível definir cor para status gerados automaticamente. Crie um status personalizado primeiro.")
+      cancelColorEdit(id)
+      return
+    }
+
+    try {
+      console.log("📤 Enviando requisição PUT para:", `/api/error-statuses/${id}`)
+      console.log("📦 Payload:", { color })
+      
+      const res = await fetch(`/api/error-statuses/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ color })
+      })
+      
+      console.log("📥 Resposta recebida:", { status: res.status, ok: res.ok })
+      
+      if (!res.ok) {
+        const error = await res.json()
+        console.error("❌ Erro ao salvar cor:", error)
+        alert("Erro ao salvar cor: " + (error.error || "Erro desconhecido"))
+        return
+      }
+
+      const result = await res.json()
+      console.log("✅ Cor salva com sucesso:", result)
+      
+      // Fecha o picker primeiro
+      setEditingColor(prev => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      setShowColorPicker(prev => ({ ...prev, [id]: false }))
+      
+      // Aguarda um pouco antes de recarregar para garantir que o banco foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Recarrega os status do banco (agora a API retorna a cor)
+      await loadErrorStatuses()
+      
+      console.log("🔄 Status recarregados após salvar cor")
+    } catch (error) {
+      console.error("❌ Erro ao salvar cor (catch):", error)
+      alert("Erro ao salvar cor. Tente novamente.")
+    }
+  }
+
+  function openColorPicker(id: string, currentColor: string | null) {
+    setEditingColor(prev => ({ ...prev, [id]: currentColor || "#e2e8f0" }))
+    setShowColorPicker(prev => ({ ...prev, [id]: true }))
+  }
+
+  function cancelColorEdit(id: string) {
+    setEditingColor(prev => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setShowColorPicker(prev => ({ ...prev, [id]: false }))
   }
 
   /* ---------- LOGOUT ---------- */
@@ -456,15 +530,60 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
                           }`}
                         >
                           <span className="capitalize text-slate-800">{status.name}</span>
-                          {canDelete && (
-                            <button
-                              onClick={() => deleteErrorStatus(status.id)}
-                              className="text-slate-600 hover:text-red-600 transition"
-                              title="Excluir"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {!status.id.startsWith("status-") && (
+                              <div className="relative">
+                                {!showColorPicker[status.id] ? (
+                                  <button
+                                    onClick={() => openColorPicker(status.id, status.color || null)}
+                                    className="h-8 w-8 rounded border-2 border-slate-300 cursor-pointer transition hover:border-slate-400 shadow-sm"
+                                    style={{
+                                      backgroundColor: status.color || "#e2e8f0"
+                                    }}
+                                    title="Selecionar cor"
+                                  />
+                                ) : (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-20"
+                                      onClick={() => cancelColorEdit(status.id)}
+                                    />
+                                    <div className="absolute right-0 z-30 mt-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+                                      <input
+                                        type="color"
+                                        value={editingColor[status.id] || status.color || "#e2e8f0"}
+                                        onChange={e => setEditingColor(prev => ({ ...prev, [status.id]: e.target.value }))}
+                                        className="h-8 w-8 cursor-pointer rounded border border-slate-300"
+                                      />
+                                      <button
+                                        onClick={() => saveStatusColor(status.id, editingColor[status.id] || status.color || "#e2e8f0")}
+                                        className="rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800"
+                                        title="Aplicar cor"
+                                      >
+                                        OK
+                                      </button>
+                                      <button
+                                        onClick={() => cancelColorEdit(status.id)}
+                                        className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
+                                        title="Cancelar"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={() => deleteErrorStatus(status.id)}
+                                className="text-slate-600 hover:text-red-600 transition"
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )
                     })
