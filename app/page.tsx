@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import AddErrorModal from "@/components/AddErrorModal"
 import SettingsModal from "@/components/SettingsModal"
-import ErrorsByPeriodChart from "@/components/ErrorsByPeriodChart"
-import ErrorsBySubjectChart from "@/components/ErrorsBySubjectChart"
+import DashboardTabs from "@/components/DashboardTabs"
+import WeekTab from "@/components/WeekTab"
+import TrendTab from "@/components/TrendTab"
+import HistoryTab from "@/components/HistoryTab"
 import { Plus, Settings } from "lucide-react"
 
 type Subject = {
@@ -17,6 +19,8 @@ type Subject = {
 type Error = {
   id: string
   created_at: string
+  error_status?: string
+  error_type?: string
   topics: {
     subjects: {
       id: string
@@ -76,7 +80,7 @@ export default function Home() {
       {/* HEADER */}
       <header className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-800">
-          Mapa de correção de erros
+          Painel de Análise de Erros
         </h1>
 
         <div className="flex gap-3">
@@ -96,35 +100,33 @@ export default function Home() {
         </div>
       </header>
 
-      {/* CHARTS */}
-      <section className="mb-8 grid gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <ErrorsByPeriodChart errors={errors} />
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <ErrorsBySubjectChart errors={errors} />
-        </div>
-      </section>
-
-      {/* GRID DE MATÉRIAS */}
-      <section>
-        <h2 className="mb-4 text-lg font-semibold text-slate-700">
-          Matérias
-        </h2>
-
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          {subjects.map(subject => (
-            <button
-              key={subject.id}
-              onClick={() => router.push(`/subject/${subject.id}`)}
-              className="flex h-24 items-center justify-center rounded-xl bg-white text-slate-800 shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-slate-300"
-            >
-              <span className="text-base font-medium">
-                {subject.name}
-              </span>
-            </button>
-          ))}
-        </div>
+      {/* DASHBOARD COM ABAS */}
+      <section className="mb-8">
+        <DashboardTabs>
+          {(activeTab) => {
+            if (activeTab === "semana") {
+              return (
+                <WeekTab
+                  errors={errors}
+                  subjects={subjects}
+                  onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
+                />
+              )
+            }
+            if (activeTab === "tendencia") {
+              return <TrendTab errors={errors} />
+            }
+            if (activeTab === "historico") {
+              return (
+                <HistoryTab
+                  errors={errors}
+                  onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
+                />
+              )
+            }
+            return null
+          }}
+        </DashboardTabs>
       </section>
 
       <AddErrorModal

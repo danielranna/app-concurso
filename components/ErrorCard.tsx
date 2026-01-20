@@ -42,7 +42,17 @@ function getStatusStyle(status: string): { label: string; badge: string; border:
       badge: "bg-red-100 text-red-700",
       border: "border-red-300"
     },
+    crítico: {
+      label: "Crítico",
+      badge: "bg-red-100 text-red-700",
+      border: "border-red-300"
+    },
     reincidente: {
+      label: "Reincidente",
+      badge: "bg-yellow-100 text-yellow-800",
+      border: "border-yellow-300"
+    },
+    Reincidente: {
       label: "Reincidente",
       badge: "bg-yellow-100 text-yellow-800",
       border: "border-yellow-300"
@@ -51,10 +61,26 @@ function getStatusStyle(status: string): { label: string; badge: string; border:
       label: "Aprendido",
       badge: "bg-green-100 text-green-700",
       border: "border-green-300"
+    },
+    consolidado: {
+      label: "Consolidado",
+      badge: "bg-green-100 text-green-700",
+      border: "border-green-300"
+    },
+    Consolidado: {
+      label: "Consolidado",
+      badge: "bg-green-100 text-green-700",
+      border: "border-green-300"
     }
   }
 
-  return defaultStyles[status] || {
+  // Normaliza o status para lowercase para busca, mas mantém original para display
+  const normalizedStatus = status?.toLowerCase() || "normal"
+  const statusKey = normalizedStatus === "reincidente" ? "reincidente" : 
+                     normalizedStatus === "critico" || normalizedStatus === "crítico" ? "critico" :
+                     normalizedStatus
+
+  return defaultStyles[statusKey] || defaultStyles[status] || {
     label: status.charAt(0).toUpperCase() + status.slice(1),
     badge: "bg-blue-100 text-blue-700",
     border: "border-blue-300"
@@ -105,15 +131,15 @@ export default function ErrorCard({
       style={borderStyle}
     >
       {/* TOPO */}
-      <div className="mb-2 flex items-start justify-between gap-3">
+      <div className="mb-2 flex items-start justify-between gap-2 min-w-0">
         {/* TEXTO */}
-        <div className="flex flex-1 flex-col gap-1">
-          <h3 className="text-sm font-semibold text-slate-800">
+        <div className="flex flex-1 flex-col gap-1 min-w-0 overflow-hidden">
+          <h3 className="text-sm font-semibold text-slate-800 truncate" title={topicName}>
             {topicName}
           </h3>
 
           <p
-            className="text-xs text-slate-500 whitespace-nowrap overflow-hidden text-ellipsis"
+            className="text-xs text-slate-500 truncate"
             title={`${subjectName} – ${errorTypeLabel}`}
           >
             {subjectName} – {errorTypeLabel}
@@ -121,14 +147,14 @@ export default function ErrorCard({
         </div>
 
         {/* AÇÕES */}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 flex-nowrap">
           {/* Status clicável */}
-          <div className="relative">
+          <div className="relative shrink-0">
             {onStatusChange && availableStatuses.length > 0 ? (
               <>
                 <button
                   onClick={() => setStatusMenuOpen(!statusMenuOpen)}
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition ${statusColor ? "" : style.badge}`}
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium cursor-pointer hover:opacity-80 transition whitespace-nowrap ${statusColor ? "" : style.badge}`}
                   style={statusColor ? {
                     backgroundColor: statusColor,
                     color: "#ffffff"
@@ -177,16 +203,18 @@ export default function ErrorCard({
 
           <button
             onClick={() => setOpen(v => !v)}
-            className="rounded-md p-1 text-slate-700 hover:bg-slate-100"
+            className="rounded-md p-1 text-slate-700 hover:bg-slate-100 shrink-0"
             title="Visualizar"
           >
             <Eye size={16} />
           </button>
 
-          <ErrorOptionsMenu
-            onEdit={onEdit}
-            onDelete={onDeleted}
-          />
+          <div className="shrink-0">
+            <ErrorOptionsMenu
+              onEdit={onEdit}
+              onDelete={onDeleted}
+            />
+          </div>
         </div>
       </div>
 
@@ -207,9 +235,10 @@ export default function ErrorCard({
             <p className="mb-2 text-xs font-semibold text-green-700">
               Correção
             </p>
-            <p className="max-h-32 overflow-auto break-words text-sm text-slate-800 leading-relaxed">
-              {error.correction_text}
-            </p>
+            <div 
+              className="max-h-32 overflow-auto break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: error.correction_text }}
+            />
           </div>
 
           {error.description && (
@@ -217,9 +246,10 @@ export default function ErrorCard({
               <p className="mb-1 text-xs font-semibold text-slate-600">
                 Descrição
               </p>
-              <p className="text-sm text-slate-700 leading-relaxed">
-                {error.description}
-              </p>
+              <div 
+                className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: error.description }}
+              />
             </div>
           )}
 

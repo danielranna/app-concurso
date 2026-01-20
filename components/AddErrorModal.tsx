@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import RichTextEditor from "@/components/RichTextEditor"
 
 type Subject = {
   id: string
@@ -125,7 +126,12 @@ export default function AddErrorModal({
     console.log("📋 error types:", errorTypesData)
     console.log("📊 error statuses:", errorStatusesData)
 
-    setSubjects(subjectsData ?? [])
+    // Ordena subjects alfabeticamente
+    const sortedSubjects = (subjectsData ?? []).sort((a, b) => 
+      a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+    )
+
+    setSubjects(sortedSubjects)
     setErrorTypes(errorTypesData ?? [])
     setErrorStatuses(errorStatusesData)
     
@@ -150,8 +156,13 @@ export default function AddErrorModal({
 
     console.log("🟣 topics retornados da API:", data)
 
-    setTopics(data)
-    return data
+    // Ordena topics alfabeticamente
+    const sortedTopics = (data ?? []).sort((a, b) => 
+      a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+    )
+
+    setTopics(sortedTopics)
+    return sortedTopics
   }
 
   async function createNewTopic() {
@@ -206,45 +217,52 @@ export default function AddErrorModal({
   }
 
   /* =====================
-     PRELOAD EDIT
+     PRELOAD EDIT / INITIAL DATA
   ===================== */
   async function preloadEdit(data: InitialError, userIdParam: string) {
     console.log("🟠 preloadEdit iniciado", data)
 
-    setSelectedSubject(data.subject_id)
-    setErrorText(data.error_text)
-    setCorrectionText(data.correction_text)
-    setDescription(data.description ?? "")
-    setReferenceLink(data.reference_link ?? "")
-    setErrorType(data.error_type ?? "")
-    // Usa o status do erro se existir, senão usa o primeiro disponível ou "normal"
-    if (data.error_status) {
-      const statusExists = errorStatuses.find(s => s.name === data.error_status)
-      if (statusExists) {
-        setErrorStatus(data.error_status)
-      } else {
-        // Se não existe na lista, ainda usa o valor do erro
-        setErrorStatus(data.error_status)
-      }
-    } else {
-      setErrorStatus(errorStatuses.length > 0 ? errorStatuses[0].name : "")
+    // Sempre define o subject_id se existir (mesmo para novos erros)
+    if (data.subject_id) {
+      setSelectedSubject(data.subject_id)
+      // Carrega os topics do subject selecionado
+      await loadTopics(data.subject_id, userIdParam)
     }
 
-    console.log("🟡 carregando topics do subject:", data.subject_id)
+    // Se for edição (tem id), carrega todos os campos
+    if (data.id) {
+      setErrorText(data.error_text)
+      setCorrectionText(data.correction_text)
+      setDescription(data.description ?? "")
+      setReferenceLink(data.reference_link ?? "")
+      setErrorType(data.error_type ?? "")
+      // Usa o status do erro se existir, senão usa o primeiro disponível ou "normal"
+      if (data.error_status) {
+        const statusExists = errorStatuses.find(s => s.name === data.error_status)
+        if (statusExists) {
+          setErrorStatus(data.error_status)
+        } else {
+          // Se não existe na lista, ainda usa o valor do erro
+          setErrorStatus(data.error_status)
+        }
+      } else {
+        setErrorStatus(errorStatuses.length > 0 ? errorStatuses[0].name : "")
+      }
 
-    const loadedTopics = await loadTopics(data.subject_id, userIdParam)
+      // Se tem topic_id, seleciona o topic
+      if (data.topic_id) {
+        console.log("🟡 carregando topics do subject:", data.subject_id)
+        const loadedTopics = await loadTopics(data.subject_id, userIdParam)
+        console.log("🟢 topics carregados:", loadedTopics)
+        console.log("🟢 tentando selecionar topic_id:", data.topic_id)
 
-    console.log("🟢 topics carregados:", loadedTopics)
-    console.log("🟢 tentando selecionar topic_id:", data.topic_id)
+        const exists = loadedTopics.find(t => t.id === data.topic_id)
+        console.log("🔎 topic existe?", exists)
 
-    const exists = loadedTopics.find(
-      t => t.id === data.topic_id
-    )
-
-    console.log("🔎 topic existe?", exists)
-
-    if (exists) {
-      setSelectedTopic(data.topic_id)
+        if (exists) {
+          setSelectedTopic(data.topic_id)
+        }
+      }
     }
   }
 
@@ -341,8 +359,10 @@ export default function AddErrorModal({
       const userIdFromLoad = await loadUserAndSubjects()
 
       if (initialData && userIdFromLoad) {
+        // Se tem initialData, pré-carrega (pode ser edição ou novo erro com subject pré-selecionado)
         await preloadEdit(initialData, userIdFromLoad)
       } else {
+        // Se não tem initialData, reseta o formulário
         resetForm()
       }
     }
@@ -460,11 +480,10 @@ export default function AddErrorModal({
             <label className="mb-1 block text-sm font-medium text-slate-600">
               Correção <span className="text-red-500">*</span>
             </label>
-            <textarea
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
-              placeholder="Digite a correção"
+            <RichTextEditor
               value={correctionText}
-              onChange={e => setCorrectionText(e.target.value)}
+              onChange={setCorrectionText}
+              placeholder="Digite a correção"
               rows={3}
             />
           </div>
@@ -485,11 +504,10 @@ export default function AddErrorModal({
             <label className="mb-1 block text-sm font-medium text-slate-600">
               Descrição <span className="text-slate-400 text-xs">(opcional)</span>
             </label>
-            <textarea
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
-              placeholder="Adicione informações adicionais sobre o erro"
+            <RichTextEditor
               value={description}
-              onChange={e => setDescription(e.target.value)}
+              onChange={setDescription}
+              placeholder="Adicione informações adicionais sobre o erro"
               rows={3}
             />
           </div>

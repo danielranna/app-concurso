@@ -6,7 +6,7 @@
     import ErrorCard from "@/components/ErrorCard"
     import AddErrorModal from "@/components/AddErrorModal"
     import ErrorsByTopicChart from "@/components/ErrorsByTopicChart"
-    import { ArrowLeft, Filter, Eye } from "lucide-react"
+    import { ArrowLeft, Filter, Eye, Plus } from "lucide-react"
 
     type ErrorItem = {
     id: string
@@ -222,18 +222,41 @@
     return (
         <main className="min-h-screen bg-slate-50 px-6 py-6">
         {/* HEADER */}
-        <header className="mb-6 flex items-center gap-4">
-            <button
-            onClick={() => router.back()}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
-            >
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-            </button>
+        <header className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+                <button
+                onClick={() => router.back()}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                >
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+                </button>
 
-            <h1 className="text-2xl font-semibold text-slate-800">
-            {subjectName}
-            </h1>
+                <h1 className="text-2xl font-semibold text-slate-800">
+                {subjectName}
+                </h1>
+            </div>
+
+            <button
+                onClick={() => {
+                    setEditingError({
+                        id: "",
+                        topic_id: "",
+                        subject_id: subjectId,
+                        error_text: "",
+                        correction_text: "",
+                        description: "",
+                        reference_link: "",
+                        error_type: "",
+                        error_status: ""
+                    })
+                    setOpenModal(true)
+                }}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            >
+                <Plus className="h-4 w-4" />
+                Adicionar Erro
+            </button>
         </header>
 
         {/* GRÁFICO */}
@@ -488,43 +511,42 @@
             <section
             className="grid gap-4"
             style={{
-                gridTemplateColumns:
-                "repeat(auto-fill, minmax(320px, 1fr))"
+                gridTemplateColumns: "repeat(2, 1fr)"
             }}
             >
             {errors.map(error => (
                 <ErrorCard
-                key={error.id}
-                error={error}
-                onEdit={() => handleEdit(error)}
-                onDeleted={() => handleDelete(error.id)}
-                allCardsExpanded={allCardsExpanded}
-                availableStatuses={errorStatuses}
-                onStatusChange={async (errorId, newStatus) => {
-                    // Atualiza o status do erro
-                    const res = await fetch(`/api/errors/${errorId}`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            user_id: userId,
-                            topic_id: error.topics.id,
-                            error_text: error.error_text,
-                            correction_text: error.correction_text,
-                            description: error.description,
-                            reference_link: error.reference_link,
-                            error_type: error.error_type,
-                            error_status: newStatus
+                    key={error.id}
+                    error={error}
+                    onEdit={() => handleEdit(error)}
+                    onDeleted={() => handleDelete(error.id)}
+                    allCardsExpanded={allCardsExpanded}
+                    availableStatuses={errorStatuses}
+                    onStatusChange={async (errorId, newStatus) => {
+                        // Atualiza o status do erro
+                        const res = await fetch(`/api/errors/${errorId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                user_id: userId,
+                                topic_id: error.topics.id,
+                                error_text: error.error_text,
+                                correction_text: error.correction_text,
+                                description: error.description,
+                                reference_link: error.reference_link,
+                                error_type: error.error_type,
+                                error_status: newStatus
+                            })
                         })
-                    })
-                    
-                    if (res.ok) {
-                        // Recarrega erros e status para garantir que as cores estejam atualizadas
-                        await Promise.all([
-                            loadErrors(userId!),
-                            loadErrorStatuses(userId!)
-                        ])
-                    }
-                }}
+                        
+                        if (res.ok) {
+                            // Recarrega erros e status para garantir que as cores estejam atualizadas
+                            await Promise.all([
+                                loadErrors(userId!),
+                                loadErrorStatuses(userId!)
+                            ])
+                        }
+                    }}
                 />
             ))}
             </section>
