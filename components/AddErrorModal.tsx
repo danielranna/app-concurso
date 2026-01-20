@@ -127,7 +127,7 @@ export default function AddErrorModal({
     console.log("📊 error statuses:", errorStatusesData)
 
     // Ordena subjects alfabeticamente
-    const sortedSubjects = (subjectsData ?? []).sort((a, b) => 
+    const sortedSubjects = (subjectsData ?? []).sort((a: Subject, b: Subject) => 
       a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
     )
 
@@ -157,7 +157,7 @@ export default function AddErrorModal({
     console.log("🟣 topics retornados da API:", data)
 
     // Ordena topics alfabeticamente
-    const sortedTopics = (data ?? []).sort((a, b) => 
+    const sortedTopics = (data ?? []).sort((a: Topic, b: Topic) => 
       a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
     )
 
