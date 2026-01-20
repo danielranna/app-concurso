@@ -223,9 +223,10 @@ export default function ErrorCard({
         <p className="text-xs font-semibold text-red-600">
           Erro
         </p>
-        <p className="max-h-24 overflow-auto break-words text-sm text-slate-800">
-          {error.error_text}
-        </p>
+        <div 
+          className="max-h-24 overflow-auto break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: error.error_text }}
+        />
       </div>
 
       {/* CONTEÚDO OCULTO */}

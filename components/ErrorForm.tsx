@@ -1,4 +1,5 @@
 import { useState } from "react"
+import RichTextEditor from "@/components/RichTextEditor"
 type ErrorFormProps = {
   selectedTopic: string
   onSubmit: (data: {
@@ -52,12 +53,11 @@ export default function ErrorForm({
           <label className="mb-1 block text-sm font-medium text-red-600">
             Erro
           </label>
-          <textarea
-            className="w-full rounded-lg border border-slate-300 p-3 text-slate-800 focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-100"
-            rows={3}
-            placeholder="O que você pensou / marcou errado"
+          <RichTextEditor
             value={errorText}
-            onChange={e => setErrorText(e.target.value)}
+            onChange={setErrorText}
+            placeholder="O que você pensou / marcou errado"
+            rows={3}
           />
         </div>
 
@@ -65,12 +65,11 @@ export default function ErrorForm({
           <label className="mb-1 block text-sm font-medium text-green-600">
             Correção
           </label>
-          <textarea
-            className="w-full rounded-lg border border-slate-300 p-3 text-slate-800 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-100"
-            rows={3}
-            placeholder="Qual é a regra correta"
+          <RichTextEditor
             value={correctionText}
-            onChange={e => setCorrectionText(e.target.value)}
+            onChange={setCorrectionText}
+            placeholder="Qual é a regra correta"
+            rows={3}
           />
         </div>
       </div>
@@ -80,12 +79,11 @@ export default function ErrorForm({
         <label className="mb-1 block text-sm font-medium text-slate-600">
           Descrição (opcional)
         </label>
-        <textarea
-          className="w-full rounded-lg border border-slate-300 p-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200"
-          rows={2}
-          placeholder="Contexto rápido para lembrar depois"
+        <RichTextEditor
           value={description}
-          onChange={e => setDescription(e.target.value)}
+          onChange={setDescription}
+          placeholder="Contexto rápido para lembrar depois"
+          rows={2}
         />
       </div>
 

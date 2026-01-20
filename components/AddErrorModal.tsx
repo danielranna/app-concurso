@@ -467,11 +467,10 @@ export default function AddErrorModal({
             <label className="mb-1 block text-sm font-medium text-slate-600">
               Erro <span className="text-red-500">*</span>
             </label>
-            <textarea
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
-              placeholder="Digite o erro cometido"
+            <RichTextEditor
               value={errorText}
-              onChange={e => setErrorText(e.target.value)}
+              onChange={setErrorText}
+              placeholder="Digite o erro cometido"
               rows={3}
             />
           </div>

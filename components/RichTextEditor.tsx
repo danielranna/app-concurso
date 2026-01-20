@@ -53,15 +53,6 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
     }
   }, [value])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Permite Enter para quebrar linha
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      document.execCommand("insertHTML", false, "<br>")
-      handleInput()
-    }
-  }
-
   const execCommand = (command: string, value: string | boolean = false) => {
     document.execCommand(command, false, value as string)
     editorRef.current?.focus()
@@ -150,7 +141,6 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
           ref={editorRef}
           contentEditable
           onInput={handleInput}
-          onKeyDown={handleKeyDown}
           onFocus={() => {
             if (editorRef.current && isEmpty) {
               editorRef.current.innerHTML = ""
