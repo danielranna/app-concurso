@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts"
 
 type Error = {
   id: string
@@ -246,32 +246,36 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                   <Pie
                     data={errorTypes}
                     cx="50%"
-                    cy="50%"
-                    labelLine={false}
+                    cy="45%"
+                    labelLine={true}
                     label={(props: any) => {
                       const { cx, cy, midAngle, innerRadius, outerRadius, percent, payload } = props
+                      // Só mostra label se a porcentagem for maior que 5%
+                      if (percent < 0.05) return null
+                      
                       const RADIAN = Math.PI / 180
-                      const radius = innerRadius + (outerRadius - innerRadius) * 0.5
+                      const radius = innerRadius + (outerRadius - innerRadius) * 0.7
                       const x = cx + radius * Math.cos(-midAngle * RADIAN)
                       const y = cy + radius * Math.sin(-midAngle * RADIAN)
                       
-                      // Busca o tipo do erro do payload
                       const tipo = payload?.tipo || ""
+                      const percentValue = (percent * 100).toFixed(0)
                       
                       return (
                         <text 
                           x={x} 
                           y={y} 
-                          fill="white" 
+                          fill="#0f172a" 
                           textAnchor={x > cx ? 'start' : 'end'} 
                           dominantBaseline="central"
-                          fontSize={12}
+                          fontSize={11}
+                          fontWeight={500}
                         >
-                          {tipo}: {(percent * 100).toFixed(0)}%
+                          {`${tipo}: ${percentValue}%`}
                         </text>
                       )
                     }}
-                    outerRadius={100}
+                    outerRadius={80}
                     fill="#8884d8"
                     dataKey="quantidade"
                   >
@@ -279,7 +283,33 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      padding: "8px 12px"
+                    }}
+                    formatter={(value: number, name: string, props: any) => {
+                      const total = errorTypes.reduce((sum, item) => sum + item.quantidade, 0)
+                      const percent = ((value / total) * 100).toFixed(1)
+                      return [`${value} (${percent}%)`, props.payload.tipo]
+                    }}
+                    labelFormatter={() => ""}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    formatter={(value, entry: any) => {
+                      const total = errorTypes.reduce((sum, item) => sum + item.quantidade, 0)
+                      const percent = ((entry.payload.quantidade / total) * 100).toFixed(1)
+                      return `${value} (${percent}%)`
+                    }}
+                    wrapperStyle={{
+                      paddingTop: "16px",
+                      fontSize: "12px"
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             ) : (

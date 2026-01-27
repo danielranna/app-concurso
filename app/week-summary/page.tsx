@@ -39,6 +39,16 @@ function WeekSummaryContent() {
   const initialType = (searchParams?.get("type") || "total") as "total" | "critical" | "reincident" | "learned"
   const [filterType, setFilterType] = useState<"total" | "critical" | "reincident" | "learned">(initialType)
 
+  // Período: esta semana | última semana | acumulado. Default: última semana (ou acumulado se all=true)
+  type Period = "this_week" | "last_week" | "accumulated"
+  const getInitialPeriod = (): Period => {
+    if (searchParams?.get("all") === "true") return "accumulated"
+    const p = searchParams?.get("period")
+    if (p === "this_week" || p === "last_week" || p === "accumulated") return p
+    return "last_week"
+  }
+  const [period, setPeriod] = useState<Period>(getInitialPeriod())
+
   async function loadUser() {
     const {
       data: { user }
@@ -69,15 +79,30 @@ function WeekSummaryContent() {
     loadUser()
   }, [])
 
-  // Atualiza o tipo quando a URL muda
+  // Sincroniza URL com padrão (última semana) quando não há period nem all
+  useEffect(() => {
+    const hasAll = searchParams?.get("all") === "true"
+    const hasPeriod = searchParams?.get("period")
+    if (!hasAll && !hasPeriod) {
+      const params = new URLSearchParams(searchParams?.toString() || "")
+      params.set("period", "last_week")
+      router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+    }
+  }, [router, searchParams])
+
+  // Atualiza o tipo e o período quando a URL muda
   useEffect(() => {
     const type = searchParams?.get("type") || "total"
     if (["total", "critical", "reincident", "learned"].includes(type)) {
       setFilterType(type as "total" | "critical" | "reincident" | "learned")
     }
+    const fromAll = searchParams?.get("all") === "true"
+    const p = searchParams?.get("period")
+    if (fromAll) setPeriod("accumulated")
+    else if (p === "this_week" || p === "last_week" || p === "accumulated") setPeriod(p)
   }, [searchParams])
 
-  // Calcula início da semana atual (Segunda-feira)
+  // Calcula início da semana (Segunda-feira) para uma data
   const getWeekStart = (date: Date): Date => {
     const dayOfWeek = date.getDay()
     const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
@@ -87,26 +112,49 @@ function WeekSummaryContent() {
     return weekStart
   }
 
-  // Verifica se deve usar todos os erros (vindo da aba Histórico) ou apenas da semana
-  const useAllErrors = searchParams?.get("all") === "true"
+  function updateUrlPeriod(next: Period) {
+    setPeriod(next)
+    const params = new URLSearchParams(searchParams?.toString() || "")
+    params.delete("all")
+    params.set("period", next)
+    router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+  }
+
+  function updateUrlType(next: "total" | "critical" | "reincident" | "learned") {
+    setFilterType(next)
+    const params = new URLSearchParams(searchParams?.toString() || "")
+    params.set("type", next)
+    router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+  }
   
-  // Filtra erros da semana atual ou usa todos os erros se vier da aba Histórico
+  // Filtra erros por período: esta semana | última semana | acumulado
   const weekErrors = useMemo(() => {
-    if (useAllErrors) {
-      return errors // Retorna todos os erros se for da aba Histórico
-    }
-    
+    if (period === "accumulated") return errors
+
     const now = new Date()
-    const weekStart = getWeekStart(now)
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekStart.getDate() + 6)
-    weekEnd.setHours(23, 59, 59, 999)
+    const thisWeekStart = getWeekStart(now)
+    let weekStart: Date
+    let weekEnd: Date
+
+    if (period === "this_week") {
+      weekStart = new Date(thisWeekStart)
+      weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekStart.getDate() + 6)
+      weekEnd.setHours(23, 59, 59, 999)
+    } else {
+      // last_week: semana anterior (segunda a domingo)
+      weekStart = new Date(thisWeekStart)
+      weekStart.setDate(thisWeekStart.getDate() - 7)
+      weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekStart.getDate() + 6)
+      weekEnd.setHours(23, 59, 59, 999)
+    }
 
     return errors.filter(error => {
       const errorDate = new Date(error.created_at)
       return errorDate >= weekStart && errorDate <= weekEnd
     })
-  }, [errors, useAllErrors])
+  }, [errors, period])
 
   // Filtra erros conforme o tipo selecionado
   const filteredErrors = useMemo(() => {
@@ -166,17 +214,23 @@ function WeekSummaryContent() {
     }
   }, [weekErrors])
 
+  const getPeriodLabel = () => {
+    if (period === "accumulated") return " (Acumulado)"
+    if (period === "last_week") return " (Última Semana)"
+    return " (Esta Semana)"
+  }
+
   const getTitle = () => {
-    const period = useAllErrors ? " (Acumulado)" : " da Semana"
+    const suffix = getPeriodLabel()
     switch (filterType) {
       case "critical":
-        return `Erros Críticos${period}`
+        return `Erros Críticos${suffix}`
       case "reincident":
-        return `Erros Reincidentes${period}`
+        return `Erros Reincidentes${suffix}`
       case "learned":
-        return `Erros Consolidados${period}`
+        return `Erros Consolidados${suffix}`
       default:
-        return `Total de Erros${period}`
+        return `Total de Erros${suffix}`
     }
   }
 
@@ -200,48 +254,83 @@ function WeekSummaryContent() {
         </h1>
       </header>
 
-      {/* FILTROS */}
-      <div className="mb-6 flex gap-2 flex-wrap">
-        <button
-          onClick={() => setFilterType("total")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            filterType === "total"
-              ? "bg-slate-900 text-white"
-              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-          }`}
-        >
-          Total ({stats.total})
-        </button>
-        <button
-          onClick={() => setFilterType("critical")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            filterType === "critical"
-              ? "bg-red-600 text-white"
-              : "bg-white text-red-600 border border-red-200 hover:bg-red-50"
-          }`}
-        >
-          Críticos ({stats.critical})
-        </button>
-        <button
-          onClick={() => setFilterType("reincident")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            filterType === "reincident"
-              ? "bg-orange-600 text-white"
-              : "bg-white text-orange-600 border border-orange-200 hover:bg-orange-50"
-          }`}
-        >
-          Reincidentes ({stats.reincident})
-        </button>
-        <button
-          onClick={() => setFilterType("learned")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            filterType === "learned"
-              ? "bg-green-600 text-white"
-              : "bg-white text-green-600 border border-green-200 hover:bg-green-50"
-          }`}
-        >
-          Consolidados ({stats.learned})
-        </button>
+      {/* FILTROS: tipo + período */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => updateUrlType("total")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              filterType === "total"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            Total ({stats.total})
+          </button>
+          <button
+            onClick={() => updateUrlType("critical")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              filterType === "critical"
+                ? "bg-red-600 text-white"
+                : "bg-white text-red-600 border border-red-200 hover:bg-red-50"
+            }`}
+          >
+            Críticos ({stats.critical})
+          </button>
+          <button
+            onClick={() => updateUrlType("reincident")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              filterType === "reincident"
+                ? "bg-orange-600 text-white"
+                : "bg-white text-orange-600 border border-orange-200 hover:bg-orange-50"
+            }`}
+          >
+            Reincidentes ({stats.reincident})
+          </button>
+          <button
+            onClick={() => updateUrlType("learned")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              filterType === "learned"
+                ? "bg-green-600 text-white"
+                : "bg-white text-green-600 border border-green-200 hover:bg-green-50"
+            }`}
+          >
+            Consolidados ({stats.learned})
+          </button>
+        </div>
+        <span className="hidden sm:inline h-6 w-px bg-slate-300" aria-hidden />
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => updateUrlPeriod("this_week")}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+              period === "this_week"
+                ? "bg-slate-800 text-white"
+                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            Esta semana
+          </button>
+          <button
+            onClick={() => updateUrlPeriod("last_week")}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+              period === "last_week"
+                ? "bg-slate-800 text-white"
+                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            Última semana
+          </button>
+          <button
+            onClick={() => updateUrlPeriod("accumulated")}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+              period === "accumulated"
+                ? "bg-slate-800 text-white"
+                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            Acumulado
+          </button>
+        </div>
       </div>
 
       {/* BOTÃO EXPANDIR/RECOLHER TUDO */}
@@ -324,12 +413,16 @@ function WeekSummaryContent() {
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
             <p className="text-slate-500">
               {filterType === "total"
-                ? useAllErrors 
+                ? period === "accumulated"
                   ? "Nenhum erro registrado"
-                  : "Nenhum erro registrado nesta semana"
-                : useAllErrors
+                  : period === "last_week"
+                    ? "Nenhum erro registrado na última semana"
+                    : "Nenhum erro registrado nesta semana"
+                : period === "accumulated"
                   ? `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} registrado`
-                  : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} registrado nesta semana`}
+                  : period === "last_week"
+                    ? `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} na última semana`
+                    : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} nesta semana`}
             </p>
           </div>
         )}
