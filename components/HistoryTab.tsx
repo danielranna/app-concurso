@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts"
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
 
 type Error = {
   id: string
@@ -246,20 +246,40 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                   <Pie
                     data={errorTypes}
                     cx="50%"
-                    cy="45%"
+                    cy="50%"
                     labelLine={true}
                     label={(props: any) => {
                       const { cx, cy, midAngle, innerRadius, outerRadius, percent, payload } = props
-                      // Só mostra label se a porcentagem for maior que 5%
-                      if (percent < 0.05) return null
-                      
                       const RADIAN = Math.PI / 180
-                      const radius = innerRadius + (outerRadius - innerRadius) * 0.7
-                      const x = cx + radius * Math.cos(-midAngle * RADIAN)
-                      const y = cy + radius * Math.sin(-midAngle * RADIAN)
+                      
+                      // Para fatias pequenas, posiciona o label mais longe
+                      const isSmall = percent < 0.05
+                      const labelRadius = isSmall 
+                        ? outerRadius + 20 
+                        : innerRadius + (outerRadius - innerRadius) * 0.5
+                      
+                      const x = cx + labelRadius * Math.cos(-midAngle * RADIAN)
+                      const y = cy + labelRadius * Math.sin(-midAngle * RADIAN)
                       
                       const tipo = payload?.tipo || ""
-                      const percentValue = (percent * 100).toFixed(0)
+                      const percentValue = (percent * 100).toFixed(1)
+                      
+                      // Para fatias muito pequenas, mostra só o nome e % em uma linha mais compacta
+                      if (isSmall) {
+                        return (
+                          <text 
+                            x={x} 
+                            y={y} 
+                            fill="#0f172a" 
+                            textAnchor={x > cx ? 'start' : 'end'} 
+                            dominantBaseline="central"
+                            fontSize={10}
+                            fontWeight={500}
+                          >
+                            {`${tipo} ${percentValue}%`}
+                          </text>
+                        )
+                      }
                       
                       return (
                         <text 
@@ -275,7 +295,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                         </text>
                       )
                     }}
-                    outerRadius={80}
+                    outerRadius={90}
                     fill="#8884d8"
                     dataKey="quantidade"
                   >
@@ -297,19 +317,6 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       return [`${v} (${percent}%)`, props.payload.tipo]
                     }}
                     labelFormatter={() => ""}
-                  />
-                  <Legend
-                    verticalAlign="bottom"
-                    height={36}
-                    formatter={(value, entry: any) => {
-                      const total = errorTypes.reduce((sum, item) => sum + item.quantidade, 0)
-                      const percent = ((entry.payload.quantidade / total) * 100).toFixed(1)
-                      return `${value} (${percent}%)`
-                    }}
-                    wrapperStyle={{
-                      paddingTop: "16px",
-                      fontSize: "12px"
-                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>
