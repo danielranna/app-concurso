@@ -290,7 +290,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       borderRadius: "8px",
                       padding: "8px 12px"
                     }}
-                    formatter={(value: number | undefined, name: string, props: any) => {
+                    formatter={(value: number | undefined, _name: string | undefined, props: any) => {
                       const v = value ?? 0
                       const total = errorTypes.reduce((sum, item) => sum + item.quantidade, 0)
                       const percent = total > 0 ? ((v / total) * 100).toFixed(1) : "0"
