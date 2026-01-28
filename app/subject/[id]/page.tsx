@@ -509,10 +509,7 @@
             </p>
         ) : (
             <section
-            className="grid gap-4"
-            style={{
-                gridTemplateColumns: "repeat(2, 1fr)"
-            }}
+            className="grid grid-cols-1 gap-4 md:grid-cols-2"
             >
             {errors.map(error => (
                 <ErrorCard

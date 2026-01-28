@@ -39,10 +39,21 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
     if (period === "custom" && startDate && endDate) {
       cutoffDate = new Date(startDate)
       filterEndDate = new Date(endDate)
+    } else if (period === "week") {
+      // Calcula o início da semana atual (segunda-feira)
+      const dayOfWeek = now.getDay()
+      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1 // Segunda = 0
+      cutoffDate = new Date(now)
+      cutoffDate.setDate(now.getDate() - diff)
+      cutoffDate.setHours(0, 0, 0, 0)
+      
+      // Fim da semana (domingo)
+      filterEndDate = new Date(cutoffDate)
+      filterEndDate.setDate(cutoffDate.getDate() + 6)
+      filterEndDate.setHours(23, 59, 59, 999)
     } else {
-      const periodMs = period === "week" 
-        ? 7 * 24 * 60 * 60 * 1000 
-        : 30 * 24 * 60 * 60 * 1000
+      // Mês: últimos 30 dias
+      const periodMs = 30 * 24 * 60 * 60 * 1000
       cutoffDate = new Date(now.getTime() - periodMs)
       filterEndDate = now
     }
