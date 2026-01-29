@@ -136,7 +136,7 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
       {/* CARDS DE RESUMO */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
-          onClick={() => router.push("/week-summary")}
+          onClick={() => router.push("/resumo-periodo?period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
@@ -144,7 +144,7 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">Esta semana</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=critical")}
+          onClick={() => router.push("/resumo-periodo?type=critical&period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-red-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Erros Críticos</p>
@@ -152,7 +152,7 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">Requim atenção</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=reincident")}
+          onClick={() => router.push("/resumo-periodo?type=reincident&period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-orange-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Reincidentes</p>
@@ -160,7 +160,7 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">Revisar urgente</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=learned")}
+          onClick={() => router.push("/resumo-periodo?type=learned&period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-green-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Consolidados</p>

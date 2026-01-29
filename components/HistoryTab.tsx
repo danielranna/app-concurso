@@ -144,7 +144,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
       {/* CARDS DE RESUMO ACUMULADOS */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
-          onClick={() => router.push("/week-summary?type=total&all=true")}
+          onClick={() => router.push("/resumo-periodo?type=total&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
@@ -152,7 +152,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">Acumulado</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=critical&all=true")}
+          onClick={() => router.push("/resumo-periodo?type=critical&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-red-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Erros Críticos</p>
@@ -160,7 +160,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">{summaryCards.critical} de {summaryCards.total} erros (acumulado)</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=reincident&all=true")}
+          onClick={() => router.push("/resumo-periodo?type=reincident&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-orange-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Reincidentes</p>
@@ -168,7 +168,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
           <p className="mt-1 text-xs text-slate-500">{summaryCards.reincident} de {summaryCards.total} erros (acumulado)</p>
         </button>
         <button
-          onClick={() => router.push("/week-summary?type=learned&all=true")}
+          onClick={() => router.push("/resumo-periodo?type=learned&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-green-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Consolidados</p>

@@ -24,7 +24,7 @@ type ChartData = {
 }
 
 export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
-  const [period, setPeriod] = useState<"week" | "month" | "custom">("week")
+  const [period, setPeriod] = useState<"accumulated" | "week" | "month" | "custom">("accumulated")
   const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
@@ -36,9 +36,18 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
     let filterEndDate: Date
     const now = new Date()
 
-    if (period === "custom" && startDate && endDate) {
+    let filteredErrors: Error[]
+    
+    if (period === "accumulated") {
+      // Acumulado: mostra todos os erros sem filtro de data
+      filteredErrors = errors
+    } else if (period === "custom" && startDate && endDate) {
       cutoffDate = new Date(startDate)
       filterEndDate = new Date(endDate)
+      filteredErrors = errors.filter(error => {
+        const errorDate = new Date(error.created_at)
+        return errorDate >= cutoffDate && errorDate <= filterEndDate
+      })
     } else if (period === "week") {
       // Calcula o início da semana atual (segunda-feira)
       const dayOfWeek = now.getDay()
@@ -51,18 +60,21 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
       filterEndDate = new Date(cutoffDate)
       filterEndDate.setDate(cutoffDate.getDate() + 6)
       filterEndDate.setHours(23, 59, 59, 999)
+      
+      filteredErrors = errors.filter(error => {
+        const errorDate = new Date(error.created_at)
+        return errorDate >= cutoffDate && errorDate <= filterEndDate
+      })
     } else {
       // Mês: últimos 30 dias
       const periodMs = 30 * 24 * 60 * 60 * 1000
       cutoffDate = new Date(now.getTime() - periodMs)
       filterEndDate = now
+      filteredErrors = errors.filter(error => {
+        const errorDate = new Date(error.created_at)
+        return errorDate >= cutoffDate && errorDate <= filterEndDate
+      })
     }
-
-    // Filtra erros do período selecionado
-    const filteredErrors = errors.filter(error => {
-      const errorDate = new Date(error.created_at)
-      return errorDate >= cutoffDate && errorDate <= filterEndDate
-    })
 
     // Agrupa por tema
     const topicCounts: { [key: string]: number } = {}
@@ -89,6 +101,19 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
         </h3>
         <div className="flex items-center gap-2">
           <div className="flex gap-2 rounded-lg border border-slate-200 p-1">
+            <button
+              onClick={() => {
+                setPeriod("accumulated")
+                setShowCustomPicker(false)
+              }}
+              className={`rounded px-3 py-1 text-sm font-medium transition ${
+                period === "accumulated"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              Acumulado
+            </button>
             <button
               onClick={() => {
                 setPeriod("week")

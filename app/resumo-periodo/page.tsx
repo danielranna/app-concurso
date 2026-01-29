@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
 
@@ -26,7 +26,11 @@ type Error = {
   }
 }
 
-function WeekSummaryContent() {
+function formatDateForInput(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+function ResumoPeriodoContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [userId, setUserId] = useState<string | null>(null)
@@ -34,20 +38,39 @@ function WeekSummaryContent() {
   const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string; color?: string | null }>>([])
   const [allCardsExpanded, setAllCardsExpanded] = useState(false)
   const [editingError, setEditingError] = useState<Error | null>(null)
-  
+
   // Lê o tipo da URL ou usa "total" como padrão
   const initialType = (searchParams?.get("type") || "total") as "total" | "critical" | "reincident" | "learned"
   const [filterType, setFilterType] = useState<"total" | "critical" | "reincident" | "learned">(initialType)
 
-  // Período: esta semana | última semana | acumulado. Default: última semana (ou acumulado se all=true)
-  type Period = "this_week" | "last_week" | "accumulated"
+  type Period = "this_week" | "last_week" | "accumulated" | "custom"
+  const getWeekStart = (date: Date): Date => {
+    const dayOfWeek = date.getDay()
+    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const weekStart = new Date(date)
+    weekStart.setDate(date.getDate() - diff)
+    weekStart.setHours(0, 0, 0, 0)
+    return weekStart
+  }
+
+  const getDefaultCustomRange = (): { from: string; to: string } => {
+    const now = new Date()
+    const start = getWeekStart(now)
+    return { from: formatDateForInput(start), to: formatDateForInput(now) }
+  }
+
   const getInitialPeriod = (): Period => {
     if (searchParams?.get("all") === "true") return "accumulated"
     const p = searchParams?.get("period")
-    if (p === "this_week" || p === "last_week" || p === "accumulated") return p
+    if (p === "this_week" || p === "last_week" || p === "accumulated" || p === "custom") return p
     return "last_week"
   }
   const [period, setPeriod] = useState<Period>(getInitialPeriod())
+
+  const fromParam = searchParams?.get("from") ?? ""
+  const toParam = searchParams?.get("to") ?? ""
+  const [customFrom, setCustomFrom] = useState(fromParam || getDefaultCustomRange().from)
+  const [customTo, setCustomTo] = useState(toParam || getDefaultCustomRange().to)
 
   async function loadUser() {
     const {
@@ -79,18 +102,26 @@ function WeekSummaryContent() {
     loadUser()
   }, [])
 
-  // Sincroniza URL com padrão (última semana) quando não há period nem all
   useEffect(() => {
     const hasAll = searchParams?.get("all") === "true"
     const hasPeriod = searchParams?.get("period")
     if (!hasAll && !hasPeriod) {
       const params = new URLSearchParams(searchParams?.toString() || "")
       params.set("period", "last_week")
-      router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+      router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
+      return
     }
-  }, [router, searchParams])
+    const p = searchParams?.get("period")
+    if (p === "custom" && (!fromParam || !toParam)) {
+      const params = new URLSearchParams(searchParams?.toString() || "")
+      const { from, to } = getDefaultCustomRange()
+      params.set("period", "custom")
+      params.set("from", from)
+      params.set("to", to)
+      router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
+    }
+  }, [router, searchParams, fromParam, toParam])
 
-  // Atualiza o tipo e o período quando a URL muda
   useEffect(() => {
     const type = searchParams?.get("type") || "total"
     if (["total", "critical", "reincident", "learned"].includes(type)) {
@@ -99,110 +130,123 @@ function WeekSummaryContent() {
     const fromAll = searchParams?.get("all") === "true"
     const p = searchParams?.get("period")
     if (fromAll) setPeriod("accumulated")
-    else if (p === "this_week" || p === "last_week" || p === "accumulated") setPeriod(p)
+    else if (p === "this_week" || p === "last_week" || p === "accumulated" || p === "custom") {
+      setPeriod(p)
+      if (p === "custom") {
+        const f = searchParams?.get("from") ?? getDefaultCustomRange().from
+        const t = searchParams?.get("to") ?? getDefaultCustomRange().to
+        setCustomFrom(f)
+        setCustomTo(t)
+      }
+    }
   }, [searchParams])
-
-  // Calcula início da semana (Segunda-feira) para uma data
-  const getWeekStart = (date: Date): Date => {
-    const dayOfWeek = date.getDay()
-    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-    const weekStart = new Date(date)
-    weekStart.setDate(date.getDate() - diff)
-    weekStart.setHours(0, 0, 0, 0)
-    return weekStart
-  }
 
   function updateUrlPeriod(next: Period) {
     setPeriod(next)
     const params = new URLSearchParams(searchParams?.toString() || "")
     params.delete("all")
+    params.delete("from")
+    params.delete("to")
     params.set("period", next)
-    router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+    if (next === "custom") {
+      const { from, to } = getDefaultCustomRange()
+      params.set("from", from)
+      params.set("to", to)
+      setCustomFrom(from)
+      setCustomTo(to)
+    }
+    router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
+  }
+
+  function applyCustomRange() {
+    const params = new URLSearchParams(searchParams?.toString() || "")
+    params.delete("all")
+    params.set("period", "custom")
+    params.set("from", customFrom)
+    params.set("to", customTo)
+    router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
   function updateUrlType(next: "total" | "critical" | "reincident" | "learned") {
     setFilterType(next)
     const params = new URLSearchParams(searchParams?.toString() || "")
     params.set("type", next)
-    router.replace(`/week-summary?${params.toString()}`, { scroll: false })
+    router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
-  
-  // Filtra erros por período: esta semana | última semana | acumulado
-  const weekErrors = useMemo(() => {
+
+  const periodErrors = useMemo(() => {
     if (period === "accumulated") return errors
 
     const now = new Date()
     const thisWeekStart = getWeekStart(now)
-    let weekStart: Date
-    let weekEnd: Date
+    let rangeStart: Date
+    let rangeEnd: Date
 
     if (period === "this_week") {
-      weekStart = new Date(thisWeekStart)
-      weekEnd = new Date(weekStart)
-      weekEnd.setDate(weekStart.getDate() + 6)
-      weekEnd.setHours(23, 59, 59, 999)
+      rangeStart = new Date(thisWeekStart)
+      rangeEnd = new Date(rangeStart)
+      rangeEnd.setDate(rangeStart.getDate() + 6)
+      rangeEnd.setHours(23, 59, 59, 999)
+    } else if (period === "last_week") {
+      rangeStart = new Date(thisWeekStart)
+      rangeStart.setDate(thisWeekStart.getDate() - 7)
+      rangeEnd = new Date(rangeStart)
+      rangeEnd.setDate(rangeStart.getDate() + 6)
+      rangeEnd.setHours(23, 59, 59, 999)
     } else {
-      // last_week: semana anterior (segunda a domingo)
-      weekStart = new Date(thisWeekStart)
-      weekStart.setDate(thisWeekStart.getDate() - 7)
-      weekEnd = new Date(weekStart)
-      weekEnd.setDate(weekStart.getDate() + 6)
-      weekEnd.setHours(23, 59, 59, 999)
+      if (!fromParam || !toParam) return []
+      const start = new Date(fromParam)
+      const end = new Date(toParam)
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return []
+      rangeStart = start
+      rangeStart.setHours(0, 0, 0, 0)
+      rangeEnd = end
+      rangeEnd.setHours(23, 59, 59, 999)
     }
 
     return errors.filter(error => {
       const errorDate = new Date(error.created_at)
-      return errorDate >= weekStart && errorDate <= weekEnd
+      return errorDate >= rangeStart && errorDate <= rangeEnd
     })
-  }, [errors, period])
+  }, [errors, period, fromParam, toParam])
 
-  // Filtra erros conforme o tipo selecionado
   const filteredErrors = useMemo(() => {
-    if (filterType === "total") {
-      return weekErrors
-    }
-
+    if (filterType === "total") return periodErrors
     if (filterType === "critical") {
-      return weekErrors.filter(e => {
+      return periodErrors.filter(e => {
         const status = (e.error_status || "").toLowerCase().trim()
         return status === "critico" || status === "crítico" || status.includes("critic")
       })
     }
-
     if (filterType === "learned") {
-      return weekErrors.filter(e => {
+      return periodErrors.filter(e => {
         const status = (e.error_status || "").toLowerCase().trim()
         return status === "consolidado" || status === "aprendido" || status === "resolvido"
       })
     }
-
     if (filterType === "reincident") {
-      return weekErrors.filter(e => {
+      return periodErrors.filter(e => {
         const status = (e.error_status || "").toLowerCase().trim()
         return status === "reincidente"
       })
     }
-
     return []
-  }, [weekErrors, filterType])
+  }, [periodErrors, filterType])
 
-  // Calcula estatísticas (usa weekErrors que já está filtrado corretamente)
   const stats = useMemo(() => {
-    const total = weekErrors.length
-    const critical = weekErrors.filter(e => {
+    const total = periodErrors.length
+    const critical = periodErrors.filter(e => {
       const status = (e.error_status || "").toLowerCase().trim()
       return status === "critico" || status === "crítico" || status.includes("critic")
     }).length
-    const learned = weekErrors.filter(e => {
+    const learned = periodErrors.filter(e => {
       const status = (e.error_status || "").toLowerCase().trim()
       return status === "consolidado" || status === "aprendido" || status === "resolvido"
     }).length
-    // Calcula reincidentes (erros com status "Reincidente" - case-insensitive)
-    const reincidentErrors = weekErrors.filter(e => {
+    const reincidentErrors = periodErrors.filter(e => {
       const status = (e.error_status || "").toLowerCase().trim()
       return status === "reincidente"
     }).length
-
     return {
       total,
       critical,
@@ -212,11 +256,13 @@ function WeekSummaryContent() {
       learnedPercent: total > 0 ? Math.round((learned / total) * 100) : 0,
       reincidentsPercent: total > 0 ? Math.round((reincidentErrors / total) * 100) : 0
     }
-  }, [weekErrors])
+  }, [periodErrors])
 
   const getPeriodLabel = () => {
     if (period === "accumulated") return " (Acumulado)"
     if (period === "last_week") return " (Última Semana)"
+    if (period === "custom" && fromParam && toParam) return ` (${fromParam} a ${toParam})`
+    if (period === "custom") return " (Entre datas)"
     return " (Esta Semana)"
   }
 
@@ -234,13 +280,21 @@ function WeekSummaryContent() {
     }
   }
 
-  if (!userId) {
-    return null
+  const emptyMessage = () => {
+    const base = filterType === "total"
+      ? "Nenhum erro registrado"
+      : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"}`
+    if (period === "accumulated") return base
+    if (period === "last_week") return `${base} na última semana`
+    if (period === "this_week") return `${base} nesta semana`
+    if (period === "custom" && fromParam && toParam) return `${base} entre ${fromParam} e ${toParam}`
+    return base
   }
+
+  if (!userId) return null
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-6">
-      {/* HEADER */}
       <header className="mb-6">
         <button
           onClick={() => router.back()}
@@ -254,7 +308,6 @@ function WeekSummaryContent() {
         </h1>
       </header>
 
-      {/* FILTROS: tipo + período */}
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <div className="flex gap-2 flex-wrap">
           <button
@@ -299,7 +352,7 @@ function WeekSummaryContent() {
           </button>
         </div>
         <span className="hidden sm:inline h-6 w-px bg-slate-300" aria-hidden />
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           <button
             onClick={() => updateUrlPeriod("this_week")}
             className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
@@ -330,10 +383,43 @@ function WeekSummaryContent() {
           >
             Acumulado
           </button>
+          <button
+            onClick={() => updateUrlPeriod("custom")}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition ${
+              period === "custom"
+                ? "bg-slate-800 text-white"
+                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            <CalendarRange className="h-4 w-4" />
+            Entre datas
+          </button>
+          {period === "custom" && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              />
+              <span className="text-slate-500 text-sm">até</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              />
+              <button
+                onClick={applyCustomRange}
+                className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 transition"
+              >
+                Aplicar
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* BOTÃO EXPANDIR/RECOLHER TUDO */}
       <div className="mb-4 flex justify-end">
         <button
           onClick={() => setAllCardsExpanded(!allCardsExpanded)}
@@ -353,7 +439,6 @@ function WeekSummaryContent() {
         </button>
       </div>
 
-      {/* LISTA DE ERROS */}
       <div className="space-y-4">
         {filteredErrors.length > 0 ? (
           filteredErrors.map(error => (
@@ -374,9 +459,7 @@ function WeekSummaryContent() {
                     }
                   : null
               }}
-              onEdit={() => {
-                setEditingError(error)
-              }}
+              onEdit={() => setEditingError(error)}
               onDeleted={async () => {
                 await loadErrors(userId!)
                 await loadErrorStatuses(userId!)
@@ -386,7 +469,6 @@ function WeekSummaryContent() {
               onStatusChange={async (errorId, newStatus) => {
                 const errorToUpdate = errors.find(e => e.id === errorId)
                 if (!errorToUpdate) return
-
                 const res = await fetch(`/api/errors/${errorId}`, {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
@@ -401,7 +483,6 @@ function WeekSummaryContent() {
                     error_status: newStatus
                   })
                 })
-                
                 if (res.ok) {
                   await loadErrors(userId!)
                   await loadErrorStatuses(userId!)
@@ -411,24 +492,11 @@ function WeekSummaryContent() {
           ))
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
-            <p className="text-slate-500">
-              {filterType === "total"
-                ? period === "accumulated"
-                  ? "Nenhum erro registrado"
-                  : period === "last_week"
-                    ? "Nenhum erro registrado na última semana"
-                    : "Nenhum erro registrado nesta semana"
-                : period === "accumulated"
-                  ? `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} registrado`
-                  : period === "last_week"
-                    ? `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} na última semana`
-                    : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"} nesta semana`}
-            </p>
+            <p className="text-slate-500">{emptyMessage()}</p>
           </div>
         )}
       </div>
 
-      {/* MODAL DE EDIÇÃO */}
       {editingError && userId && (
         <AddErrorModal
           isOpen={!!editingError}
@@ -459,7 +527,7 @@ function WeekSummaryContent() {
   )
 }
 
-export default function WeekSummaryPage() {
+export default function ResumoPeriodoPage() {
   return (
     <Suspense fallback={
       <main className="min-h-screen bg-slate-50 px-6 py-6">
@@ -468,7 +536,7 @@ export default function WeekSummaryPage() {
         </div>
       </main>
     }>
-      <WeekSummaryContent />
+      <ResumoPeriodoContent />
     </Suspense>
   )
 }
