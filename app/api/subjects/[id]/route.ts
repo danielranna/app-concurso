@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { revalidateTag } from "next/cache"
 
 /* =========================
    DELETE /api/subjects/:id
@@ -39,6 +38,7 @@ export async function DELETE(
 
   // Revalida o cache após deleção
   if (subject?.user_id) {
+    const { revalidateTag } = await import("next/cache")
     revalidateTag(`subjects-${subject.user_id}`)
   }
 

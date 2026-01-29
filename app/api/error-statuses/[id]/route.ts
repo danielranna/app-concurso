@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { revalidateTag } from "next/cache"
 
 /* =========================
    PUT /api/error-statuses/:id
@@ -52,6 +51,7 @@ export async function PUT(
 
   // Revalida o cache após atualização
   if (status?.user_id) {
+    const { revalidateTag } = await import("next/cache")
     revalidateTag(`error-statuses-${status.user_id}`)
   }
 
@@ -104,6 +104,7 @@ export async function DELETE(
 
   // Revalida o cache após deleção
   if (status?.user_id) {
+    const { revalidateTag } = await import("next/cache")
     revalidateTag(`error-statuses-${status.user_id}`)
   }
 

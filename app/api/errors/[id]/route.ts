@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { revalidateTag } from "next/cache"
 
 /* =========================
    DELETE /api/errors/:id
@@ -39,11 +38,12 @@ export async function DELETE(
 
   // Revalida o cache após deleção
   if (errorData?.user_id) {
+    const { revalidateTag } = await import("next/cache")
     revalidateTag(`errors-${errorData.user_id}`)
     revalidateTag('errors-all')
-  }
-  if (errorData?.topics && Array.isArray(errorData.topics) && errorData.topics[0]?.subject_id) {
-    revalidateTag(`errors-subject-${errorData.topics[0].subject_id}`)
+    if (errorData?.topics && Array.isArray(errorData.topics) && errorData.topics[0]?.subject_id) {
+      revalidateTag(`errors-subject-${errorData.topics[0].subject_id}`)
+    }
   }
 
   return NextResponse.json({ success: true })
@@ -120,14 +120,15 @@ export async function PUT(
 
   // Revalida o cache após atualização
   if (oldError?.user_id) {
+    const { revalidateTag } = await import("next/cache")
     revalidateTag(`errors-${oldError.user_id}`)
     revalidateTag('errors-all')
-  }
-  if (oldError?.topics && Array.isArray(oldError.topics) && oldError.topics[0]?.subject_id) {
-    revalidateTag(`errors-subject-${oldError.topics[0].subject_id}`)
-  }
-  if (newTopic?.subject_id && newTopic.subject_id !== oldError?.topics?.[0]?.subject_id) {
-    revalidateTag(`errors-subject-${newTopic.subject_id}`)
+    if (oldError?.topics && Array.isArray(oldError.topics) && oldError.topics[0]?.subject_id) {
+      revalidateTag(`errors-subject-${oldError.topics[0].subject_id}`)
+    }
+    if (newTopic?.subject_id && newTopic.subject_id !== oldError?.topics?.[0]?.subject_id) {
+      revalidateTag(`errors-subject-${newTopic.subject_id}`)
+    }
   }
 
   return NextResponse.json({ success: true })
