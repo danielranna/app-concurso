@@ -24,7 +24,7 @@ type Error = {
   correction_text: string
   description?: string
   reference_link?: string
-  error_status?: string
+  error_status: string
   error_type?: string
   created_at: string
   topics: {
@@ -291,7 +291,11 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     if (isCacheValid(cacheKey, 'errors')) {
       const cached = cache.errors.get(cacheKey)
       if (cached) {
-        return cached
+        // Garante que error_status sempre tenha um valor padrão
+        return cached.map((error: any) => ({
+          ...error,
+          error_status: error.error_status || "normal"
+        }))
       }
     }
 
@@ -304,16 +308,22 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     const res = await fetch(`/api/errors?${urlParams.toString()}`)
     const data = await res.json()
     
+    // Garante que error_status sempre tenha um valor padrão
+    const normalizedData = (data ?? []).map((error: any) => ({
+      ...error,
+      error_status: error.error_status || "normal"
+    }))
+    
     setCache(prev => ({
       ...prev,
-      errors: new Map(prev.errors).set(cacheKey, data ?? []),
+      errors: new Map(prev.errors).set(cacheKey, normalizedData),
       timestamps: {
         ...prev.timestamps,
         errors: new Map(prev.timestamps.errors).set(cacheKey, Date.now()),
       },
     }))
 
-    return data ?? []
+    return normalizedData
   }, [cache, isCacheValid, getCacheKey])
 
   const invalidateErrors = useCallback((userId: string, subjectId?: string) => {
