@@ -256,7 +256,7 @@
                 className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedTopicIds.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
-                    : "border-slate-300 hover:bg-slate-50"
+                    : "border-slate-300 text-slate-900 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4 shrink-0" />
@@ -327,7 +327,7 @@
                 className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedErrorTypes.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
-                    : "border-slate-300 hover:bg-slate-50"
+                    : "border-slate-300 text-slate-900 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4 shrink-0" />
@@ -401,7 +401,7 @@
                 className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedStatuses.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
-                    : "border-slate-300 hover:bg-slate-50"
+                    : "border-slate-300 text-slate-900 hover:bg-slate-50"
                 }`}
                 >
                 <Filter className="h-4 w-4 shrink-0" />

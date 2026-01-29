@@ -239,7 +239,7 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
           <h3 className="mb-4 text-lg font-semibold text-slate-800">
             Tipos de Erro Mais Frequentes
           </h3>
-          <div style={{ width: "100%", height: 300 }}>
+          <div style={{ width: "100%", height: 450 }}>
             {errorTypes.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -252,10 +252,15 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       const { cx, cy, midAngle, innerRadius, outerRadius, percent, payload } = props
                       const RADIAN = Math.PI / 180
                       
-                      // Para fatias pequenas, posiciona o label mais longe
-                      const isSmall = percent < 0.05
-                      const labelRadius = isSmall 
-                        ? outerRadius + 20 
+                      // Para fatias pequenas, posiciona o label bem mais longe
+                      const isSmall = percent < 0.08
+                      const isVerySmall = percent < 0.03
+                      
+                      // Aumenta o raio do label para fatias pequenas
+                      const labelRadius = isVerySmall 
+                        ? outerRadius + 50
+                        : isSmall 
+                        ? outerRadius + 35
                         : innerRadius + (outerRadius - innerRadius) * 0.5
                       
                       const x = cx + labelRadius * Math.cos(-midAngle * RADIAN)
@@ -264,22 +269,8 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       const tipo = payload?.tipo || ""
                       const percentValue = (percent * 100).toFixed(1)
                       
-                      // Para fatias muito pequenas, mostra só o nome e % em uma linha mais compacta
-                      if (isSmall) {
-                        return (
-                          <text 
-                            x={x} 
-                            y={y} 
-                            fill="#0f172a" 
-                            textAnchor={x > cx ? 'start' : 'end'} 
-                            dominantBaseline="central"
-                            fontSize={10}
-                            fontWeight={500}
-                          >
-                            {`${tipo} ${percentValue}%`}
-                          </text>
-                        )
-                      }
+                      // Ajusta o tamanho da fonte baseado no tamanho da fatia
+                      const fontSize = isVerySmall ? 11 : isSmall ? 12 : 13
                       
                       return (
                         <text 
@@ -288,14 +279,15 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                           fill="#0f172a" 
                           textAnchor={x > cx ? 'start' : 'end'} 
                           dominantBaseline="central"
-                          fontSize={11}
-                          fontWeight={500}
+                          fontSize={fontSize}
+                          fontWeight={600}
                         >
-                          {`${tipo}: ${percentValue}%`}
+                          {`${tipo} ${percentValue}%`}
                         </text>
                       )
                     }}
-                    outerRadius={90}
+                    outerRadius={140}
+                    innerRadius={30}
                     fill="#8884d8"
                     dataKey="quantidade"
                   >
@@ -308,7 +300,8 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                       backgroundColor: "#fff",
                       border: "1px solid #e2e8f0",
                       borderRadius: "8px",
-                      padding: "8px 12px"
+                      padding: "8px 12px",
+                      fontSize: "13px"
                     }}
                     formatter={(value: number | undefined, _name: string | undefined, props: any) => {
                       const v = value ?? 0

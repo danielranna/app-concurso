@@ -153,7 +153,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
               setIsEmpty(!html || html.trim() === "" || html === "<br>")
             }
           }}
-          className="w-full rounded-b-lg border border-t-0 border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 min-h-[3rem] break-words overflow-wrap-anywhere relative z-10"
+          className="w-full rounded-b-lg border border-t-0 border-slate-300 p-2 text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 min-h-[3rem] break-words overflow-wrap-anywhere relative z-10"
           style={{ 
             minHeight: getMinHeight(),
             wordWrap: 'break-word',
@@ -163,7 +163,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         />
         {isEmpty && placeholder && (
           <div 
-            className="absolute top-2 left-2 text-slate-400 pointer-events-none z-0"
+            className="absolute top-2 left-2 text-slate-600 pointer-events-none z-0"
             style={{ 
               minHeight: getMinHeight(),
               lineHeight: '1.5rem'

@@ -366,7 +366,7 @@ export default function AddErrorModal({
               Matéria
             </label>
             <select
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              className="w-full rounded-lg border border-slate-300 p-2 text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
               value={selectedSubject}
               onChange={e => {
                 console.log("📘 subject selecionado", e.target.value)
@@ -390,7 +390,7 @@ export default function AddErrorModal({
             </label>
             <div className="flex gap-2">
               <select
-                className="flex-1 rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                className="flex-1 rounded-lg border border-slate-300 p-2 text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 disabled:bg-slate-100 disabled:cursor-not-allowed"
                 value={selectedTopic}
                 onChange={e => {
                   console.log("📙 topic selecionado", e.target.value)
@@ -451,7 +451,7 @@ export default function AddErrorModal({
               Link para questão <span className="text-slate-400 text-xs">(opcional)</span>
             </label>
             <input
-              className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
+              className="w-full rounded-lg border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0"
               placeholder="Cole o link da questão aqui"
               value={referenceLink}
               onChange={e => setReferenceLink(e.target.value)}
@@ -568,7 +568,7 @@ export default function AddErrorModal({
                       }
                     }}
                     placeholder="Digite o nome do tema"
-                    className="w-full rounded-lg border border-slate-300 p-2 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    className="w-full rounded-lg border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"
                     autoFocus
                     disabled={creatingTopic}
                   />
