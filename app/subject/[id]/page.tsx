@@ -220,23 +220,21 @@
     }, [userId, subjectId, selectedTopicIds, selectedErrorTypes, selectedStatuses])
 
     return (
-        <main className="min-h-screen bg-slate-50 px-6 py-6">
+        <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6">
         {/* HEADER */}
-        <header className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <header className="mb-6 flex flex-wrap items-center gap-3 sm:justify-between">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3 sm:gap-4">
                 <button
                 onClick={() => router.back()}
-                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
                 >
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
+                <ArrowLeft className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Voltar</span>
                 </button>
-
-                <h1 className="text-2xl font-semibold text-slate-800">
+                <h1 className="min-w-0 truncate text-xl font-semibold text-slate-800 sm:text-2xl">
                 {subjectName}
                 </h1>
             </div>
-
             <button
                 onClick={() => {
                     setEditingError({
@@ -252,34 +250,34 @@
                     })
                     setOpenModal(true)
                 }}
-                className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
             >
-                <Plus className="h-4 w-4" />
-                Adicionar Erro
+                <Plus className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Adicionar Erro</span>
             </button>
         </header>
 
         {/* GRÁFICO */}
-        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <ErrorsByTopicChart errors={errors} subjectId={subjectId} />
         </section>
 
         {/* Botão Expandir Todos */}
         {errors.length > 0 && (
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex flex-wrap justify-end">
             <button
                 onClick={() => setAllCardsExpanded(!allCardsExpanded)}
-                className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
                 title={allCardsExpanded ? "Ocultar todos" : "Mostrar todos"}
             >
-                <Eye className="h-4 w-4" />
-                {allCardsExpanded ? "Ocultar todos" : "Mostrar todos"}
+                <Eye className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">{allCardsExpanded ? "Ocultar todos" : "Mostrar todos"}</span>
             </button>
             </div>
         )}
 
         {/* FILTROS */}
-        <section className="mb-6 flex gap-3 relative">
+        <section className="relative mb-6 flex flex-wrap gap-2 sm:gap-3">
             {/* Filtro Tema */}
             <div className="relative">
                 <button
@@ -288,16 +286,16 @@
                     openFilterMenu === "topics" ? null : "topics"
                     )
                 }
-                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
+                className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedTopicIds.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
-                <Filter className="h-4 w-4" />
-                Tema
+                <Filter className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Tema</span>
                 {selectedTopicIds.length > 0 && (
-                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="shrink-0 rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white">
                     {selectedTopicIds.length}
                     </span>
                 )}
@@ -309,7 +307,7 @@
                     className="fixed inset-0 z-10"
                     onClick={() => setOpenFilterMenu(null)}
                     />
-                    <div className="absolute top-full left-0 mt-2 z-20 w-64 rounded-lg border bg-white shadow-lg p-3 max-h-64 overflow-auto">
+                    <div className="absolute top-full left-0 z-20 mt-2 w-full min-w-[16rem] max-w-[calc(100vw-2rem)] max-h-64 overflow-auto rounded-lg border bg-white p-3 shadow-lg sm:w-64">
                     {topics.length === 0 ? (
                         <p className="text-sm text-slate-500">
                         Nenhum tema cadastrado
@@ -359,16 +357,16 @@
                     openFilterMenu === "errorTypes" ? null : "errorTypes"
                     )
                 }
-                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
+                className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedErrorTypes.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
-                <Filter className="h-4 w-4" />
-                Tipo de erro
+                <Filter className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Tipo de erro</span>
                 {selectedErrorTypes.length > 0 && (
-                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="shrink-0 rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white">
                     {selectedErrorTypes.length}
                     </span>
                 )}
@@ -380,7 +378,7 @@
                     className="fixed inset-0 z-10"
                     onClick={() => setOpenFilterMenu(null)}
                     />
-                    <div className="absolute top-full left-0 mt-2 z-20 w-64 rounded-lg border bg-white shadow-lg p-3 max-h-64 overflow-auto">
+                    <div className="absolute top-full left-0 z-20 mt-2 w-full min-w-[16rem] max-w-[calc(100vw-2rem)] max-h-64 overflow-auto rounded-lg border bg-white p-3 shadow-lg sm:w-64">
                     {errorTypes.length === 0 ? (
                         <p className="text-sm text-slate-500">
                         Nenhum tipo cadastrado
@@ -433,16 +431,16 @@
                     openFilterMenu === "statuses" ? null : "statuses"
                     )
                 }
-                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
+                className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition sm:px-4 ${
                     selectedStatuses.length > 0
                     ? "bg-slate-100 border-slate-900 text-slate-900"
                     : "border-slate-300 hover:bg-slate-50"
                 }`}
                 >
-                <Filter className="h-4 w-4" />
-                Status
+                <Filter className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Status</span>
                 {selectedStatuses.length > 0 && (
-                    <span className="bg-slate-900 text-white rounded-full px-2 py-0.5 text-xs">
+                    <span className="shrink-0 rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white">
                     {selectedStatuses.length}
                     </span>
                 )}
@@ -454,7 +452,7 @@
                     className="fixed inset-0 z-10"
                     onClick={() => setOpenFilterMenu(null)}
                     />
-                    <div className="absolute top-full left-0 mt-2 z-20 w-64 rounded-lg border bg-white shadow-lg p-3">
+                    <div className="absolute top-full left-0 z-20 mt-2 w-full min-w-[16rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-white p-3 shadow-lg sm:w-64">
                     {errorStatuses.length === 0 ? (
                         <p className="text-sm text-slate-500">
                         Nenhum status cadastrado

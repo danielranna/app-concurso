@@ -224,7 +224,7 @@ export default function ErrorCard({
           Erro
         </p>
         <div 
-          className="max-h-24 overflow-auto break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+          className="break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
           dangerouslySetInnerHTML={{ __html: error.error_text }}
         />
       </div>
@@ -237,7 +237,7 @@ export default function ErrorCard({
               Correção
             </p>
             <div 
-              className="max-h-32 overflow-auto break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+              className="break-words text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
               dangerouslySetInnerHTML={{ __html: error.correction_text }}
             />
           </div>

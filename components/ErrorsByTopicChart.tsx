@@ -95,18 +95,18 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-slate-800">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <h3 className="shrink-0 text-lg font-semibold text-slate-800">
           Erros por Tema
         </h3>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-2 rounded-lg border border-slate-200 p-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 p-1 sm:gap-2">
             <button
               onClick={() => {
                 setPeriod("accumulated")
                 setShowCustomPicker(false)
               }}
-              className={`rounded px-3 py-1 text-sm font-medium transition ${
+              className={`shrink-0 rounded px-2 py-1.5 text-sm font-medium transition sm:px-3 ${
                 period === "accumulated"
                   ? "bg-slate-900 text-white"
                   : "text-slate-600 hover:bg-slate-100"
@@ -119,7 +119,7 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
                 setPeriod("week")
                 setShowCustomPicker(false)
               }}
-              className={`rounded px-3 py-1 text-sm font-medium transition ${
+              className={`shrink-0 rounded px-2 py-1.5 text-sm font-medium transition sm:px-3 ${
                 period === "week"
                   ? "bg-slate-900 text-white"
                   : "text-slate-600 hover:bg-slate-100"
@@ -132,7 +132,7 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
                 setPeriod("month")
                 setShowCustomPicker(false)
               }}
-              className={`rounded px-3 py-1 text-sm font-medium transition ${
+              className={`shrink-0 rounded px-2 py-1.5 text-sm font-medium transition sm:px-3 ${
                 period === "month"
                   ? "bg-slate-900 text-white"
                   : "text-slate-600 hover:bg-slate-100"
@@ -149,14 +149,14 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
                   setPeriod("custom")
                 }
               }}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1 text-sm font-medium transition ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-sm font-medium transition sm:px-3 ${
                 period === "custom"
                   ? "bg-slate-900 text-white border-slate-900"
                   : "border-slate-300 text-slate-600 hover:bg-slate-100"
               }`}
             >
-              <Calendar className="h-4 w-4" />
-              Período
+              <Calendar className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Período</span>
             </button>
             {showCustomPicker && (
               <>
@@ -164,7 +164,7 @@ export default function ErrorsByTopicChart({ errors, subjectId }: Props) {
                   className="fixed inset-0 z-10"
                   onClick={() => setShowCustomPicker(false)}
                 />
-                <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
+                <div className="absolute right-0 z-20 mt-2 w-full min-w-[16rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-4 shadow-lg sm:w-64">
                   <div className="space-y-3">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">

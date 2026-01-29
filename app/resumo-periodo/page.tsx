@@ -294,68 +294,70 @@ function ResumoPeriodoContent() {
   if (!userId) return null
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-6">
+    <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6">
       <header className="mb-6">
         <button
           onClick={() => router.back()}
           className="mb-4 flex items-center gap-2 text-slate-600 hover:text-slate-900 transition"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 shrink-0" />
           <span>Voltar</span>
         </button>
-        <h1 className="text-2xl font-semibold text-slate-800">
+        <h1 className="text-xl font-semibold text-slate-800 sm:text-2xl">
           {getTitle()}
         </h1>
       </header>
 
+      {/* Filtros por tipo */}
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          onClick={() => updateUrlType("total")}
+          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
+            filterType === "total"
+              ? "bg-slate-900 text-white"
+              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          Total ({stats.total})
+        </button>
+        <button
+          onClick={() => updateUrlType("critical")}
+          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
+            filterType === "critical"
+              ? "bg-red-600 text-white"
+              : "bg-white text-red-600 border border-red-200 hover:bg-red-50"
+          }`}
+        >
+          Críticos ({stats.critical})
+        </button>
+        <button
+          onClick={() => updateUrlType("reincident")}
+          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
+            filterType === "reincident"
+              ? "bg-orange-600 text-white"
+              : "bg-white text-orange-600 border border-orange-200 hover:bg-orange-50"
+          }`}
+        >
+          Reincidentes ({stats.reincident})
+        </button>
+        <button
+          onClick={() => updateUrlType("learned")}
+          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
+            filterType === "learned"
+              ? "bg-green-600 text-white"
+              : "bg-white text-green-600 border border-green-200 hover:bg-green-50"
+          }`}
+        >
+          Consolidados ({stats.learned})
+        </button>
+      </div>
+
+      {/* Filtros por período */}
       <div className="mb-6 flex flex-wrap items-center gap-2">
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => updateUrlType("total")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              filterType === "total"
-                ? "bg-slate-900 text-white"
-                : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            Total ({stats.total})
-          </button>
-          <button
-            onClick={() => updateUrlType("critical")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              filterType === "critical"
-                ? "bg-red-600 text-white"
-                : "bg-white text-red-600 border border-red-200 hover:bg-red-50"
-            }`}
-          >
-            Críticos ({stats.critical})
-          </button>
-          <button
-            onClick={() => updateUrlType("reincident")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              filterType === "reincident"
-                ? "bg-orange-600 text-white"
-                : "bg-white text-orange-600 border border-orange-200 hover:bg-orange-50"
-            }`}
-          >
-            Reincidentes ({stats.reincident})
-          </button>
-          <button
-            onClick={() => updateUrlType("learned")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              filterType === "learned"
-                ? "bg-green-600 text-white"
-                : "bg-white text-green-600 border border-green-200 hover:bg-green-50"
-            }`}
-          >
-            Consolidados ({stats.learned})
-          </button>
-        </div>
-        <span className="hidden sm:inline h-6 w-px bg-slate-300" aria-hidden />
-        <div className="flex gap-2 flex-wrap items-center">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => updateUrlPeriod("this_week")}
-            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
               period === "this_week"
                 ? "bg-slate-800 text-white"
                 : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
@@ -365,7 +367,7 @@ function ResumoPeriodoContent() {
           </button>
           <button
             onClick={() => updateUrlPeriod("last_week")}
-            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
               period === "last_week"
                 ? "bg-slate-800 text-white"
                 : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
@@ -375,7 +377,7 @@ function ResumoPeriodoContent() {
           </button>
           <button
             onClick={() => updateUrlPeriod("accumulated")}
-            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
               period === "accumulated"
                 ? "bg-slate-800 text-white"
                 : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
@@ -385,45 +387,45 @@ function ResumoPeriodoContent() {
           </button>
           <button
             onClick={() => updateUrlPeriod("custom")}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition ${
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
               period === "custom"
                 ? "bg-slate-800 text-white"
                 : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
             }`}
           >
-            <CalendarRange className="h-4 w-4" />
-            Entre datas
+            <CalendarRange className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Entre datas</span>
           </button>
-          {period === "custom" && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={e => setCustomFrom(e.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
-              />
-              <span className="text-slate-500 text-sm">até</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={e => setCustomTo(e.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
-              />
-              <button
-                onClick={applyCustomRange}
-                className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 transition"
-              >
-                Aplicar
-              </button>
-            </div>
-          )}
         </div>
+        {period === "custom" && (
+          <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3 sm:w-auto sm:border-0 sm:bg-transparent sm:p-0">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={e => setCustomFrom(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 sm:flex-initial"
+            />
+            <span className="hidden text-slate-500 text-sm sm:inline">até</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={e => setCustomTo(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 sm:flex-initial"
+            />
+            <button
+              onClick={applyCustomRange}
+              className="w-full rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 sm:w-auto"
+            >
+              Aplicar
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex flex-wrap justify-end gap-2">
         <button
           onClick={() => setAllCardsExpanded(!allCardsExpanded)}
-          className="flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
         >
           {allCardsExpanded ? (
             <>
