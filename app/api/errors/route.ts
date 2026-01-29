@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { unstable_cache } from "next/cache"
 
 /* =========================
    GET /api/errors
@@ -20,64 +21,97 @@ export async function GET(req: Request) {
     )
   }
 
-  let query = supabaseServer
-    .from("errors")
-    .select(
-      `
-      id,
-      error_text,
-      correction_text,
-      description,
-      reference_link,
-      error_status,
-      error_type,
-      created_at,
-      topics!inner (
-        id,
-        name,
-        subject_id,
-        subjects (
+  // Cria uma chave única para o cache baseada nos parâmetros
+  const cacheKey = `errors-${user_id}-${subject_id || 'all'}-${topic_ids.sort().join(',')}-${error_types.sort().join(',')}-${error_statuses.sort().join(',')}`
+
+  // Cache por 1 minuto (dados mais dinâmicos)
+  const getCachedErrors = unstable_cache(
+    async (
+      userId: string,
+      topicIds: string[],
+      subjectId: string | null,
+      errorStatuses: string[],
+      errorTypes: string[]
+    ) => {
+      let query = supabaseServer
+        .from("errors")
+        .select(
+          `
           id,
-          name
+          error_text,
+          correction_text,
+          description,
+          reference_link,
+          error_status,
+          error_type,
+          created_at,
+          topics!inner (
+            id,
+            name,
+            subject_id,
+            subjects (
+              id,
+              name
+            )
+          )
+        `
         )
-      )
-    `
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+
+      if (topicIds.length > 0) {
+        query = query.in("topic_id", topicIds)
+      }
+
+      if (subjectId) {
+        query = query.eq("topics.subject_id", subjectId)
+      }
+
+      if (errorStatuses.length > 0) {
+        query = query.in("error_status", errorStatuses)
+      }
+
+      if (errorTypes.length > 0) {
+        query = query.in("error_type", errorTypes)
+      }
+
+      const { data, error } = await query
+
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      return data ?? []
+    },
+    ["errors"],
+    {
+      revalidate: 60, // 1 minuto
+      tags: [`errors-${user_id}`, subject_id ? `errors-subject-${subject_id}` : 'errors-all'],
+    }
+  )
+
+  try {
+    const data = await getCachedErrors(
+      user_id,
+      topic_ids,
+      subject_id,
+      error_statuses,
+      error_types
     )
-    .eq("user_id", user_id)
-    .order("created_at", { ascending: false })
-
-  if (topic_ids.length > 0) {
-    query = query.in("topic_id", topic_ids)
-  }
-
-  if (subject_id) {
-    query = query.eq("topics.subject_id", subject_id)
-  }
-
-  if (error_statuses.length > 0) {
-    query = query.in("error_status", error_statuses)
-  }
-
-  if (error_types.length > 0) {
-    query = query.in("error_type", error_types)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
+    return NextResponse.json(data)
+  } catch (error: any) {
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
     )
   }
-
-  return NextResponse.json(data ?? [])
 }
 
 /* =========================
    POST /api/errors
 ========================= */
 export async function POST(req: Request) {
+  const { revalidateTag } = await import("next/cache")
   const body = await req.json()
 
   const {
@@ -97,6 +131,13 @@ export async function POST(req: Request) {
       { status: 400 }
     )
   }
+
+  // Busca o subject_id antes de inserir para revalidar o cache correto
+  const { data: topic } = await supabaseServer
+    .from("topics")
+    .select("subject_id")
+    .eq("id", topic_id)
+    .single()
 
   const { error } = await supabaseServer
     .from("errors")
@@ -119,6 +160,13 @@ export async function POST(req: Request) {
       { status: 500 }
     )
   }
+
+  // Revalida o cache após inserção
+  revalidateTag(`errors-${user_id}`)
+  if (topic?.subject_id) {
+    revalidateTag(`errors-subject-${topic.subject_id}`)
+  }
+  revalidateTag('errors-all')
 
   return NextResponse.json({ success: true })
 }

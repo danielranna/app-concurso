@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { revalidateTag } from "next/cache"
 
 /* =========================
    DELETE /api/errors/:id
@@ -17,6 +18,13 @@ export async function DELETE(
     )
   }
 
+  // Busca user_id e subject_id antes de deletar para revalidar o cache
+  const { data: errorData } = await supabaseServer
+    .from("errors")
+    .select("user_id, topics!inner(subject_id)")
+    .eq("id", id)
+    .single()
+
   const { error } = await supabaseServer
     .from("errors")
     .delete()
@@ -27,6 +35,15 @@ export async function DELETE(
       { error: error.message },
       { status: 500 }
     )
+  }
+
+  // Revalida o cache após deleção
+  if (errorData?.user_id) {
+    revalidateTag(`errors-${errorData.user_id}`)
+    revalidateTag('errors-all')
+  }
+  if (errorData?.topics && Array.isArray(errorData.topics) && errorData.topics[0]?.subject_id) {
+    revalidateTag(`errors-subject-${errorData.topics[0].subject_id}`)
   }
 
   return NextResponse.json({ success: true })
@@ -67,6 +84,20 @@ export async function PUT(
     )
   }
 
+  // Busca user_id e subject_id antes de atualizar para revalidar o cache
+  const { data: oldError } = await supabaseServer
+    .from("errors")
+    .select("user_id, topics!inner(subject_id)")
+    .eq("id", id)
+    .single()
+
+  // Busca o novo subject_id se o topic_id mudou
+  const { data: newTopic } = await supabaseServer
+    .from("topics")
+    .select("subject_id")
+    .eq("id", topic_id)
+    .single()
+
   const { error } = await supabaseServer
     .from("errors")
     .update({
@@ -85,6 +116,18 @@ export async function PUT(
       { error: error.message },
       { status: 500 }
     )
+  }
+
+  // Revalida o cache após atualização
+  if (oldError?.user_id) {
+    revalidateTag(`errors-${oldError.user_id}`)
+    revalidateTag('errors-all')
+  }
+  if (oldError?.topics && Array.isArray(oldError.topics) && oldError.topics[0]?.subject_id) {
+    revalidateTag(`errors-subject-${oldError.topics[0].subject_id}`)
+  }
+  if (newTopic?.subject_id && newTopic.subject_id !== oldError?.topics?.[0]?.subject_id) {
+    revalidateTag(`errors-subject-${newTopic.subject_id}`)
   }
 
   return NextResponse.json({ success: true })

@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Trash2, LogOut } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { useDataCache } from "@/contexts/DataCacheContext"
 
 type Subject = {
   id: string
@@ -28,6 +29,7 @@ type Props = {
 
 export default function SettingsModal({ open, onClose, userId }: Props) {
   const router = useRouter()
+  const cache = useDataCache()
   const [tab, setTab] = useState<"subjects" | "topics" | "errorTypes" | "status">("subjects")
 
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -47,8 +49,8 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
   /* ---------- LOADERS ---------- */
 
   async function loadSubjects() {
-    const res = await fetch(`/api/subjects?user_id=${userId}`)
-    setSubjects(await res.json())
+    const data = await cache.getSubjects(userId)
+    setSubjects(data)
   }
 
   async function loadTopics(subjectId: string) {
@@ -59,45 +61,13 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
   }
 
   async function loadErrorTypes() {
-    try {
-      const res = await fetch(`/api/error-types?user_id=${userId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setErrorTypes(data ?? [])
-      } else {
-        console.error("Erro ao carregar tipos de erro:", res.status)
-        setErrorTypes([])
-      }
-    } catch (error) {
-      console.error("Erro ao carregar tipos de erro:", error)
-      setErrorTypes([])
-    }
+    const data = await cache.getErrorTypes(userId)
+    setErrorTypes(data ?? [])
   }
 
   async function loadErrorStatuses() {
-    try {
-      const res = await fetch(`/api/error-statuses?user_id=${userId}`)
-      if (res.ok) {
-        const data = await res.json()
-        // Garante que sempre temos array de objetos com id e name
-        const statuses = (data ?? []).map((item: any, index: number) => {
-          if (typeof item === 'string') {
-            return { id: `status-${index}`, name: item, color: null }
-          }
-          return { 
-            id: item.id || `status-${index}`, 
-            name: item.name || item,
-            color: item.color || null
-          }
-        })
-        setErrorStatuses(statuses)
-      } else {
-        setErrorStatuses([])
-      }
-    } catch (error) {
-      console.error("Erro ao carregar status de erro:", error)
-      setErrorStatuses([])
-    }
+    const data = await cache.getErrorStatuses(userId)
+    setErrorStatuses(data)
   }
 
   useEffect(() => {
@@ -120,6 +90,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     })
 
     setNewSubject("")
+    cache.invalidateSubjects(userId)
     loadSubjects()
   }
 
@@ -127,6 +98,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     if (!confirm("Deseja realmente excluir esta matéria?")) return
 
     await fetch(`/api/subjects/${id}`, { method: "DELETE" })
+    cache.invalidateSubjects(userId)
     loadSubjects()
   }
 
@@ -168,6 +140,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     })
 
     setNewErrorType("")
+    cache.invalidateErrorTypes(userId)
     loadErrorTypes()
   }
 
@@ -175,6 +148,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     if (!confirm("Deseja realmente excluir este tipo de erro?")) return
 
     await fetch(`/api/error-types/${id}`, { method: "DELETE" })
+    cache.invalidateErrorTypes(userId)
     loadErrorTypes()
   }
 
@@ -190,6 +164,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     })
 
     setNewErrorStatus("")
+    cache.invalidateErrorStatuses(userId)
     loadErrorStatuses()
   }
 
@@ -197,6 +172,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     if (!confirm("Deseja realmente excluir este status?")) return
 
     await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
+    cache.invalidateErrorStatuses(userId)
     loadErrorStatuses()
   }
 
@@ -229,6 +205,10 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
         alert("Erro ao salvar cor: " + (error.error || "Erro desconhecido"))
         return
       }
+
+      // Invalida o cache após atualizar a cor
+      cache.invalidateErrorStatuses(userId)
+      loadErrorStatuses()
 
       const result = await res.json()
       console.log("✅ Cor salva com sucesso:", result)

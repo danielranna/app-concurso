@@ -7,6 +7,7 @@
     import AddErrorModal from "@/components/AddErrorModal"
     import ErrorsByTopicChart from "@/components/ErrorsByTopicChart"
     import { ArrowLeft, Filter, Eye, Plus } from "lucide-react"
+    import { useDataCache } from "@/contexts/DataCacheContext"
 
     type ErrorItem = {
     id: string
@@ -31,6 +32,7 @@
     export default function SubjectPage() {
     const params = useParams()
     const router = useRouter()
+    const cache = useDataCache()
     const subjectId = params.id as string
 
     const [mounted, setMounted] = useState(false)
@@ -100,44 +102,13 @@
     }
 
     async function loadErrorTypes(uid: string) {
-        try {
-            const res = await fetch(`/api/error-types?user_id=${uid}`)
-            if (res.ok) {
-                const data = await res.json()
-                setErrorTypes(data ?? [])
-            } else {
-                console.error("Erro ao carregar tipos de erro:", res.status)
-                setErrorTypes([])
-            }
-        } catch (error) {
-            console.error("Erro ao carregar tipos de erro:", error)
-            setErrorTypes([])
-        }
+        const data = await cache.getErrorTypes(uid)
+        setErrorTypes(data ?? [])
     }
 
     async function loadErrorStatuses(uid: string) {
-        try {
-            const res = await fetch(`/api/error-statuses?user_id=${uid}`)
-            if (res.ok) {
-                const data = await res.json()
-                const statuses = data.map((item: any, index: number) => {
-                    if (typeof item === 'string') {
-                        return { id: `status-${index}`, name: item, color: null }
-                    }
-                    return { 
-                        id: item.id || `status-${index}`, 
-                        name: item.name || item,
-                        color: item.color || null
-                    }
-                })
-                setErrorStatuses(statuses)
-            } else {
-                setErrorStatuses([])
-            }
-        } catch (error) {
-            console.error("Erro ao carregar status de erro:", error)
-            setErrorStatuses([])
-        }
+        const data = await cache.getErrorStatuses(uid)
+        setErrorStatuses(data)
     }
 
     /* =====================
@@ -146,18 +117,13 @@
     async function loadErrors(uid: string) {
         setLoading(true)
 
-        const params = new URLSearchParams({
-        user_id: uid,
-        subject_id: subjectId
+        const data = await cache.getErrors(uid, {
+            subject_id: subjectId,
+            topic_ids: selectedTopicIds.length > 0 ? selectedTopicIds : undefined,
+            error_types: selectedErrorTypes.length > 0 ? selectedErrorTypes : undefined,
+            error_statuses: selectedStatuses.length > 0 ? selectedStatuses : undefined,
         })
 
-        selectedTopicIds.forEach(id => params.append("topic_id", id))
-        selectedErrorTypes.forEach(type => params.append("error_type", type))
-        selectedStatuses.forEach(status => params.append("error_status", status))
-
-        const res = await fetch(`/api/errors?${params.toString()}`)
-
-        const data = await res.json()
         setErrors(data ?? [])
         setLoading(false)
     }
@@ -192,6 +158,7 @@
         })
 
         if (res.ok) {
+            cache.invalidateErrors(userId!, subjectId)
             loadErrors(userId!)
         }
     }
@@ -535,7 +502,8 @@
                         })
                         
                         if (res.ok) {
-                            // Recarrega erros e status para garantir que as cores estejam atualizadas
+                            // Invalida o cache e recarrega erros e status
+                            cache.invalidateErrors(userId!, subjectId)
                             await Promise.all([
                                 loadErrors(userId!),
                                 loadErrorStatuses(userId!)
@@ -556,6 +524,7 @@
             }}
             initialData={editingError}
             onSuccess={() => {
+                cache.invalidateErrors(userId!, subjectId)
                 loadErrors(userId!)
                 loadErrorTypes(userId!)
                 loadErrorStatuses(userId!)

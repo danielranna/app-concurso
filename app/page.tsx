@@ -10,6 +10,7 @@ import WeekTab from "@/components/WeekTab"
 import TrendTab from "@/components/TrendTab"
 import HistoryTab from "@/components/HistoryTab"
 import { Plus, Settings } from "lucide-react"
+import { useDataCache } from "@/contexts/DataCacheContext"
 
 type Subject = {
   id: string
@@ -31,6 +32,7 @@ type Error = {
 
 export default function Home() {
   const router = useRouter()
+  const cache = useDataCache()
 
   const [isAddErrorOpen, setIsAddErrorOpen] = useState(false)
   const [openSettings, setOpenSettings] = useState(false)
@@ -54,15 +56,13 @@ export default function Home() {
 
   // 📚 MATÉRIAS
   async function loadSubjects(user_id: string) {
-    const res = await fetch(`/api/subjects?user_id=${user_id}`)
-    const data = await res.json()
+    const data = await cache.getSubjects(user_id)
     setSubjects(data)
   }
 
   // 📊 ERROS (para os gráficos)
   async function loadErrors(user_id: string) {
-    const res = await fetch(`/api/errors?user_id=${user_id}`)
-    const data = await res.json()
+    const data = await cache.getErrors(user_id)
     setErrors(data ?? [])
   }
 
@@ -134,6 +134,7 @@ export default function Home() {
         onClose={() => setIsAddErrorOpen(false)}
         onSuccess={() => {
           if (userId) {
+            cache.invalidateErrors(userId)
             loadErrors(userId)
           }
         }}
@@ -144,6 +145,7 @@ export default function Home() {
           open={openSettings}
           onClose={() => {
             setOpenSettings(false)
+            cache.invalidateSubjects(userId)
             loadSubjects(userId)
           }}
           userId={userId}

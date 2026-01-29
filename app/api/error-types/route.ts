@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { unstable_cache } from "next/cache"
 
 /* =========================
    GET /api/error-types
@@ -16,38 +17,58 @@ export async function GET(req: Request) {
     )
   }
 
-  // Tenta buscar da tabela error_types primeiro
-  const { data: typesData, error: typesError } = await supabaseServer
-    .from("error_types")
-    .select("*")
-    .eq("user_id", user_id)
-    .order("created_at", { ascending: true })
+  // Cache por 5 minutos
+  const getCachedErrorTypes = unstable_cache(
+    async (userId: string) => {
+      // Tenta buscar da tabela error_types primeiro
+      const { data: typesData, error: typesError } = await supabaseServer
+        .from("error_types")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true })
 
-  if (!typesError && typesData && typesData.length > 0) {
-    return NextResponse.json(typesData)
+      if (!typesError && typesData && typesData.length > 0) {
+        return typesData
+      }
+
+      // Se não tem tabela ou está vazia, busca valores únicos da tabela errors
+      const { data: errorsData, error: errorsError } = await supabaseServer
+        .from("errors")
+        .select("error_type")
+        .eq("user_id", userId)
+
+      if (errorsError) {
+        console.error("Erro ao buscar tipos de erro:", errorsError.message)
+        return []
+      }
+
+      // Extrai valores únicos de error_type
+      const uniqueTypes = Array.from(
+        new Set(errorsData?.map(item => item.error_type).filter(Boolean) || [])
+      ).map((name, index) => ({
+        id: `type-${index}`,
+        name: name as string,
+        user_id: userId
+      }))
+
+      return uniqueTypes
+    },
+    ["error-types"],
+    {
+      revalidate: 300, // 5 minutos
+      tags: [`error-types-${user_id}`],
+    }
+  )
+
+  try {
+    const data = await getCachedErrorTypes(user_id)
+    return NextResponse.json(data)
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
   }
-
-  // Se não tem tabela ou está vazia, busca valores únicos da tabela errors
-  const { data: errorsData, error: errorsError } = await supabaseServer
-    .from("errors")
-    .select("error_type")
-    .eq("user_id", user_id)
-
-  if (errorsError) {
-    console.error("Erro ao buscar tipos de erro:", errorsError.message)
-    return NextResponse.json([])
-  }
-
-  // Extrai valores únicos de error_type
-  const uniqueTypes = Array.from(
-    new Set(errorsData?.map(item => item.error_type).filter(Boolean) || [])
-  ).map((name, index) => ({
-    id: `type-${index}`,
-    name: name as string,
-    user_id
-  }))
-
-  return NextResponse.json(uniqueTypes)
 }
 
 /* =========================
@@ -55,6 +76,7 @@ export async function GET(req: Request) {
    Cria um novo tipo de erro na tabela error_types
 ========================= */
 export async function POST(req: Request) {
+  const { revalidateTag } = await import("next/cache")
   const body = await req.json()
   const { user_id, name } = body
 
@@ -85,6 +107,9 @@ export async function POST(req: Request) {
       message: "Tipo será criado automaticamente ao usar em um erro" 
     })
   }
+
+  // Revalida o cache após inserção
+  revalidateTag(`error-types-${user_id}`)
 
   return NextResponse.json({ success: true, data })
 }

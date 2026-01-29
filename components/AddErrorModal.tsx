@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import RichTextEditor from "@/components/RichTextEditor"
+import { useDataCache } from "@/contexts/DataCacheContext"
 
 type Subject = {
   id: string
@@ -49,6 +50,7 @@ export default function AddErrorModal({
 }: Props) {
   console.log("🟢 RENDER MODAL", { isOpen, initialData })
 
+  const cache = useDataCache()
   const [userId, setUserId] = useState<string | null>(null)
 
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -88,39 +90,12 @@ export default function AddErrorModal({
 
     setUserId(user.id)
 
-    const [subjectsRes, errorTypesRes, errorStatusesRes] = await Promise.all([
-      fetch(`/api/subjects?user_id=${user.id}`),
-      fetch(`/api/error-types?user_id=${user.id}`).catch(() => 
-        new Response(JSON.stringify([]), { status: 200 })
-      ),
-      fetch(`/api/error-statuses?user_id=${user.id}`).catch(() => 
-        new Response(JSON.stringify([]), { status: 200 })
-      )
+    // Usa o cache para carregar os dados
+    const [subjectsData, errorTypesData, errorStatusesData] = await Promise.all([
+      cache.getSubjects(user.id),
+      cache.getErrorTypes(user.id),
+      cache.getErrorStatuses(user.id)
     ])
-
-    const subjectsData = await subjectsRes.json()
-    let errorTypesData = []
-    let errorStatusesData = []
-    
-    if (errorTypesRes.ok) {
-      errorTypesData = await errorTypesRes.json()
-    } else {
-      console.error("Erro ao carregar tipos de erro:", errorTypesRes.status)
-      errorTypesData = []
-    }
-
-    if (errorStatusesRes.ok) {
-      const statusesData = await errorStatusesRes.json()
-      errorStatusesData = statusesData.map((item: any, index: number) => {
-        if (typeof item === 'string') {
-          return { id: `status-${index}`, name: item }
-        }
-        return { id: item.id || `status-${index}`, name: item.name || item }
-      })
-    } else {
-      // Se não conseguir carregar, retorna vazio (sem status padrão)
-      errorStatusesData = []
-    }
 
     console.log("📚 subjects:", subjectsData)
     console.log("📋 error types:", errorTypesData)
@@ -314,32 +289,16 @@ export default function AddErrorModal({
       return
     }
 
-    // Recarrega tipos e status após criar/editar erro
+    // Invalida o cache após criar/editar erro
     if (userId) {
-      const [errorTypesRes, errorStatusesRes] = await Promise.all([
-        fetch(`/api/error-types?user_id=${userId}`).catch(() => 
-          new Response(JSON.stringify([]), { status: 200 })
-        ),
-        fetch(`/api/error-statuses?user_id=${userId}`).catch(() => 
-          new Response(JSON.stringify([]), { status: 200 })
-        )
+      cache.invalidateErrors(userId, initialData?.subject_id)
+      // Recarrega tipos e status do cache (que pode ter sido atualizado pelo servidor)
+      const [errorTypesData, errorStatusesData] = await Promise.all([
+        cache.getErrorTypes(userId),
+        cache.getErrorStatuses(userId)
       ])
-      
-      if (errorTypesRes.ok) {
-        const errorTypesData = await errorTypesRes.json()
-        setErrorTypes(errorTypesData ?? [])
-      }
-      
-      if (errorStatusesRes.ok) {
-        const statusesData = await errorStatusesRes.json()
-        const statuses = statusesData.map((item: any, index: number) => {
-          if (typeof item === 'string') {
-            return { id: `status-${index}`, name: item }
-          }
-          return { id: item.id || `status-${index}`, name: item.name || item }
-        })
-        setErrorStatuses(statuses)
-      }
+      setErrorTypes(errorTypesData ?? [])
+      setErrorStatuses(errorStatusesData)
     }
 
     resetForm()

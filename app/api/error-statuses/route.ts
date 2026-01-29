@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { unstable_cache } from "next/cache"
 
 /* =========================
    GET /api/error-statuses
@@ -16,42 +17,62 @@ export async function GET(req: Request) {
     )
   }
 
-  // Tenta buscar da tabela error_statuses primeiro
-  const { data: statusesData, error: statusesError } = await supabaseServer
-    .from("error_statuses")
-    .select("*")
-    .eq("user_id", user_id)
-    .order("created_at", { ascending: true })
+  // Cache por 5 minutos
+  const getCachedErrorStatuses = unstable_cache(
+    async (userId: string) => {
+      // Tenta buscar da tabela error_statuses primeiro
+      const { data: statusesData, error: statusesError } = await supabaseServer
+        .from("error_statuses")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true })
 
-  if (!statusesError && statusesData && statusesData.length > 0) {
-    return NextResponse.json(statusesData.map(s => ({ 
-      id: s.id, 
-      name: s.name,
-      color: s.color || null
-    })))
-  }
+      if (!statusesError && statusesData && statusesData.length > 0) {
+        return statusesData.map(s => ({ 
+          id: s.id, 
+          name: s.name,
+          color: s.color || null
+        }))
+      }
 
-  // Se não tem tabela ou está vazia, busca valores únicos da tabela errors
-  const { data: errorsData, error: errorsError } = await supabaseServer
-    .from("errors")
-    .select("error_status")
-    .eq("user_id", user_id)
+      // Se não tem tabela ou está vazia, busca valores únicos da tabela errors
+      const { data: errorsData, error: errorsError } = await supabaseServer
+        .from("errors")
+        .select("error_status")
+        .eq("user_id", userId)
 
-  if (errorsError) {
-    console.error("Erro ao buscar status de erro:", errorsError.message)
-    return NextResponse.json([])
-  }
+      if (errorsError) {
+        console.error("Erro ao buscar status de erro:", errorsError.message)
+        return []
+      }
 
-  // Extrai valores únicos de error_status (sem adicionar status padrão)
-  const uniqueStatuses = Array.from(
-    new Set(errorsData?.map(item => item.error_status).filter(Boolean) || [])
+      // Extrai valores únicos de error_status (sem adicionar status padrão)
+      const uniqueStatuses = Array.from(
+        new Set(errorsData?.map(item => item.error_status).filter(Boolean) || [])
+      )
+
+      // Retorna apenas os status que realmente existem (sem adicionar padrão)
+      return uniqueStatuses.map((name, index) => ({
+        id: `status-${index}`,
+        name
+      }))
+    },
+    ["error-statuses"],
+    {
+      revalidate: 300, // 5 minutos
+      tags: [`error-statuses-${user_id}`],
+    }
   )
 
-  // Retorna apenas os status que realmente existem (sem adicionar padrão)
-  return NextResponse.json(uniqueStatuses.map((name, index) => ({
-    id: `status-${index}`,
-    name
-  })))
+  try {
+    const data = await getCachedErrorStatuses(user_id)
+    return NextResponse.json(data)
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
 }
 
 /* =========================
@@ -59,6 +80,7 @@ export async function GET(req: Request) {
    Cria um novo status na tabela error_statuses
 ========================= */
 export async function POST(req: Request) {
+  const { revalidateTag } = await import("next/cache")
   const body = await req.json()
   const { user_id, name, color } = body
 
@@ -90,6 +112,9 @@ export async function POST(req: Request) {
       message: "Status será criado automaticamente ao usar em um erro" 
     })
   }
+
+  // Revalida o cache após inserção
+  revalidateTag(`error-statuses-${user_id}`)
 
   return NextResponse.json({ success: true, data })
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { revalidateTag } from "next/cache"
 
 /* =========================
    PUT /api/error-statuses/:id
@@ -27,6 +28,13 @@ export async function PUT(
     )
   }
 
+  // Busca o user_id antes de atualizar para revalidar o cache
+  const { data: status } = await supabaseServer
+    .from("error_statuses")
+    .select("user_id")
+    .eq("id", id)
+    .single()
+
   const { data, error } = await supabaseServer
     .from("error_statuses")
     .update({ color: color || null })
@@ -40,6 +48,11 @@ export async function PUT(
       { error: error.message },
       { status: 500 }
     )
+  }
+
+  // Revalida o cache após atualização
+  if (status?.user_id) {
+    revalidateTag(`error-statuses-${status.user_id}`)
   }
 
   return NextResponse.json({ success: true, data })
@@ -69,6 +82,13 @@ export async function DELETE(
     )
   }
 
+  // Busca o user_id antes de deletar para revalidar o cache
+  const { data: status } = await supabaseServer
+    .from("error_statuses")
+    .select("user_id")
+    .eq("id", id)
+    .single()
+
   const { error } = await supabaseServer
     .from("error_statuses")
     .delete()
@@ -80,6 +100,11 @@ export async function DELETE(
       { error: error.message },
       { status: 500 }
     )
+  }
+
+  // Revalida o cache após deleção
+  if (status?.user_id) {
+    revalidateTag(`error-statuses-${status.user_id}`)
   }
 
   return NextResponse.json({ success: true })

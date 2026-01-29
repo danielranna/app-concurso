@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { unstable_cache } from "next/cache"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -14,24 +15,42 @@ export async function GET(req: Request) {
     )
   }
 
-  const { data, error } = await supabaseServer
-    .from("topics")
-    .select("*")
-    .eq("user_id", user_id)
-    .eq("subject_id", subject_id)
-    .order("created_at", { ascending: true })
+  // Cache por 5 minutos
+  const getCachedTopics = unstable_cache(
+    async (userId: string, subjectId: string) => {
+      const { data, error } = await supabaseServer
+        .from("topics")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("subject_id", subjectId)
+        .order("created_at", { ascending: true })
 
-  if (error) {
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      return data
+    },
+    ["topics"],
+    {
+      revalidate: 300, // 5 minutos
+      tags: [`topics-${user_id}-${subject_id}`],
+    }
+  )
+
+  try {
+    const data = await getCachedTopics(user_id, subject_id)
+    return NextResponse.json(data)
+  } catch (error: any) {
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
     )
   }
-
-  return NextResponse.json(data)
 }
 
 export async function POST(req: Request) {
+  const { revalidateTag } = await import("next/cache")
   const body = await req.json()
   const { user_id, subject_id, name } = body
 
@@ -58,6 +77,9 @@ export async function POST(req: Request) {
       { status: 500 }
     )
   }
+
+  // Revalida o cache após inserção
+  revalidateTag(`topics-${user_id}-${subject_id}`)
 
   return NextResponse.json({ success: true })
 }
