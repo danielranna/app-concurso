@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
 
@@ -71,6 +71,11 @@ function ResumoPeriodoContent() {
   const toParam = searchParams?.get("to") ?? ""
   const [customFrom, setCustomFrom] = useState(fromParam || getDefaultCustomRange().from)
   const [customTo, setCustomTo] = useState(toParam || getDefaultCustomRange().to)
+
+  // Dropdowns e popup
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false)
+  const [showPeriodDropdown, setShowPeriodDropdown] = useState(false)
+  const [showDatePicker, setShowDatePicker] = useState(false)
 
   async function loadUser() {
     const {
@@ -291,10 +296,50 @@ function ResumoPeriodoContent() {
     return base
   }
 
+  // Labels para os dropdowns
+  const typeOptions = [
+    { value: "total" as const, label: "Total", count: stats.total, color: "slate" },
+    { value: "critical" as const, label: "Críticos", count: stats.critical, color: "red" },
+    { value: "reincident" as const, label: "Reincidentes", count: stats.reincident, color: "orange" },
+    { value: "learned" as const, label: "Consolidados", count: stats.learned, color: "green" }
+  ]
+
+  const periodOptions = [
+    { value: "this_week" as const, label: "Esta semana" },
+    { value: "last_week" as const, label: "Última semana" },
+    { value: "accumulated" as const, label: "Acumulado" },
+    { value: "custom" as const, label: "Entre datas" }
+  ]
+
+  const selectedTypeOption = typeOptions.find(t => t.value === filterType) || typeOptions[0]
+  const selectedPeriodOption = periodOptions.find(p => p.value === period) || periodOptions[0]
+
+  const getTypeColorClasses = (color: string, selected: boolean) => {
+    if (color === "red") return selected ? "bg-red-600 text-white" : "text-red-600 hover:bg-red-50"
+    if (color === "orange") return selected ? "bg-orange-600 text-white" : "text-orange-600 hover:bg-orange-50"
+    if (color === "green") return selected ? "bg-green-600 text-white" : "text-green-600 hover:bg-green-50"
+    return selected ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"
+  }
+
+  const handlePeriodSelect = (value: Period) => {
+    setShowPeriodDropdown(false)
+    if (value === "custom") {
+      setShowDatePicker(true)
+    } else {
+      updateUrlPeriod(value)
+    }
+  }
+
+  const handleApplyDates = () => {
+    setShowDatePicker(false)
+    applyCustomRange()
+  }
+
   if (!userId) return null
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6">
+      {/* Header com Voltar e Título */}
       <header className="mb-6">
         <button
           onClick={() => router.back()}
@@ -308,138 +353,173 @@ function ResumoPeriodoContent() {
         </h1>
       </header>
 
-      {/* Filtros por tipo */}
-      <div className="mb-3 flex flex-wrap gap-2">
-        <button
-          onClick={() => updateUrlType("total")}
-          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
-            filterType === "total"
-              ? "bg-slate-900 text-white"
-              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-          }`}
-        >
-          Total ({stats.total})
-        </button>
-        <button
-          onClick={() => updateUrlType("critical")}
-          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
-            filterType === "critical"
-              ? "bg-red-600 text-white"
-              : "bg-white text-red-600 border border-red-200 hover:bg-red-50"
-          }`}
-        >
-          Críticos ({stats.critical})
-        </button>
-        <button
-          onClick={() => updateUrlType("reincident")}
-          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
-            filterType === "reincident"
-              ? "bg-orange-600 text-white"
-              : "bg-white text-orange-600 border border-orange-200 hover:bg-orange-50"
-          }`}
-        >
-          Reincidentes ({stats.reincident})
-        </button>
-        <button
-          onClick={() => updateUrlType("learned")}
-          className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition sm:px-4 ${
-            filterType === "learned"
-              ? "bg-green-600 text-white"
-              : "bg-white text-green-600 border border-green-200 hover:bg-green-50"
-          }`}
-        >
-          Consolidados ({stats.learned})
-        </button>
-      </div>
-
-      {/* Filtros por período */}
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-2">
+      {/* Filtros compactos: Erros + Período na mesma linha */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        {/* Dropdown de Tipo de Erro */}
+        <div className="relative">
           <button
-            onClick={() => updateUrlPeriod("this_week")}
-            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              period === "this_week"
-                ? "bg-slate-800 text-white"
-                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-            }`}
+            onClick={() => {
+              setShowTypeDropdown(!showTypeDropdown)
+              setShowPeriodDropdown(false)
+            }}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
-            Esta semana
+            <span className="text-slate-500">Erros:</span>
+            <span className={`rounded px-2 py-0.5 text-xs font-semibold ${getTypeColorClasses(selectedTypeOption.color, true)}`}>
+              {selectedTypeOption.label} ({selectedTypeOption.count})
+            </span>
+            <ChevronDown className={`h-4 w-4 text-slate-400 transition ${showTypeDropdown ? "rotate-180" : ""}`} />
           </button>
-          <button
-            onClick={() => updateUrlPeriod("last_week")}
-            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              period === "last_week"
-                ? "bg-slate-800 text-white"
-                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            Última semana
-          </button>
-          <button
-            onClick={() => updateUrlPeriod("accumulated")}
-            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              period === "accumulated"
-                ? "bg-slate-800 text-white"
-                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            Acumulado
-          </button>
-          <button
-            onClick={() => updateUrlPeriod("custom")}
-            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              period === "custom"
-                ? "bg-slate-800 text-white"
-                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            <CalendarRange className="h-4 w-4 shrink-0" />
-            <span className="whitespace-nowrap">Entre datas</span>
-          </button>
+          {showTypeDropdown && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowTypeDropdown(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                {typeOptions.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => {
+                      updateUrlType(option.value)
+                      setShowTypeDropdown(false)
+                    }}
+                    className={`flex w-full items-center justify-between px-3 py-2 text-sm transition ${
+                      filterType === option.value ? "bg-slate-50" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className={getTypeColorClasses(option.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")}>
+                      {option.label}
+                    </span>
+                    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${getTypeColorClasses(option.color, filterType === option.value)}`}>
+                      {option.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        {period === "custom" && (
-          <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3 sm:w-auto sm:border-0 sm:bg-transparent sm:p-0">
-            <input
-              type="date"
-              value={customFrom}
-              onChange={e => setCustomFrom(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 sm:flex-initial"
-            />
-            <span className="hidden text-slate-500 text-sm sm:inline">até</span>
-            <input
-              type="date"
-              value={customTo}
-              onChange={e => setCustomTo(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 sm:flex-initial"
-            />
-            <button
-              onClick={applyCustomRange}
-              className="w-full rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 sm:w-auto"
-            >
-              Aplicar
-            </button>
-          </div>
-        )}
-      </div>
 
-      <div className="mb-4 flex flex-wrap justify-end gap-2">
+        {/* Dropdown de Período */}
+        <div className="relative">
+          <button
+            onClick={() => {
+              setShowPeriodDropdown(!showPeriodDropdown)
+              setShowTypeDropdown(false)
+            }}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <span className="text-slate-500">Período:</span>
+            <span className="font-semibold text-slate-800">
+              {period === "custom" && fromParam && toParam
+                ? `${fromParam} a ${toParam}`
+                : selectedPeriodOption.label}
+            </span>
+            {period === "custom" && <CalendarRange className="h-4 w-4 text-slate-500" />}
+            <ChevronDown className={`h-4 w-4 text-slate-400 transition ${showPeriodDropdown ? "rotate-180" : ""}`} />
+          </button>
+          {showPeriodDropdown && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowPeriodDropdown(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                {periodOptions.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => handlePeriodSelect(option.value)}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition ${
+                      period === option.value ? "bg-slate-50 font-semibold text-slate-900" : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {option.value === "custom" && <CalendarRange className="h-4 w-4" />}
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Botão editar datas se custom ativo */}
+        {period === "custom" && (
+          <button
+            onClick={() => setShowDatePicker(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+          >
+            <CalendarRange className="h-4 w-4" />
+            Editar datas
+          </button>
+        )}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Expandir/Recolher Tudo */}
         <button
           onClick={() => setAllCardsExpanded(!allCardsExpanded)}
-          className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
         >
           {allCardsExpanded ? (
             <>
               <ChevronUp className="h-4 w-4" />
-              Recolher Tudo
+              <span className="hidden sm:inline">Recolher</span>
             </>
           ) : (
             <>
               <ChevronDown className="h-4 w-4" />
-              Expandir Tudo
+              <span className="hidden sm:inline">Expandir</span>
             </>
           )}
         </button>
       </div>
+
+      {/* Popup para selecionar datas */}
+      {showDatePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-800">Selecionar período</h3>
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-600">Data início</label>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={e => setCustomFrom(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-600">Data fim</label>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={e => setCustomTo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowDatePicker(false)}
+                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleApplyDates}
+                  className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {filteredErrors.length > 0 ? (
