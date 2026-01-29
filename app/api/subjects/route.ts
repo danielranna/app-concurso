@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   }
 
   // Revalida o cache após inserção
-  revalidateTag(`subjects-${user_id}`)
+  revalidateTag(`subjects-${user_id}`, "max")
 
   return NextResponse.json({ success: true })
 }

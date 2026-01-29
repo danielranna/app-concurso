@@ -109,7 +109,7 @@ export async function POST(req: Request) {
   }
 
   // Revalida o cache após inserção
-  revalidateTag(`error-types-${user_id}`)
+  revalidateTag(`error-types-${user_id}`, "max")
 
   return NextResponse.json({ success: true, data })
 }

@@ -39,7 +39,7 @@ export async function DELETE(
   // Revalida o cache após deleção
   if (subject?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`subjects-${subject.user_id}`)
+    revalidateTag(`subjects-${subject.user_id}`, "max")
   }
 
   return NextResponse.json({ success: true })

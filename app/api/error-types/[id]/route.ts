@@ -48,7 +48,7 @@ export async function DELETE(
   // Revalida o cache após deleção
   if (errorType?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`error-types-${errorType.user_id}`)
+    revalidateTag(`error-types-${errorType.user_id}`, "max")
   }
 
   return NextResponse.json({ success: true })

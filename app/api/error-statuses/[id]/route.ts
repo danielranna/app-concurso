@@ -52,7 +52,7 @@ export async function PUT(
   // Revalida o cache após atualização
   if (status?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`error-statuses-${status.user_id}`)
+    revalidateTag(`error-statuses-${status.user_id}`, "max")
   }
 
   return NextResponse.json({ success: true, data })
@@ -105,7 +105,7 @@ export async function DELETE(
   // Revalida o cache após deleção
   if (status?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`error-statuses-${status.user_id}`)
+    revalidateTag(`error-statuses-${status.user_id}`, "max")
   }
 
   return NextResponse.json({ success: true })

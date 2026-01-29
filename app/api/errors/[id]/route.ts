@@ -39,10 +39,10 @@ export async function DELETE(
   // Revalida o cache após deleção
   if (errorData?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`errors-${errorData.user_id}`)
-    revalidateTag('errors-all')
+    revalidateTag(`errors-${errorData.user_id}`, "max")
+    revalidateTag('errors-all', "max")
     if (errorData?.topics && Array.isArray(errorData.topics) && errorData.topics[0]?.subject_id) {
-      revalidateTag(`errors-subject-${errorData.topics[0].subject_id}`)
+      revalidateTag(`errors-subject-${errorData.topics[0].subject_id}`, "max")
     }
   }
 
@@ -121,13 +121,13 @@ export async function PUT(
   // Revalida o cache após atualização
   if (oldError?.user_id) {
     const { revalidateTag } = await import("next/cache")
-    revalidateTag(`errors-${oldError.user_id}`)
-    revalidateTag('errors-all')
+    revalidateTag(`errors-${oldError.user_id}`, "max")
+    revalidateTag('errors-all', "max")
     if (oldError?.topics && Array.isArray(oldError.topics) && oldError.topics[0]?.subject_id) {
-      revalidateTag(`errors-subject-${oldError.topics[0].subject_id}`)
+      revalidateTag(`errors-subject-${oldError.topics[0].subject_id}`, "max")
     }
     if (newTopic?.subject_id && newTopic.subject_id !== oldError?.topics?.[0]?.subject_id) {
-      revalidateTag(`errors-subject-${newTopic.subject_id}`)
+      revalidateTag(`errors-subject-${newTopic.subject_id}`, "max")
     }
   }
 
