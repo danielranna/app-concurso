@@ -247,21 +247,52 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
                     data={errorTypes}
                     cx="50%"
                     cy="50%"
-                    labelLine={true}
-                    label={(props: any) => {
-                      const { cx, cy, midAngle, innerRadius, outerRadius, percent, payload } = props
+                    labelLine={(props: any) => {
+                      const { cx, cy, midAngle, innerRadius, outerRadius, percent } = props
                       const RADIAN = Math.PI / 180
                       
-                      // Para fatias pequenas, posiciona o label bem mais longe
+                      // Calcula o ponto de início da linha (na borda externa do gráfico)
+                      const startX = cx + outerRadius * Math.cos(-midAngle * RADIAN)
+                      const startY = cy + outerRadius * Math.sin(-midAngle * RADIAN)
+                      
+                      // Calcula o ponto final da linha (fora do gráfico)
                       const isSmall = percent < 0.08
                       const isVerySmall = percent < 0.03
-                      
-                      // Aumenta o raio do label para fatias pequenas
                       const labelRadius = isVerySmall 
                         ? outerRadius + 50
                         : isSmall 
-                        ? outerRadius + 35
-                        : innerRadius + (outerRadius - innerRadius) * 0.5
+                        ? outerRadius + 40
+                        : outerRadius + 30
+                      
+                      const endX = cx + labelRadius * Math.cos(-midAngle * RADIAN)
+                      const endY = cy + labelRadius * Math.sin(-midAngle * RADIAN)
+                      
+                      return (
+                        <line
+                          x1={startX}
+                          y1={startY}
+                          x2={endX}
+                          y2={endY}
+                          stroke="#64748b"
+                          strokeWidth={1.5}
+                        />
+                      )
+                    }}
+                    label={(props: any) => {
+                      const { cx, cy, midAngle, outerRadius, percent, payload } = props
+                      const RADIAN = Math.PI / 180
+                      
+                      // SEMPRE posiciona labels FORA do gráfico
+                      // Ajusta a distância baseado no tamanho da fatia
+                      const isSmall = percent < 0.08
+                      const isVerySmall = percent < 0.03
+                      
+                      // Todos os labels ficam fora, mas com distâncias diferentes
+                      const labelRadius = isVerySmall 
+                        ? outerRadius + 50
+                        : isSmall 
+                        ? outerRadius + 40
+                        : outerRadius + 30  // Fatias maiores também ficam fora
                       
                       const x = cx + labelRadius * Math.cos(-midAngle * RADIAN)
                       const y = cy + labelRadius * Math.sin(-midAngle * RADIAN)
