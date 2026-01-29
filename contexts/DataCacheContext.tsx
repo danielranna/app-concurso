@@ -20,10 +20,17 @@ type ErrorStatus = {
 
 type Error = {
   id: string
-  created_at: string
+  error_text: string
+  correction_text: string
+  description?: string
+  reference_link?: string
   error_status?: string
   error_type?: string
+  created_at: string
   topics: {
+    id: string
+    name: string
+    subject_id: string
     subjects: {
       id: string
       name: string
