@@ -39,9 +39,14 @@ function ResumoPeriodoContent() {
   const [allCardsExpanded, setAllCardsExpanded] = useState(false)
   const [editingError, setEditingError] = useState<Error | null>(null)
 
-  // Lê o tipo da URL ou usa "total" como padrão
-  const initialType = (searchParams?.get("type") || "total") as "total" | "critical" | "reincident" | "learned"
-  const [filterType, setFilterType] = useState<"total" | "critical" | "reincident" | "learned">(initialType)
+  // Filtro: "total" ou nome do status (vindo da URL ?type=total ou ?status=NomeDoStatus)
+  const getInitialFilterType = () => {
+    const statusFromUrl = searchParams?.get("status")
+    if (statusFromUrl) return decodeURIComponent(statusFromUrl)
+    const typeFromUrl = searchParams?.get("type") || "total"
+    return typeFromUrl === "total" ? "total" : typeFromUrl
+  }
+  const [filterType, setFilterType] = useState<string>(getInitialFilterType)
 
   type Period = "this_week" | "last_week" | "accumulated" | "custom"
   const getWeekStart = (date: Date): Date => {
@@ -128,9 +133,12 @@ function ResumoPeriodoContent() {
   }, [router, searchParams, fromParam, toParam])
 
   useEffect(() => {
-    const type = searchParams?.get("type") || "total"
-    if (["total", "critical", "reincident", "learned"].includes(type)) {
-      setFilterType(type as "total" | "critical" | "reincident" | "learned")
+    const statusFromUrl = searchParams?.get("status")
+    const typeFromUrl = searchParams?.get("type") || "total"
+    if (statusFromUrl) {
+      setFilterType(decodeURIComponent(statusFromUrl))
+    } else if (typeFromUrl === "total") {
+      setFilterType("total")
     }
     const fromAll = searchParams?.get("all") === "true"
     const p = searchParams?.get("period")
@@ -172,11 +180,16 @@ function ResumoPeriodoContent() {
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
-  function updateUrlType(next: "total" | "critical" | "reincident" | "learned") {
-    setFilterType(next)
+  function updateUrlFilter(value: string) {
+    setFilterType(value)
     const params = new URLSearchParams(searchParams?.toString() || "")
-    params.delete("status")
-    params.set("type", next)
+    if (value === "total") {
+      params.delete("status")
+      params.set("type", "total")
+    } else {
+      params.delete("type")
+      params.set("status", encodeURIComponent(value))
+    }
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
@@ -216,59 +229,11 @@ function ResumoPeriodoContent() {
     })
   }, [errors, period, fromParam, toParam])
 
-  const statusParam = searchParams?.get("status") ?? ""
-
   const filteredErrors = useMemo(() => {
-    if (statusParam) {
-      const name = statusParam.toLowerCase().trim()
-      return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
-    }
     if (filterType === "total") return periodErrors
-    if (filterType === "critical") {
-      return periodErrors.filter(e => {
-        const status = (e.error_status || "").toLowerCase().trim()
-        return status === "critico" || status === "crítico" || status.includes("critic")
-      })
-    }
-    if (filterType === "learned") {
-      return periodErrors.filter(e => {
-        const status = (e.error_status || "").toLowerCase().trim()
-        return status === "consolidado" || status === "aprendido" || status === "resolvido"
-      })
-    }
-    if (filterType === "reincident") {
-      return periodErrors.filter(e => {
-        const status = (e.error_status || "").toLowerCase().trim()
-        return status === "reincidente"
-      })
-    }
-    return []
-  }, [periodErrors, filterType, statusParam])
-
-  const stats = useMemo(() => {
-    const total = periodErrors.length
-    const critical = periodErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "critico" || status === "crítico" || status.includes("critic")
-    }).length
-    const learned = periodErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "consolidado" || status === "aprendido" || status === "resolvido"
-    }).length
-    const reincidentErrors = periodErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "reincidente"
-    }).length
-    return {
-      total,
-      critical,
-      learned,
-      reincident: reincidentErrors,
-      criticalPercent: total > 0 ? Math.round((critical / total) * 100) : 0,
-      learnedPercent: total > 0 ? Math.round((learned / total) * 100) : 0,
-      reincidentsPercent: total > 0 ? Math.round((reincidentErrors / total) * 100) : 0
-    }
-  }, [periodErrors])
+    const name = filterType.toLowerCase().trim()
+    return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
+  }, [periodErrors, filterType])
 
   const getPeriodLabel = () => {
     if (period === "accumulated") return " (Acumulado)"
@@ -280,27 +245,14 @@ function ResumoPeriodoContent() {
 
   const getTitle = () => {
     const suffix = getPeriodLabel()
-    if (statusParam) {
-      return `Erros: ${decodeURIComponent(statusParam)}${suffix}`
-    }
-    switch (filterType) {
-      case "critical":
-        return `Erros Críticos${suffix}`
-      case "reincident":
-        return `Erros Reincidentes${suffix}`
-      case "learned":
-        return `Erros Consolidados${suffix}`
-      default:
-        return `Total de Erros${suffix}`
-    }
+    if (filterType === "total") return `Total de Erros${suffix}`
+    return `Erros: ${filterType}${suffix}`
   }
 
   const emptyMessage = () => {
-    const base = statusParam
-      ? `Nenhum erro com status "${decodeURIComponent(statusParam)}"`
-      : filterType === "total"
-        ? "Nenhum erro registrado"
-        : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"}`
+    const base = filterType === "total"
+      ? "Nenhum erro registrado"
+      : `Nenhum erro com status "${filterType}"`
     if (period === "accumulated") return base
     if (period === "last_week") return `${base} na última semana`
     if (period === "this_week") return `${base} nesta semana`
@@ -308,13 +260,33 @@ function ResumoPeriodoContent() {
     return base
   }
 
-  // Labels para os dropdowns
-  const typeOptions = [
-    { value: "total" as const, label: "Total", count: stats.total, color: "slate" },
-    { value: "critical" as const, label: "Críticos", count: stats.critical, color: "red" },
-    { value: "reincident" as const, label: "Reincidentes", count: stats.reincident, color: "orange" },
-    { value: "learned" as const, label: "Consolidados", count: stats.learned, color: "green" }
-  ]
+  // Opções do dropdown: Total + lista de status (com contagem e cor)
+  const typeOptions = useMemo(() => {
+    const totalOption = { value: "total", label: "Total", count: periodErrors.length, color: "slate" as string }
+    const statusOptions = (errorStatuses || []).map(s => {
+      const name = typeof s === "string" ? s : (s.name ?? "")
+      const color = typeof s === "object" && s.color ? s.color : "#64748b"
+      const count = periodErrors.filter(
+        e => (e.error_status || "").toLowerCase().trim() === name.toLowerCase().trim()
+      ).length
+      return { value: name, label: name, count, color }
+    })
+    return [totalOption, ...statusOptions]
+  }, [periodErrors, errorStatuses])
+
+  const selectedTypeOption = useMemo(() => {
+    const found = typeOptions.find(o => o.value === filterType)
+    if (found) return found
+    if (filterType !== "total") {
+      return {
+        value: filterType,
+        label: filterType,
+        count: filteredErrors.length,
+        color: "#64748b"
+      }
+    }
+    return typeOptions[0]
+  }, [typeOptions, filterType, filteredErrors.length])
 
   const periodOptions = [
     { value: "this_week" as const, label: "Esta semana" },
@@ -323,7 +295,6 @@ function ResumoPeriodoContent() {
     { value: "custom" as const, label: "Entre datas" }
   ]
 
-  const selectedTypeOption = typeOptions.find(t => t.value === filterType) || typeOptions[0]
   const selectedPeriodOption = periodOptions.find(p => p.value === period) || periodOptions[0]
 
   const getTypeColorClasses = (color: string, selected: boolean) => {
@@ -377,7 +348,10 @@ function ResumoPeriodoContent() {
             className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
             <span className="text-slate-500">Erros:</span>
-            <span className={`rounded px-2 py-0.5 text-xs font-semibold ${getTypeColorClasses(selectedTypeOption.color, true)}`}>
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${selectedTypeOption.color?.startsWith("#") ? "" : getTypeColorClasses(selectedTypeOption.color, true)}`}
+              style={selectedTypeOption.color?.startsWith("#") ? { backgroundColor: selectedTypeOption.color } : undefined}
+            >
               {selectedTypeOption.label} ({selectedTypeOption.count})
             </span>
             <ChevronDown className={`h-4 w-4 text-slate-400 transition ${showTypeDropdown ? "rotate-180" : ""}`} />
@@ -385,22 +359,28 @@ function ResumoPeriodoContent() {
           {showTypeDropdown && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowTypeDropdown(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                 {typeOptions.map(option => (
                   <button
                     key={option.value}
                     onClick={() => {
-                      updateUrlType(option.value)
+                      updateUrlFilter(option.value)
                       setShowTypeDropdown(false)
                     }}
                     className={`flex w-full items-center justify-between px-3 py-2 text-sm transition ${
                       filterType === option.value ? "bg-slate-50" : "hover:bg-slate-50"
                     }`}
                   >
-                    <span className={getTypeColorClasses(option.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")}>
+                    <span
+                      className={option.color?.startsWith("#") ? "" : getTypeColorClasses(option.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")}
+                      style={option.color?.startsWith("#") ? { color: option.color } : undefined}
+                    >
                       {option.label}
                     </span>
-                    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${getTypeColorClasses(option.color, filterType === option.value)}`}>
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${option.color?.startsWith("#") ? "" : getTypeColorClasses(option.color, filterType === option.value)}`}
+                      style={option.color?.startsWith("#") ? { backgroundColor: option.color } : undefined}
+                    >
                       {option.count}
                     </span>
                   </button>
