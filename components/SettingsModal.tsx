@@ -84,164 +84,205 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
 
   async function createSubject() {
     if (!newSubject) return
+    const name = newSubject.trim()
+    const tempId = `temp-subject-${Date.now()}`
+    setSubjects(prev => [...prev, { id: tempId, name }])
+    setNewSubject("")
 
-    await fetch("/api/subjects", {
+    const res = await fetch("/api/subjects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, name: newSubject })
+      body: JSON.stringify({ user_id: userId, name })
     })
-
-    setNewSubject("")
-    cache.invalidateSubjects(userId)
-    loadSubjects()
-    onDataChange?.()
+    if (res.ok) {
+      cache.invalidateSubjects(userId)
+      onDataChange?.()
+    } else {
+      setSubjects(prev => prev.filter(s => s.id !== tempId))
+    }
   }
 
   async function deleteSubject(id: string) {
     if (!confirm("Deseja realmente excluir esta matéria?")) return
-
-    await fetch(`/api/subjects/${id}`, { method: "DELETE" })
-    cache.invalidateSubjects(userId)
-    loadSubjects()
-    onDataChange?.()
+    const removed = subjects.find(s => s.id === id)
+    if (!removed) return
+    if (id.startsWith("temp-")) {
+      setSubjects(prev => prev.filter(s => s.id !== id))
+      onDataChange?.()
+      return
+    }
+    setSubjects(prev => prev.filter(s => s.id !== id))
+    const res = await fetch(`/api/subjects/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      cache.invalidateSubjects(userId)
+      onDataChange?.()
+    } else {
+      setSubjects(prev => [...prev, removed])
+    }
   }
 
   /* ---------- CRUD TOPIC ---------- */
 
   async function createTopic() {
     if (!newTopic || !selectedSubject) return
+    const name = newTopic.trim()
+    const tempId = `temp-topic-${Date.now()}`
+    setTopics(prev => [...prev, { id: tempId, name }])
+    setNewTopic("")
 
-    await fetch("/api/topics", {
+    const res = await fetch("/api/topics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
         subject_id: selectedSubject,
-        name: newTopic
+        name
       })
     })
-
-    setNewTopic("")
-    loadTopics(selectedSubject)
-    onDataChange?.()
+    if (res.ok) {
+      onDataChange?.()
+    } else {
+      setTopics(prev => prev.filter(t => t.id !== tempId))
+    }
   }
 
   async function deleteTopic(id: string) {
     if (!confirm("Deseja realmente excluir este tema?")) return
-
-    await fetch(`/api/topics/${id}`, { method: "DELETE" })
-    loadTopics(selectedSubject)
-    onDataChange?.()
+    const removed = topics.find(t => t.id === id)
+    if (!removed) return
+    if (id.startsWith("temp-")) {
+      setTopics(prev => prev.filter(t => t.id !== id))
+      onDataChange?.()
+      return
+    }
+    setTopics(prev => prev.filter(t => t.id !== id))
+    const res = await fetch(`/api/topics/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      onDataChange?.()
+    } else {
+      setTopics(prev => [...prev, removed])
+    }
   }
 
   /* ---------- CRUD ERROR TYPE ---------- */
 
   async function createErrorType() {
     if (!newErrorType) return
+    const name = newErrorType.trim()
+    setNewErrorType("")
 
-    await fetch("/api/error-types", {
+    const res = await fetch("/api/error-types", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, name: newErrorType })
+      body: JSON.stringify({ user_id: userId, name })
     })
-
-    setNewErrorType("")
-    cache.invalidateErrorTypes(userId)
-    loadErrorTypes()
-    onDataChange?.()
+    const json = await res.json()
+    if (res.ok && json.data) {
+      setErrorTypes(prev => [...prev, { id: json.data.id, name: json.data.name }])
+      cache.invalidateErrorTypes(userId)
+      onDataChange?.()
+    } else if (res.ok) {
+      const tempId = `temp-type-${Date.now()}`
+      setErrorTypes(prev => [...prev, { id: tempId, name }])
+      cache.invalidateErrorTypes(userId)
+      onDataChange?.()
+    }
   }
 
   async function deleteErrorType(id: string) {
     if (!confirm("Deseja realmente excluir este tipo de erro?")) return
-
-    await fetch(`/api/error-types/${id}`, { method: "DELETE" })
-    cache.invalidateErrorTypes(userId)
-    loadErrorTypes()
-    onDataChange?.()
+    const removed = errorTypes.find(e => e.id === id)
+    if (!removed) return
+    if (id.startsWith("temp-")) {
+      setErrorTypes(prev => prev.filter(e => e.id !== id))
+      onDataChange?.()
+      return
+    }
+    setErrorTypes(prev => prev.filter(e => e.id !== id))
+    const res = await fetch(`/api/error-types/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      cache.invalidateErrorTypes(userId)
+      onDataChange?.()
+    } else {
+      setErrorTypes(prev => [...prev, removed])
+    }
   }
 
   /* ---------- CRUD ERROR STATUS ---------- */
 
   async function createErrorStatus() {
     if (!newErrorStatus) return
+    const name = newErrorStatus.trim()
+    setNewErrorStatus("")
 
-    await fetch("/api/error-statuses", {
+    const res = await fetch("/api/error-statuses", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, name: newErrorStatus })
+      body: JSON.stringify({ user_id: userId, name })
     })
-
-    setNewErrorStatus("")
-    cache.invalidateErrorStatuses(userId)
-    loadErrorStatuses()
-    onDataChange?.()
+    const json = await res.json()
+    if (res.ok && json.data) {
+      setErrorStatuses(prev => [...prev, { id: json.data.id, name: json.data.name, color: json.data.color ?? null }])
+      cache.invalidateErrorStatuses(userId)
+      onDataChange?.()
+    } else if (res.ok) {
+      const tempId = `temp-status-${Date.now()}`
+      setErrorStatuses(prev => [...prev, { id: tempId, name, color: null }])
+      cache.invalidateErrorStatuses(userId)
+      onDataChange?.()
+    }
   }
 
   async function deleteErrorStatus(id: string) {
     if (!confirm("Deseja realmente excluir este status?")) return
-
-    await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
-    cache.invalidateErrorStatuses(userId)
-    loadErrorStatuses()
-    onDataChange?.()
+    const removed = errorStatuses.find(s => s.id === id)
+    if (!removed) return
+    if (id.startsWith("temp-") || id.startsWith("status-")) {
+      setErrorStatuses(prev => prev.filter(s => s.id !== id))
+      onDataChange?.()
+      return
+    }
+    setErrorStatuses(prev => prev.filter(s => s.id !== id))
+    const res = await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      cache.invalidateErrorStatuses(userId)
+      onDataChange?.()
+    } else {
+      setErrorStatuses(prev => [...prev, removed])
+    }
   }
 
   async function saveStatusColor(id: string, color: string) {
-    console.log("🎨 saveStatusColor chamado:", { id, color })
-    
-    // Verifica se o ID é válido (não é um status gerado automaticamente)
     if (id.startsWith("status-")) {
-      console.warn("⚠️ Não é possível salvar cor para status gerado automaticamente:", id)
       alert("Não é possível definir cor para status gerados automaticamente. Crie um status personalizado primeiro.")
       cancelColorEdit(id)
       return
     }
+    const previousColor = errorStatuses.find(s => s.id === id)?.color ?? null
+    setErrorStatuses(prev =>
+      prev.map(s => (s.id === id ? { ...s, color } : s))
+    )
+    setEditingColor(prev => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setShowColorPicker(prev => ({ ...prev, [id]: false }))
 
-    try {
-      console.log("📤 Enviando requisição PUT para:", `/api/error-statuses/${id}`)
-      console.log("📦 Payload:", { color })
-      
-      const res = await fetch(`/api/error-statuses/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ color })
-      })
-      
-      console.log("📥 Resposta recebida:", { status: res.status, ok: res.ok })
-      
-      if (!res.ok) {
-        const error = await res.json()
-        console.error("❌ Erro ao salvar cor:", error)
-        alert("Erro ao salvar cor: " + (error.error || "Erro desconhecido"))
-        return
-      }
-
-      // Invalida o cache após atualizar a cor
+    const res = await fetch(`/api/error-statuses/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color })
+    })
+    if (res.ok) {
       cache.invalidateErrorStatuses(userId)
-      loadErrorStatuses()
       onDataChange?.()
-
-      const result = await res.json()
-      console.log("✅ Cor salva com sucesso:", result)
-      
-      // Fecha o picker primeiro
-      setEditingColor(prev => {
-        const next = { ...prev }
-        delete next[id]
-        return next
-      })
-      setShowColorPicker(prev => ({ ...prev, [id]: false }))
-      
-      // Aguarda um pouco antes de recarregar para garantir que o banco foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 300))
-      
-      // Recarrega os status do banco (agora a API retorna a cor)
-      await loadErrorStatuses()
-      
-      console.log("🔄 Status recarregados após salvar cor")
-    } catch (error) {
-      console.error("❌ Erro ao salvar cor (catch):", error)
-      alert("Erro ao salvar cor. Tente novamente.")
+    } else {
+      setErrorStatuses(prev =>
+        prev.map(s => (s.id === id ? { ...s, color: previousColor } : s))
+      )
+      const err = await res.json().catch(() => ({}))
+      alert("Erro ao salvar cor: " + (err.error || "Tente novamente."))
     }
   }
 
