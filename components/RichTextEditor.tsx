@@ -131,6 +131,48 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
     setShowFontFamily(false)
   }
 
+  const insertList = (ordered: boolean) => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    editor.focus()
+
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return
+
+    const range = sel.getRangeAt(0)
+    const tag = ordered ? "ol" : "ul"
+
+    const selectedText = range.toString()
+    let listHtml: string
+
+    if (selectedText) {
+      const lines = selectedText.split(/\n/)
+      const lis = lines.map(line => `<li>${line || "<br>"}</li>`).join("")
+      listHtml = `<${tag}>${lis}</${tag}>`
+    } else {
+      listHtml = `<${tag}><li><br></li></${tag}>`
+    }
+
+    document.execCommand("insertHTML", false, listHtml)
+
+    const lists = editor.getElementsByTagName(tag)
+    const lastList = lists[lists.length - 1]
+    if (lastList) {
+      const items = lastList.getElementsByTagName("li")
+      const lastLi = items[items.length - 1]
+      if (lastLi) {
+        const newRange = document.createRange()
+        newRange.setStart(lastLi, 0)
+        newRange.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(newRange)
+      }
+    }
+
+    handleInput()
+  }
+
   const getMinHeight = () => {
     return `${rows * 1.5}rem`
   }
@@ -301,7 +343,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => execCommand("insertUnorderedList")}
+          onClick={() => insertList(false)}
           className={toolbarBtn}
           title="Lista com marcadores"
         >
@@ -310,7 +352,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => execCommand("insertOrderedList")}
+          onClick={() => insertList(true)}
           className={toolbarBtn}
           title="Lista numerada"
         >
@@ -366,7 +408,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
               setIsEmpty(!html || html.trim() === "" || html === "<br>")
             }
           }}
-          className="w-full rounded-b-lg border border-t-0 border-slate-300 p-2 text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 min-h-[3rem] break-words overflow-wrap-anywhere relative z-10"
+          className="w-full rounded-b-lg border border-t-0 border-slate-300 p-2 text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-0 min-h-[3rem] break-words overflow-wrap-anywhere relative z-10 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:ml-0"
           style={{ 
             minHeight: getMinHeight(),
             wordWrap: 'break-word',
