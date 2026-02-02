@@ -125,6 +125,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
       <div className="flex flex-wrap items-center gap-1 border border-slate-300 rounded-t-lg p-2 bg-slate-50">
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("bold")}
           className={toolbarBtn}
           title="Negrito (Ctrl+B)"
@@ -133,6 +134,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("italic")}
           className={toolbarBtn}
           title="Itálico (Ctrl+I)"
@@ -141,6 +143,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("underline")}
           className={toolbarBtn}
           title="Sublinhado (Ctrl+U)"
@@ -149,6 +152,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("strikeThrough")}
           className={toolbarBtn}
           title="Riscado"
@@ -233,7 +237,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
             <>
               <div
                 className="fixed inset-0 z-10"
-                onClick={() => setShowColorPicker(false)}
+                onClick={() => applyColor(previewColor)}
               />
               <div className="absolute top-full left-0 z-20 mt-2 p-3 bg-white border border-slate-300 rounded-lg shadow-lg" onClick={e => e.stopPropagation()}>
                 <div className="flex flex-wrap gap-2">
@@ -259,7 +263,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                     className="w-full h-9 cursor-pointer rounded border border-slate-300"
                   />
                 </div>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex justify-center">
                   <button
                     type="button"
                     onClick={() => applyColor(previewColor)}
@@ -277,6 +281,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
 
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("insertUnorderedList")}
           className={toolbarBtn}
           title="Lista com marcadores"
@@ -285,6 +290,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("insertOrderedList")}
           className={toolbarBtn}
           title="Lista numerada"
@@ -296,6 +302,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
 
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("justifyLeft")}
           className={toolbarBtn}
           title="Alinhar à esquerda"
@@ -304,6 +311,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("justifyCenter")}
           className={toolbarBtn}
           title="Centralizar"
@@ -312,6 +320,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => execCommand("justifyRight")}
           className={toolbarBtn}
           title="Alinhar à direita"
