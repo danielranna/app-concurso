@@ -39,8 +39,17 @@ function ResumoPeriodoContent() {
   const [allCardsExpanded, setAllCardsExpanded] = useState(false)
   const [editingError, setEditingError] = useState<Error | null>(null)
 
-  // Filtro: sempre sincronizado pela URL (evita precisar F5 ao abrir por um card)
-  const [filterType, setFilterType] = useState<string>("total")
+  // Filtro: lê da URL na montagem (window) e depois sincroniza com searchParams
+  const [filterType, setFilterType] = useState<string>(() => {
+    if (typeof window === "undefined") return "total"
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get("status")
+    if (status) {
+      try { return decodeURIComponent(status) }
+      catch { return status }
+    }
+    return params.get("type") || "total"
+  })
 
   type Period = "this_week" | "last_week" | "accumulated" | "custom"
   const getWeekStart = (date: Date): Date => {
@@ -59,6 +68,12 @@ function ResumoPeriodoContent() {
   }
 
   const getInitialPeriod = (): Period => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get("all") === "true") return "accumulated"
+      const p = params.get("period")
+      if (p === "this_week" || p === "last_week" || p === "accumulated" || p === "custom") return p
+    }
     if (searchParams?.get("all") === "true") return "accumulated"
     const p = searchParams?.get("period")
     if (p === "this_week" || p === "last_week" || p === "accumulated" || p === "custom") return p
@@ -126,13 +141,15 @@ function ResumoPeriodoContent() {
     }
   }, [router, searchParams, fromParam, toParam])
 
-  // Sincroniza filtro e período com a URL (ao abrir por card ou mudar dropdown)
-  const statusFromUrl = searchParams?.get("status") ?? ""
-  const typeFromUrl = searchParams?.get("type") ?? "total"
-  const periodFromUrl = searchParams?.get("period") ?? ""
-  const allFromUrl = searchParams?.get("all") ?? ""
+  // Sincroniza filtro e período com a URL (qualquer mudança na query dispara o efeito)
+  const searchString = typeof searchParams?.toString === "function" ? searchParams.toString() : ""
 
   useEffect(() => {
+    const statusFromUrl = searchParams?.get("status") ?? ""
+    const typeFromUrl = searchParams?.get("type") ?? "total"
+    const periodFromUrl = searchParams?.get("period") ?? ""
+    const allFromUrl = searchParams?.get("all") ?? ""
+
     if (statusFromUrl) {
       try {
         setFilterType(decodeURIComponent(statusFromUrl))
@@ -153,7 +170,7 @@ function ResumoPeriodoContent() {
         setCustomTo(t)
       }
     }
-  }, [statusFromUrl, typeFromUrl, periodFromUrl, allFromUrl])
+  }, [searchString])
 
   function updateUrlPeriod(next: Period) {
     setPeriod(next)

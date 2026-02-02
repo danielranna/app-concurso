@@ -80,16 +80,30 @@ export default function Home() {
     setErrors(data ?? [])
   }
 
-  /** Invalida cache e recarrega dados (após alterações nas configurações) */
-  function refreshDataAfterSettings() {
+  /** Invalida cache e recarrega dados direto da API (evita ler cache antes do estado atualizar) */
+  async function refreshDataAfterSettings() {
     if (!userId) return
     cache.invalidateSubjects(userId)
     cache.invalidateErrorStatuses(userId)
     cache.invalidateErrorTypes(userId)
     cache.invalidateErrors(userId)
-    loadSubjects(userId)
-    loadErrorStatuses(userId)
-    loadErrors(userId)
+    // Busca direto da API para não depender do estado do cache (que atualiza assincronamente)
+    const [subjectsRes, statusesRes, errorsRes] = await Promise.all([
+      fetch(`/api/subjects?user_id=${userId}`),
+      fetch(`/api/error-statuses?user_id=${userId}`),
+      fetch(`/api/errors?user_id=${userId}`)
+    ])
+    const subjectsData = await subjectsRes.json()
+    const statusesData = await statusesRes.json()
+    const statusesNormalized = (statusesData ?? []).map((item: unknown, i: number) =>
+      typeof item === "string"
+        ? { id: `status-${i}`, name: item, color: null }
+        : { id: (item as { id?: string }).id ?? `status-${i}`, name: (item as { name?: string }).name ?? (item as string), color: (item as { color?: string | null }).color ?? null }
+    )
+    const errorsData = await errorsRes.json()
+    setSubjects(subjectsData ?? [])
+    setErrorStatuses(statusesNormalized)
+    setErrors((errorsData ?? []).map((e: { error_status?: string }) => ({ ...e, error_status: e.error_status ?? "normal" })))
   }
 
   useEffect(() => {
