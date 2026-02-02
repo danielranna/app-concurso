@@ -510,10 +510,8 @@
 
                         if (res.ok) {
                             cache.invalidateErrors(userId!, subjectId)
-                            await Promise.all([
-                                loadErrors(userId!),
-                                loadErrorStatuses(userId!)
-                            ])
+                            await loadErrorStatuses(userId!)
+                            // Não chama loadErrors para não sobrescrever com dados em cache antigos
                         } else {
                             // Reverte a badge se a API falhar
                             setErrors(prev =>

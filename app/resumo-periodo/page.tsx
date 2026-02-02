@@ -611,8 +611,8 @@ function ResumoPeriodoContent() {
                   })
                 })
                 if (res.ok) {
-                  await loadErrors(userId!)
                   await loadErrorStatuses(userId!)
+                  // Não chama loadErrors para não sobrescrever com dados em cache antigos
                 } else {
                   setErrors(prev =>
                     prev.map(e =>
