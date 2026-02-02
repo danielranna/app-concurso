@@ -175,6 +175,7 @@ function ResumoPeriodoContent() {
   function updateUrlType(next: "total" | "critical" | "reincident" | "learned") {
     setFilterType(next)
     const params = new URLSearchParams(searchParams?.toString() || "")
+    params.delete("status")
     params.set("type", next)
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
@@ -215,7 +216,13 @@ function ResumoPeriodoContent() {
     })
   }, [errors, period, fromParam, toParam])
 
+  const statusParam = searchParams?.get("status") ?? ""
+
   const filteredErrors = useMemo(() => {
+    if (statusParam) {
+      const name = statusParam.toLowerCase().trim()
+      return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
+    }
     if (filterType === "total") return periodErrors
     if (filterType === "critical") {
       return periodErrors.filter(e => {
@@ -236,7 +243,7 @@ function ResumoPeriodoContent() {
       })
     }
     return []
-  }, [periodErrors, filterType])
+  }, [periodErrors, filterType, statusParam])
 
   const stats = useMemo(() => {
     const total = periodErrors.length
@@ -273,6 +280,9 @@ function ResumoPeriodoContent() {
 
   const getTitle = () => {
     const suffix = getPeriodLabel()
+    if (statusParam) {
+      return `Erros: ${decodeURIComponent(statusParam)}${suffix}`
+    }
     switch (filterType) {
       case "critical":
         return `Erros Críticos${suffix}`
@@ -286,9 +296,11 @@ function ResumoPeriodoContent() {
   }
 
   const emptyMessage = () => {
-    const base = filterType === "total"
-      ? "Nenhum erro registrado"
-      : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"}`
+    const base = statusParam
+      ? `Nenhum erro com status "${decodeURIComponent(statusParam)}"`
+      : filterType === "total"
+        ? "Nenhum erro registrado"
+        : `Nenhum erro ${filterType === "critical" ? "crítico" : filterType === "reincident" ? "reincidente" : "consolidado"}`
     if (period === "accumulated") return base
     if (period === "last_week") return `${base} na última semana`
     if (period === "this_week") return `${base} nesta semana`

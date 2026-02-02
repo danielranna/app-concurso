@@ -145,19 +145,24 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
           <p className="mt-1 text-2xl font-bold text-slate-900">{totalErrors}</p>
           <p className="mt-1 text-xs text-slate-500">Acumulado</p>
         </button>
-        {statusCounts.map(({ id, name, count, color }) => (
-          <div
-            key={id}
-            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left"
-            style={{ borderLeftWidth: 4, borderLeftColor: color }}
-          >
-            <p className="text-sm text-slate-600">{name}</p>
-            <p className="mt-1 text-2xl font-bold" style={{ color }}>{count}</p>
-            <p className="mt-1 text-xs text-slate-500">
-              {totalErrors > 0 ? Math.round((count / totalErrors) * 100) : 0}% do total
-            </p>
-          </div>
-        ))}
+        {statusCounts.map(({ id, name, count, color }) => {
+          const pct = totalErrors > 0 ? Math.round((count / totalErrors) * 100) : 0
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => router.push(`/resumo-periodo?status=${encodeURIComponent(name)}&all=true`)}
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 cursor-pointer"
+              style={{ borderLeftWidth: 4, borderLeftColor: color }}
+            >
+              <p className="text-sm text-slate-600">{name}</p>
+              <p className="mt-1 text-2xl font-bold" style={{ color }}>{pct}%</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {count} de {totalErrors} erros
+              </p>
+            </button>
+          )
+        })}
       </div>
 
       {/* RANKING GERAL DE MATÉRIAS */}

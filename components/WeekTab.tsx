@@ -141,19 +141,24 @@ export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClic
           <p className="mt-1 text-2xl font-bold text-slate-900">{totalWeek}</p>
           <p className="mt-1 text-xs text-slate-500">Esta semana</p>
         </button>
-        {statusCounts.map(({ id, name, count, color }) => (
-          <div
-            key={id}
-            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left"
-            style={{ borderLeftWidth: 4, borderLeftColor: color }}
-          >
-            <p className="text-sm text-slate-600">{name}</p>
-            <p className="mt-1 text-2xl font-bold" style={{ color }}>{count}</p>
-            <p className="mt-1 text-xs text-slate-500">
-              {totalWeek > 0 ? Math.round((count / totalWeek) * 100) : 0}% desta semana
-            </p>
-          </div>
-        ))}
+        {statusCounts.map(({ id, name, count, color }) => {
+          const pct = totalWeek > 0 ? Math.round((count / totalWeek) * 100) : 0
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => router.push(`/resumo-periodo?status=${encodeURIComponent(name)}&period=this_week`)}
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 cursor-pointer"
+              style={{ borderLeftWidth: 4, borderLeftColor: color }}
+            >
+              <p className="text-sm text-slate-600">{name}</p>
+              <p className="mt-1 text-2xl font-bold" style={{ color }}>{pct}%</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {count} de {totalWeek} erros
+              </p>
+            </button>
+          )
+        })}
       </div>
 
       {/* ERROS POR DIA DA SEMANA */}
