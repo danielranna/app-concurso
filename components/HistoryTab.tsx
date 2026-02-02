@@ -152,8 +152,8 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
               key={id}
               type="button"
               onClick={() => router.push(`/resumo-periodo?status=${encodeURIComponent(name)}&all=true`)}
-              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 cursor-pointer"
-              style={{ borderLeftWidth: 4, borderLeftColor: color }}
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-[var(--status-color)] cursor-pointer"
+              style={{ ['--status-color' as string]: color, borderLeftWidth: 4, borderLeftColor: color }}
             >
               <p className="text-sm text-slate-600">{name}</p>
               <p className="mt-1 text-2xl font-bold" style={{ color }}>{pct}%</p>
