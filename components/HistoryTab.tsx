@@ -17,46 +17,40 @@ type Error = {
   }
 }
 
+type ErrorStatus = {
+  id: string
+  name: string
+  color?: string | null
+}
+
 type Props = {
   errors: Error[]
+  errorStatuses: ErrorStatus[]
   onSubjectClick: (subjectId: string) => void
 }
 
 const COLORS = ['#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8']
+const DEFAULT_STATUS_COLOR = "#64748b"
 
-export default function HistoryTab({ errors, onSubjectClick }: Props) {
+export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Props) {
   const router = useRouter()
 
-  // CARDS DE RESUMO ACUMULADOS
-  const summaryCards = useMemo(() => {
-    const total = errors.length
-    // Filtra erros críticos (case-insensitive)
-    const critical = errors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "critico" || status === "crítico" || status.includes("critic")
-    }).length
-    // Filtra erros consolidados (case-insensitive)
-    const learned = errors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "consolidado" || status === "aprendido" || status === "resolvido"
-    }).length
-    
-    // Calcula reincidentes (erros com status "Reincidente" - case-insensitive)
-    const reincidentErrors = errors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "reincidente"
-    }).length
-
-    return {
-      total,
-      critical,
-      learned,
-      reincident: reincidentErrors,
-      criticalPercent: total > 0 ? Math.round((critical / total) * 100) : 0,
-      learnedPercent: total > 0 ? Math.round((learned / total) * 100) : 0,
-      reincidentsPercent: total > 0 ? Math.round((reincidentErrors / total) * 100) : 0
-    }
-  }, [errors])
+  // Total + contagem por status (lista dinâmica com cores)
+  const totalErrors = errors.length
+  const statusCounts = useMemo(() => {
+    return errorStatuses.map(status => {
+      const count = errors.filter(e => {
+        const errStatus = (e.error_status || "").toLowerCase().trim()
+        const statusName = (status.name || "").toLowerCase().trim()
+        return errStatus === statusName
+      }).length
+      return {
+        ...status,
+        count,
+        color: status.color || DEFAULT_STATUS_COLOR
+      }
+    })
+  }, [errors, errorStatuses])
 
   // RANKING GERAL DE MATÉRIAS (ACUMULADO)
   const subjectRanking = useMemo(() => {
@@ -100,16 +94,16 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
       .slice(0, 6)
   }, [errors])
 
-  // STATUS DOS ERROS
-  const errorStatuses = useMemo(() => {
-    const statusCounts: { [key: string]: number } = {}
+  // STATUS DOS ERROS (para o gráfico de pizza)
+  const chartStatusData = useMemo(() => {
+    const counts: { [key: string]: number } = {}
 
     errors.forEach(error => {
       const status = error.error_status || "normal"
-      statusCounts[status] = (statusCounts[status] || 0) + 1
+      counts[status] = (counts[status] || 0) + 1
     })
 
-    return Object.entries(statusCounts)
+    return Object.entries(counts)
       .map(([status, quantidade]) => ({
         status,
         quantidade
@@ -141,40 +135,29 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* CARDS DE RESUMO ACUMULADOS */}
+      {/* CARDS: Total + lista de status com cores */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
           onClick={() => router.push("/resumo-periodo?type=total&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{summaryCards.total}</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{totalErrors}</p>
           <p className="mt-1 text-xs text-slate-500">Acumulado</p>
         </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=critical&all=true")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-red-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Erros Críticos</p>
-          <p className="mt-1 text-2xl font-bold text-red-600">{summaryCards.criticalPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">{summaryCards.critical} de {summaryCards.total} erros (acumulado)</p>
-        </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=reincident&all=true")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-orange-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Reincidentes</p>
-          <p className="mt-1 text-2xl font-bold text-orange-600">{summaryCards.reincidentsPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">{summaryCards.reincident} de {summaryCards.total} erros (acumulado)</p>
-        </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=learned&all=true")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-green-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Consolidados</p>
-          <p className="mt-1 text-2xl font-bold text-green-600">{summaryCards.learnedPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">{summaryCards.learned} de {summaryCards.total} erros (acumulado)</p>
-        </button>
+        {statusCounts.map(({ id, name, count, color }) => (
+          <div
+            key={id}
+            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left"
+            style={{ borderLeftWidth: 4, borderLeftColor: color }}
+          >
+            <p className="text-sm text-slate-600">{name}</p>
+            <p className="mt-1 text-2xl font-bold" style={{ color }}>{count}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {totalErrors > 0 ? Math.round((count / totalErrors) * 100) : 0}% do total
+            </p>
+          </div>
+        ))}
       </div>
 
       {/* RANKING GERAL DE MATÉRIAS */}
@@ -358,9 +341,9 @@ export default function HistoryTab({ errors, onSubjectClick }: Props) {
             Distribuição por Status
           </h3>
           <div style={{ width: "100%", height: 300 }}>
-            {errorStatuses.length > 0 ? (
+            {chartStatusData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={errorStatuses}>
+                <BarChart data={chartStatusData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis 
                     dataKey="status" 

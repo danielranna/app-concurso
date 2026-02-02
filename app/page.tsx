@@ -17,6 +17,12 @@ type Subject = {
   name: string
 }
 
+type ErrorStatus = {
+  id: string
+  name: string
+  color?: string | null
+}
+
 type Error = {
   id: string
   created_at: string
@@ -38,6 +44,7 @@ export default function Home() {
   const [openSettings, setOpenSettings] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [errorStatuses, setErrorStatuses] = useState<ErrorStatus[]>([])
   const [errors, setErrors] = useState<Error[]>([])
 
   async function loadUser() {
@@ -48,6 +55,7 @@ export default function Home() {
     if (user) {
       setUserId(user.id)
       loadSubjects(user.id)
+      loadErrorStatuses(user.id)
       loadErrors(user.id)
     } else {
       router.push("/login")
@@ -58,6 +66,12 @@ export default function Home() {
   async function loadSubjects(user_id: string) {
     const data = await cache.getSubjects(user_id)
     setSubjects(data)
+  }
+
+  // 📋 STATUS DE ERRO (para os cards)
+  async function loadErrorStatuses(user_id: string) {
+    const data = await cache.getErrorStatuses(user_id)
+    setErrorStatuses(data ?? [])
   }
 
   // 📊 ERROS (para os gráficos)
@@ -109,6 +123,7 @@ export default function Home() {
                 <WeekTab
                   errors={errors}
                   subjects={subjects}
+                  errorStatuses={errorStatuses}
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
                 />
               )
@@ -120,6 +135,7 @@ export default function Home() {
               return (
                 <HistoryTab
                   errors={errors}
+                  errorStatuses={errorStatuses}
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
                 />
               )
@@ -135,6 +151,8 @@ export default function Home() {
         onSuccess={() => {
           if (userId) {
             cache.invalidateErrors(userId)
+            cache.invalidateErrorStatuses(userId)
+            loadErrorStatuses(userId)
             loadErrors(userId)
           }
         }}
@@ -146,7 +164,9 @@ export default function Home() {
           onClose={() => {
             setOpenSettings(false)
             cache.invalidateSubjects(userId)
+            cache.invalidateErrorStatuses(userId)
             loadSubjects(userId)
+            loadErrorStatuses(userId)
           }}
           userId={userId}
         />

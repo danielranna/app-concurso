@@ -22,13 +22,22 @@ type Subject = {
   name: string
 }
 
+type ErrorStatus = {
+  id: string
+  name: string
+  color?: string | null
+}
+
 type Props = {
   errors: Error[]
   subjects: Subject[]
+  errorStatuses: ErrorStatus[]
   onSubjectClick: (subjectId: string) => void
 }
 
-export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
+const DEFAULT_STATUS_COLOR = "#64748b"
+
+export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClick }: Props) {
   const router = useRouter()
 
   // Calcula início da semana atual (Segunda-feira)
@@ -55,33 +64,22 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
     })
   }, [errors])
 
-  // CARDS DE RESUMO
-  const summaryCards = useMemo(() => {
-    const total = weekErrors.length
-    // Filtra erros críticos (case-insensitive e aceita variações)
-    const critical = weekErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "critico" || status === "crítico" || status.includes("critic")
-    }).length
-    // Filtra erros consolidados (case-insensitive)
-    const learned = weekErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "consolidado" || status === "aprendido" || status === "resolvido"
-    }).length
-    
-    // Calcula reincidentes (erros com status "Reincidente" - case-insensitive)
-    const reincidentErrors = weekErrors.filter(e => {
-      const status = (e.error_status || "").toLowerCase().trim()
-      return status === "reincidente"
-    }).length
-
-    return {
-      total,
-      criticalPercent: total > 0 ? Math.round((critical / total) * 100) : 0,
-      learnedPercent: total > 0 ? Math.round((learned / total) * 100) : 0,
-      reincidentsPercent: total > 0 ? Math.round((reincidentErrors / total) * 100) : 0
-    }
-  }, [weekErrors])
+  // Total + contagem por status (lista dinâmica com cores)
+  const totalWeek = weekErrors.length
+  const statusCounts = useMemo(() => {
+    return errorStatuses.map(status => {
+      const count = weekErrors.filter(e => {
+        const errStatus = (e.error_status || "").toLowerCase().trim()
+        const statusName = (status.name || "").toLowerCase().trim()
+        return errStatus === statusName
+      }).length
+      return {
+        ...status,
+        count,
+        color: status.color || DEFAULT_STATUS_COLOR
+      }
+    })
+  }, [weekErrors, errorStatuses])
 
   // ERROS POR DIA DA SEMANA
   const errorsByDay = useMemo(() => {
@@ -133,40 +131,29 @@ export default function WeekTab({ errors, subjects, onSubjectClick }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* CARDS DE RESUMO */}
+      {/* CARDS: Total + lista de status com cores */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
           onClick={() => router.push("/resumo-periodo?period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">{summaryCards.total}</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{totalWeek}</p>
           <p className="mt-1 text-xs text-slate-500">Esta semana</p>
         </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=critical&period=this_week")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-red-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Erros Críticos</p>
-          <p className="mt-1 text-2xl font-bold text-red-600">{summaryCards.criticalPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">Requim atenção</p>
-        </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=reincident&period=this_week")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-orange-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Reincidentes</p>
-          <p className="mt-1 text-2xl font-bold text-orange-600">{summaryCards.reincidentsPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">Revisar urgente</p>
-        </button>
-        <button
-          onClick={() => router.push("/resumo-periodo?type=learned&period=this_week")}
-          className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-green-300 cursor-pointer"
-        >
-          <p className="text-sm text-slate-600">Consolidados</p>
-          <p className="mt-1 text-2xl font-bold text-green-600">{summaryCards.learnedPercent}%</p>
-          <p className="mt-1 text-xs text-slate-500">Progresso</p>
-        </button>
+        {statusCounts.map(({ id, name, count, color }) => (
+          <div
+            key={id}
+            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left"
+            style={{ borderLeftWidth: 4, borderLeftColor: color }}
+          >
+            <p className="text-sm text-slate-600">{name}</p>
+            <p className="mt-1 text-2xl font-bold" style={{ color }}>{count}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {totalWeek > 0 ? Math.round((count / totalWeek) * 100) : 0}% desta semana
+            </p>
+          </div>
+        ))}
       </div>
 
       {/* ERROS POR DIA DA SEMANA */}
