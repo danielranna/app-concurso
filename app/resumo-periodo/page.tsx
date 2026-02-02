@@ -39,14 +39,8 @@ function ResumoPeriodoContent() {
   const [allCardsExpanded, setAllCardsExpanded] = useState(false)
   const [editingError, setEditingError] = useState<Error | null>(null)
 
-  // Filtro: "total" ou nome do status (vindo da URL ?type=total ou ?status=NomeDoStatus)
-  const getInitialFilterType = () => {
-    const statusFromUrl = searchParams?.get("status")
-    if (statusFromUrl) return decodeURIComponent(statusFromUrl)
-    const typeFromUrl = searchParams?.get("type") || "total"
-    return typeFromUrl === "total" ? "total" : typeFromUrl
-  }
-  const [filterType, setFilterType] = useState<string>(getInitialFilterType)
+  // Filtro: sempre sincronizado pela URL (evita precisar F5 ao abrir por um card)
+  const [filterType, setFilterType] = useState<string>("total")
 
   type Period = "this_week" | "last_week" | "accumulated" | "custom"
   const getWeekStart = (date: Date): Date => {
@@ -132,27 +126,34 @@ function ResumoPeriodoContent() {
     }
   }, [router, searchParams, fromParam, toParam])
 
+  // Sincroniza filtro e período com a URL (ao abrir por card ou mudar dropdown)
+  const statusFromUrl = searchParams?.get("status") ?? ""
+  const typeFromUrl = searchParams?.get("type") ?? "total"
+  const periodFromUrl = searchParams?.get("period") ?? ""
+  const allFromUrl = searchParams?.get("all") ?? ""
+
   useEffect(() => {
-    const statusFromUrl = searchParams?.get("status")
-    const typeFromUrl = searchParams?.get("type") || "total"
     if (statusFromUrl) {
-      setFilterType(decodeURIComponent(statusFromUrl))
-    } else if (typeFromUrl === "total") {
-      setFilterType("total")
+      try {
+        setFilterType(decodeURIComponent(statusFromUrl))
+      } catch {
+        setFilterType(statusFromUrl)
+      }
+    } else {
+      setFilterType(typeFromUrl === "total" ? "total" : typeFromUrl)
     }
-    const fromAll = searchParams?.get("all") === "true"
-    const p = searchParams?.get("period")
-    if (fromAll) setPeriod("accumulated")
-    else if (p === "this_week" || p === "last_week" || p === "accumulated" || p === "custom") {
-      setPeriod(p)
-      if (p === "custom") {
+    if (allFromUrl === "true") {
+      setPeriod("accumulated")
+    } else if (["this_week", "last_week", "accumulated", "custom"].includes(periodFromUrl)) {
+      setPeriod(periodFromUrl as Period)
+      if (periodFromUrl === "custom") {
         const f = searchParams?.get("from") ?? getDefaultCustomRange().from
         const t = searchParams?.get("to") ?? getDefaultCustomRange().to
         setCustomFrom(f)
         setCustomTo(t)
       }
     }
-  }, [searchParams])
+  }, [statusFromUrl, typeFromUrl, periodFromUrl, allFromUrl])
 
   function updateUrlPeriod(next: Period) {
     setPeriod(next)
@@ -349,7 +350,7 @@ function ResumoPeriodoContent() {
           >
             <span className="text-slate-500">Erros:</span>
             <span
-              className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${selectedTypeOption.color?.startsWith("#") ? "" : getTypeColorClasses(selectedTypeOption.color, true)}`}
+              className={`rounded-md px-2 py-0.5 text-xs font-semibold text-white ${selectedTypeOption.color?.startsWith("#") ? "" : getTypeColorClasses(selectedTypeOption.color, true)}`}
               style={selectedTypeOption.color?.startsWith("#") ? { backgroundColor: selectedTypeOption.color } : undefined}
             >
               {selectedTypeOption.label} ({selectedTypeOption.count})
@@ -360,31 +361,36 @@ function ResumoPeriodoContent() {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowTypeDropdown(false)} />
               <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                {typeOptions.map(option => (
-                  <button
-                    key={option.value}
-                    onClick={() => {
-                      updateUrlFilter(option.value)
-                      setShowTypeDropdown(false)
-                    }}
-                    className={`flex w-full items-center justify-between px-3 py-2 text-sm transition ${
-                      filterType === option.value ? "bg-slate-50" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    <span
-                      className={option.color?.startsWith("#") ? "" : getTypeColorClasses(option.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")}
-                      style={option.color?.startsWith("#") ? { color: option.color } : undefined}
+                {typeOptions.map(option => {
+                  const isHex = option.color?.startsWith("#")
+                  const borderColor = isHex ? option.color : undefined
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        updateUrlFilter(option.value)
+                        setShowTypeDropdown(false)
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 border-l-4 py-2 pl-3 pr-3 text-left text-sm transition ${
+                        filterType === option.value ? "bg-slate-50" : "hover:bg-slate-50"
+                      } ${!borderColor ? "border-l-slate-300" : ""}`}
+                      style={borderColor ? { borderLeftColor: borderColor } : undefined}
                     >
-                      {option.label}
-                    </span>
-                    <span
-                      className={`rounded px-2 py-0.5 text-xs font-semibold text-white ${option.color?.startsWith("#") ? "" : getTypeColorClasses(option.color, filterType === option.value)}`}
-                      style={option.color?.startsWith("#") ? { backgroundColor: option.color } : undefined}
-                    >
-                      {option.count}
-                    </span>
-                  </button>
-                ))}
+                      <span
+                        className={isHex ? "" : getTypeColorClasses(option.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")}
+                        style={isHex ? { color: option.color } : undefined}
+                      >
+                        {option.label}
+                      </span>
+                      <span
+                        className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-white ${isHex ? "" : getTypeColorClasses(option.color, filterType === option.value)}`}
+                        style={isHex ? { backgroundColor: option.color } : undefined}
+                      >
+                        {option.count}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </>
           )}

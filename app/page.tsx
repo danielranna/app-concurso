@@ -80,6 +80,18 @@ export default function Home() {
     setErrors(data ?? [])
   }
 
+  /** Invalida cache e recarrega dados (após alterações nas configurações) */
+  function refreshDataAfterSettings() {
+    if (!userId) return
+    cache.invalidateSubjects(userId)
+    cache.invalidateErrorStatuses(userId)
+    cache.invalidateErrorTypes(userId)
+    cache.invalidateErrors(userId)
+    loadSubjects(userId)
+    loadErrorStatuses(userId)
+    loadErrors(userId)
+  }
+
   useEffect(() => {
     loadUser()
   }, [])
@@ -163,11 +175,9 @@ export default function Home() {
           open={openSettings}
           onClose={() => {
             setOpenSettings(false)
-            cache.invalidateSubjects(userId)
-            cache.invalidateErrorStatuses(userId)
-            loadSubjects(userId)
-            loadErrorStatuses(userId)
+            refreshDataAfterSettings()
           }}
+          onDataChange={refreshDataAfterSettings}
           userId={userId}
         />
       )}

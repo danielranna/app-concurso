@@ -25,9 +25,11 @@ type Props = {
   open: boolean
   onClose: () => void
   userId: string
+  /** Chamado após qualquer alteração (matérias, temas, tipos, status) para o pai atualizar sem F5 */
+  onDataChange?: () => void
 }
 
-export default function SettingsModal({ open, onClose, userId }: Props) {
+export default function SettingsModal({ open, onClose, userId, onDataChange }: Props) {
   const router = useRouter()
   const cache = useDataCache()
   const [tab, setTab] = useState<"subjects" | "topics" | "errorTypes" | "status">("subjects")
@@ -92,6 +94,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     setNewSubject("")
     cache.invalidateSubjects(userId)
     loadSubjects()
+    onDataChange?.()
   }
 
   async function deleteSubject(id: string) {
@@ -100,6 +103,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     await fetch(`/api/subjects/${id}`, { method: "DELETE" })
     cache.invalidateSubjects(userId)
     loadSubjects()
+    onDataChange?.()
   }
 
   /* ---------- CRUD TOPIC ---------- */
@@ -119,6 +123,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
 
     setNewTopic("")
     loadTopics(selectedSubject)
+    onDataChange?.()
   }
 
   async function deleteTopic(id: string) {
@@ -126,6 +131,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
 
     await fetch(`/api/topics/${id}`, { method: "DELETE" })
     loadTopics(selectedSubject)
+    onDataChange?.()
   }
 
   /* ---------- CRUD ERROR TYPE ---------- */
@@ -142,6 +148,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     setNewErrorType("")
     cache.invalidateErrorTypes(userId)
     loadErrorTypes()
+    onDataChange?.()
   }
 
   async function deleteErrorType(id: string) {
@@ -150,6 +157,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     await fetch(`/api/error-types/${id}`, { method: "DELETE" })
     cache.invalidateErrorTypes(userId)
     loadErrorTypes()
+    onDataChange?.()
   }
 
   /* ---------- CRUD ERROR STATUS ---------- */
@@ -166,6 +174,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     setNewErrorStatus("")
     cache.invalidateErrorStatuses(userId)
     loadErrorStatuses()
+    onDataChange?.()
   }
 
   async function deleteErrorStatus(id: string) {
@@ -174,6 +183,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
     await fetch(`/api/error-statuses/${id}`, { method: "DELETE" })
     cache.invalidateErrorStatuses(userId)
     loadErrorStatuses()
+    onDataChange?.()
   }
 
   async function saveStatusColor(id: string, color: string) {
@@ -209,6 +219,7 @@ export default function SettingsModal({ open, onClose, userId }: Props) {
       // Invalida o cache após atualizar a cor
       cache.invalidateErrorStatuses(userId)
       loadErrorStatuses()
+      onDataChange?.()
 
       const result = await res.json()
       console.log("✅ Cor salva com sucesso:", result)
