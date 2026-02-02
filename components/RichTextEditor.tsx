@@ -45,6 +45,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
   const [showFontSize, setShowFontSize] = useState(false)
   const [showFontFamily, setShowFontFamily] = useState(false)
   const [selectedColor, setSelectedColor] = useState("#000000")
+  const [previewColor, setPreviewColor] = useState("#000000")
   const [isEmpty, setIsEmpty] = useState(true)
 
   const basicColors = [
@@ -93,6 +94,13 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
     setSelectedColor(color)
     execCommand("foreColor", color)
     setShowColorPicker(false)
+  }
+
+  const openColorPicker = () => {
+    setPreviewColor(selectedColor)
+    setShowColorPicker(true)
+    setShowFontSize(false)
+    setShowFontFamily(false)
   }
 
   const applyFontSize = (size: string) => {
@@ -211,7 +219,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         <div className="relative">
           <button
             type="button"
-            onClick={() => { setShowColorPicker(!showColorPicker); setShowFontSize(false); setShowFontFamily(false) }}
+            onClick={() => showColorPicker ? setShowColorPicker(false) : openColorPicker()}
             className={`${toolbarBtn} flex items-center gap-1`}
             title="Cor do texto"
           >
@@ -227,14 +235,14 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                 className="fixed inset-0 z-10"
                 onClick={() => setShowColorPicker(false)}
               />
-              <div className="absolute top-full left-0 z-20 mt-2 p-3 bg-white border border-slate-300 rounded-lg shadow-lg">
+              <div className="absolute top-full left-0 z-20 mt-2 p-3 bg-white border border-slate-300 rounded-lg shadow-lg" onClick={e => e.stopPropagation()}>
                 <div className="flex flex-wrap gap-2">
                   {basicColors.map(color => (
                     <button
                       key={color}
                       type="button"
-                      onClick={() => applyColor(color)}
-                      className="w-7 h-7 rounded border border-slate-300 hover:ring-2 hover:ring-slate-400 transition shrink-0"
+                      onClick={() => setPreviewColor(color)}
+                      className={`w-7 h-7 rounded border transition shrink-0 ${previewColor === color ? "ring-2 ring-slate-500 ring-offset-1 border-slate-500" : "border-slate-300 hover:ring-2 hover:ring-slate-400"}`}
                       style={{ backgroundColor: color }}
                       title={color}
                     />
@@ -246,10 +254,19 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                   </label>
                   <input
                     type="color"
-                    value={selectedColor}
-                    onChange={(e) => applyColor(e.target.value)}
+                    value={previewColor}
+                    onChange={(e) => setPreviewColor(e.target.value)}
                     className="w-full h-9 cursor-pointer rounded border border-slate-300"
                   />
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => applyColor(previewColor)}
+                    className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 transition"
+                  >
+                    OK
+                  </button>
                 </div>
               </div>
             </>
