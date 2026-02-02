@@ -264,8 +264,8 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                     <button
                       key={color}
                       type="button"
-                      onClick={() => setPreviewColor(color)}
-                      className={`w-7 h-7 rounded border transition shrink-0 ${previewColor === color ? "ring-2 ring-slate-500 ring-offset-1 border-slate-500" : "border-slate-300 hover:ring-2 hover:ring-slate-400"}`}
+                      onClick={() => applyColor(color)}
+                      className="w-7 h-7 rounded border border-slate-300 hover:ring-2 hover:ring-slate-400 transition shrink-0"
                       style={{ backgroundColor: color }}
                       title={color}
                     />
@@ -275,21 +275,21 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                   <label className="block text-xs font-medium text-slate-600 mb-1.5">
                     Cor personalizada
                   </label>
-                  <input
-                    type="color"
-                    value={previewColor}
-                    onChange={(e) => setPreviewColor(e.target.value)}
-                    className="w-full h-9 cursor-pointer rounded border border-slate-300"
-                  />
-                </div>
-                <div className="mt-3 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => applyColor(previewColor)}
-                    className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 transition"
-                  >
-                    OK
-                  </button>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="color"
+                      value={previewColor}
+                      onChange={(e) => setPreviewColor(e.target.value)}
+                      className="h-9 w-14 cursor-pointer rounded border border-slate-300 shrink-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => applyColor(previewColor)}
+                      className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 transition shrink-0"
+                    >
+                      OK
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
