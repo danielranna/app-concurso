@@ -41,6 +41,7 @@ const FONT_FAMILIES = [
 
 export default function RichTextEditor({ value, onChange, placeholder = "", rows = 3 }: Props) {
   const editorRef = useRef<HTMLDivElement>(null)
+  const savedSelectionRef = useRef<Range | null>(null)
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [showFontSize, setShowFontSize] = useState(false)
   const [showFontFamily, setShowFontFamily] = useState(false)
@@ -92,11 +93,28 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
 
   const applyColor = (color: string) => {
     setSelectedColor(color)
+    // Restaura a seleção antes de aplicar a cor
+    if (savedSelectionRef.current && editorRef.current) {
+      const sel = window.getSelection()
+      if (sel) {
+        sel.removeAllRanges()
+        sel.addRange(savedSelectionRef.current)
+        savedSelectionRef.current = null
+      }
+    }
+    editorRef.current?.focus()
     execCommand("foreColor", color)
     setShowColorPicker(false)
   }
 
   const openColorPicker = () => {
+    // Salva a seleção antes de abrir (editor ainda tem foco se usarmos preventDefault no botão)
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange()
+    } else {
+      savedSelectionRef.current = null
+    }
     setPreviewColor(selectedColor)
     setShowColorPicker(true)
     setShowFontSize(false)
@@ -223,6 +241,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
         <div className="relative">
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => showColorPicker ? setShowColorPicker(false) : openColorPicker()}
             className={`${toolbarBtn} flex items-center gap-1`}
             title="Cor do texto"
