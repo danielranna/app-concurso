@@ -589,6 +589,13 @@ function ResumoPeriodoContent() {
               onStatusChange={async (errorId, newStatus) => {
                 const errorToUpdate = errors.find(e => e.id === errorId)
                 if (!errorToUpdate) return
+                const previousStatus = errorToUpdate.error_status ?? "normal"
+                // Atualização otimista: badge muda na hora
+                setErrors(prev =>
+                  prev.map(e =>
+                    e.id === errorId ? { ...e, error_status: newStatus } : e
+                  )
+                )
                 const res = await fetch(`/api/errors/${errorId}`, {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
@@ -606,6 +613,12 @@ function ResumoPeriodoContent() {
                 if (res.ok) {
                   await loadErrors(userId!)
                   await loadErrorStatuses(userId!)
+                } else {
+                  setErrors(prev =>
+                    prev.map(e =>
+                      e.id === errorId ? { ...e, error_status: previousStatus } : e
+                    )
+                  )
                 }
               }}
             />

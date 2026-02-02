@@ -485,7 +485,14 @@
                     allCardsExpanded={allCardsExpanded}
                     availableStatuses={errorStatuses}
                     onStatusChange={async (errorId, newStatus) => {
-                        // Atualiza o status do erro
+                        const previousStatus = error.error_status
+                        // Atualização otimista: badge muda na hora
+                        setErrors(prev =>
+                            prev.map(e =>
+                                e.id === errorId ? { ...e, error_status: newStatus } : e
+                            )
+                        )
+
                         const res = await fetch(`/api/errors/${errorId}`, {
                             method: "PUT",
                             headers: { "Content-Type": "application/json" },
@@ -500,14 +507,20 @@
                                 error_status: newStatus
                             })
                         })
-                        
+
                         if (res.ok) {
-                            // Invalida o cache e recarrega erros e status
                             cache.invalidateErrors(userId!, subjectId)
                             await Promise.all([
                                 loadErrors(userId!),
                                 loadErrorStatuses(userId!)
                             ])
+                        } else {
+                            // Reverte a badge se a API falhar
+                            setErrors(prev =>
+                                prev.map(e =>
+                                    e.id === errorId ? { ...e, error_status: previousStatus } : e
+                                )
+                            )
                         }
                     }}
                 />
