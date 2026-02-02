@@ -47,10 +47,9 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
   const [selectedColor, setSelectedColor] = useState("#000000")
   const [isEmpty, setIsEmpty] = useState(true)
 
-  const colors = [
-    "#000000", "#FFFFFF", "#FF0000", "#00FF00", "#0000FF",
-    "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500", "#800080",
-    "#008000", "#800000", "#008080", "#FFC0CB", "#A52A2A"
+  const basicColors = [
+    "#000000", "#FF0000", "#008000", "#0000FF",
+    "#FFA500", "#6B7280"
   ]
 
   const [isInternalUpdate, setIsInternalUpdate] = useState(false)
@@ -229,24 +228,27 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
                 onClick={() => setShowColorPicker(false)}
               />
               <div className="absolute top-full left-0 z-20 mt-2 p-3 bg-white border border-slate-300 rounded-lg shadow-lg">
-                <div className="grid grid-cols-5 gap-2">
-                  {colors.map(color => (
+                <div className="flex flex-wrap gap-2">
+                  {basicColors.map(color => (
                     <button
                       key={color}
                       type="button"
                       onClick={() => applyColor(color)}
-                      className="w-8 h-8 rounded border border-slate-300 hover:scale-110 transition"
+                      className="w-7 h-7 rounded border border-slate-300 hover:ring-2 hover:ring-slate-400 transition shrink-0"
                       style={{ backgroundColor: color }}
                       title={color}
                     />
                   ))}
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200">
+                  <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                    Cor personalizada
+                  </label>
                   <input
                     type="color"
                     value={selectedColor}
                     onChange={(e) => applyColor(e.target.value)}
-                    className="w-full h-8 cursor-pointer"
+                    className="w-full h-9 cursor-pointer rounded border border-slate-300"
                   />
                 </div>
               </div>
