@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo, Suspense } from "react"
+import { useEffect, useLayoutEffect, useState, useMemo, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X } from "lucide-react"
@@ -141,27 +141,50 @@ function ResumoPeriodoContent() {
     }
   }, [router, searchParams, fromParam, toParam])
 
-  // Sincroniza filtro e período com a URL (qualquer mudança na query dispara o efeito)
+  // Sincroniza filtro e período com a URL
   const searchString = typeof searchParams?.toString === "function" ? searchParams.toString() : ""
 
+  // No cliente, ao montar: lê a URL real antes de pintar (evita flash "total")
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return
+    const p = new URLSearchParams(window.location.search)
+    const s = p.get("status")
+    if (s) {
+      try { setFilterType(decodeURIComponent(s)) } catch { setFilterType(s) }
+    } else {
+      setFilterType(p.get("type") || "total")
+    }
+    if (p.get("all") === "true") {
+      setPeriod("accumulated")
+    } else {
+      const periodVal = p.get("period")
+      if (periodVal === "this_week" || periodVal === "last_week" || periodVal === "accumulated" || periodVal === "custom") {
+        setPeriod(periodVal)
+        if (periodVal === "custom") {
+          const f = p.get("from") ?? getDefaultCustomRange().from
+          const t = p.get("to") ?? getDefaultCustomRange().to
+          setCustomFrom(f)
+          setCustomTo(t)
+        }
+      }
+    }
+  }, []) // só na montagem (cliente)
+
+  // Quando searchParams mudar (ex.: dropdown), sincroniza de novo
   useEffect(() => {
     const statusFromUrl = searchParams?.get("status") ?? ""
     const typeFromUrl = searchParams?.get("type") ?? "total"
     const periodFromUrl = searchParams?.get("period") ?? ""
     const allFromUrl = searchParams?.get("all") ?? ""
+    if (!statusFromUrl && typeFromUrl === "total" && !periodFromUrl && !allFromUrl) return
 
     if (statusFromUrl) {
-      try {
-        setFilterType(decodeURIComponent(statusFromUrl))
-      } catch {
-        setFilterType(statusFromUrl)
-      }
+      try { setFilterType(decodeURIComponent(statusFromUrl)) } catch { setFilterType(statusFromUrl) }
     } else {
       setFilterType(typeFromUrl === "total" ? "total" : typeFromUrl)
     }
-    if (allFromUrl === "true") {
-      setPeriod("accumulated")
-    } else if (["this_week", "last_week", "accumulated", "custom"].includes(periodFromUrl)) {
+    if (allFromUrl === "true") setPeriod("accumulated")
+    else if (["this_week", "last_week", "accumulated", "custom"].includes(periodFromUrl)) {
       setPeriod(periodFromUrl as Period)
       if (periodFromUrl === "custom") {
         const f = searchParams?.get("from") ?? getDefaultCustomRange().from

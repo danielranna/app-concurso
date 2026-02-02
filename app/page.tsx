@@ -46,6 +46,7 @@ export default function Home() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [errorStatuses, setErrorStatuses] = useState<ErrorStatus[]>([])
   const [errors, setErrors] = useState<Error[]>([])
+  const [dashboardKey, setDashboardKey] = useState(0)
 
   async function loadUser() {
     const {
@@ -140,8 +141,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* DASHBOARD COM ABAS */}
-      <section className="mb-8">
+      {/* DASHBOARD COM ABAS (key força re-render após config) */}
+      <section className="mb-8" key={dashboardKey}>
         <DashboardTabs>
           {(activeTab) => {
             if (activeTab === "semana") {
@@ -187,11 +188,15 @@ export default function Home() {
       {userId && (
         <SettingsModal
           open={openSettings}
-          onClose={() => {
+          onClose={async () => {
             setOpenSettings(false)
-            refreshDataAfterSettings()
+            await refreshDataAfterSettings()
+            setDashboardKey(k => k + 1)
           }}
-          onDataChange={refreshDataAfterSettings}
+          onDataChange={async () => {
+            await refreshDataAfterSettings()
+            setDashboardKey(k => k + 1)
+          }}
           userId={userId}
         />
       )}
