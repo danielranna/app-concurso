@@ -386,7 +386,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
               <>
                 <div className="mb-4 flex gap-2">
                   <input
-                    className="flex-1 rounded border p-2"
+                    className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     placeholder="Nome da matéria"
                     value={newSubject}
                     onChange={e => setNewSubject(e.target.value)}
@@ -422,7 +422,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
             {tab === "topics" && (
               <>
                 <select
-                  className="mb-3 w-full rounded border p-2"
+                  className="mb-3 w-full rounded border border-slate-300 p-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
                   value={selectedSubject}
                   onChange={e => {
                     setSelectedSubject(e.target.value)
@@ -441,7 +441,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
                   <>
                     <div className="mb-4 flex gap-2">
                       <input
-                        className="flex-1 rounded border p-2"
+                        className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
                         placeholder="Nome do tema"
                         value={newTopic}
                         onChange={e => setNewTopic(e.target.value)}
@@ -480,7 +480,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
               <>
                 <div className="mb-4 flex gap-2">
                   <input
-                    className="flex-1 rounded border p-2"
+                    className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     placeholder="Nome do tipo de erro"
                     value={newErrorType}
                     onChange={e => setNewErrorType(e.target.value)}
@@ -498,7 +498,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
 
                 <div className="grid grid-cols-3 gap-3">
                   {errorTypes.length === 0 ? (
-                    <p className="col-span-3 text-sm text-slate-500">
+                    <p className="col-span-3 text-sm text-slate-700">
                       Nenhum tipo de erro cadastrado ainda.
                     </p>
                   ) : (
@@ -528,7 +528,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
               <>
                 <div className="mb-4 flex gap-2">
                   <input
-                    className="flex-1 rounded border p-2"
+                    className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     placeholder="Nome do status"
                     value={newErrorStatus}
                     onChange={e => setNewErrorStatus(e.target.value)}
@@ -546,7 +546,7 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
 
                 <div className="grid grid-cols-3 gap-3">
                   {errorStatuses.length === 0 ? (
-                    <p className="col-span-3 text-sm text-slate-500">
+                    <p className="col-span-3 text-sm text-slate-700">
                       Nenhum status cadastrado ainda.
                     </p>
                   ) : (
