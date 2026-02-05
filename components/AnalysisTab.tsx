@@ -626,56 +626,11 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
             </div>
 
             <div className="space-y-6">
-              {/* Threshold de revisões */}
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Threshold de Revisões
-                </label>
-                <p className="text-xs text-slate-500 mb-2">
-                  Cards com mais revisões que isso entram na zona de atenção
-                </p>
-                <input
-                  type="number"
-                  value={tempConfig.review_threshold}
-                  onChange={(e) => setTempConfig({ ...tempConfig, review_threshold: parseInt(e.target.value) || 0 })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  min={1}
-                />
-              </div>
-
-              {/* Threshold de eficiência */}
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Threshold de Eficiência
-                </label>
-                <p className="text-xs text-slate-500 mb-2">
-                  Cards com eficiência menor que isso são problemáticos (0.0 - 1.0)
-                </p>
-                <input
-                  type="number"
-                  value={tempConfig.efficiency_threshold}
-                  onChange={(e) => setTempConfig({ ...tempConfig, efficiency_threshold: parseFloat(e.target.value) || 0 })}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                />
-              </div>
-
-              {/* Flag automática */}
-              <div>
-                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={tempConfig.auto_flag_enabled}
-                    onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
-                    className="rounded border-slate-300"
-                  />
-                  Flag automática
-                </label>
-                <p className="mt-1 text-xs text-slate-500">
-                  Aplicar flag automaticamente em cards que cruzam os thresholds
-                </p>
+              {/* Explicação geral */}
+              <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
+                <p className="font-medium mb-1">Como funciona a análise?</p>
+                <p>A eficiência de um card é calculada: <strong>Peso do Status ÷ Número de Revisões</strong>.</p>
+                <p className="mt-1">Exemplo: Um card "Consolidado" (peso 4) com 20 revisões tem eficiência de 0.20. Um card "Difícil" (peso 1) com 50 revisões tem eficiência de 0.02 — muito baixa, precisa de atenção.</p>
               </div>
 
               {/* Pesos dos status */}
@@ -683,14 +638,17 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                 <label className="text-sm font-medium text-slate-700">
                   Pesos dos Status
                 </label>
-                <p className="text-xs text-slate-500 mb-2">
-                  Maior peso = status mais avançado
+                <p className="text-xs text-slate-500 mb-1">
+                  Defina um valor numérico para cada status representando seu nível de progresso.
                 </p>
-                <div className="space-y-2">
+                <p className="text-xs text-slate-500 mb-3">
+                  <strong>Dica:</strong> Status mais avançados (ex: "Consolidado") devem ter pesos maiores. Status iniciais (ex: "Difícil") devem ter pesos menores.
+                </p>
+                <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                   {errorStatuses.map((status, index) => (
                     <div key={status.id} className="flex items-center gap-3">
                       <span
-                        className="h-3 w-3 rounded-full"
+                        className="h-3 w-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: status.color || DEFAULT_STATUS_COLOR }}
                       />
                       <span className="flex-1 text-sm text-slate-700">{status.name}</span>
@@ -708,6 +666,64 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Threshold de revisões */}
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Mínimo de Revisões para Análise
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Só analisa cards com pelo menos este número de revisões. Cards com poucas revisões ainda não têm dados suficientes para avaliar.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={tempConfig.review_threshold}
+                    onChange={(e) => setTempConfig({ ...tempConfig, review_threshold: parseInt(e.target.value) || 0 })}
+                    className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    min={1}
+                  />
+                  <span className="text-sm text-slate-500">revisões</span>
+                </div>
+              </div>
+
+              {/* Threshold de eficiência */}
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Eficiência Mínima Aceitável
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Cards com eficiência abaixo deste valor são considerados problemáticos. Quanto menor o número, mais tolerante.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={tempConfig.efficiency_threshold}
+                    onChange={(e) => setTempConfig({ ...tempConfig, efficiency_threshold: parseFloat(e.target.value) || 0 })}
+                    className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                  />
+                  <span className="text-xs text-slate-500">(0.05 = muito rígido, 0.2 = moderado, 0.5 = tolerante)</span>
+                </div>
+              </div>
+
+              {/* Flag automática */}
+              <div className="rounded-lg border border-slate-200 p-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={tempConfig.auto_flag_enabled}
+                    onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
+                    className="rounded border-slate-300"
+                  />
+                  Sugerir flag automaticamente
+                </label>
+                <p className="mt-1 text-xs text-slate-500">
+                  Destaca automaticamente cards que ultrapassam o mínimo de revisões e têm eficiência abaixo do aceitável. Você ainda decide se quer aplicar a flag.
+                </p>
               </div>
 
               <div className="flex gap-2 pt-2">
