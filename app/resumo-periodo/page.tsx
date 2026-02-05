@@ -153,43 +153,7 @@ function ResumoPeriodoContent() {
     }
   }, [])
 
-  const startNewReview = useCallback(async () => {
-    if (!userId || filteredErrors.length === 0) return
-    setReviewLoading(true)
-
-    try {
-      // Cancela sessão anterior se existir
-      if (reviewSession?.id) {
-        await fetch(`/api/review-sessions/${reviewSession.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "cancel" })
-        })
-      }
-
-      // Cria nova sessão
-      const res = await fetch("/api/review-sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          filters: { period, filterType, customFrom, customTo },
-          card_ids: filteredErrors.map(e => e.id)
-        })
-      })
-
-      const newSession = await res.json()
-      if (newSession && newSession.id) {
-        setReviewSession(newSession)
-        setReviewMode(true)
-        setShowReviewModal(false)
-      }
-    } catch (error) {
-      console.error("Erro ao iniciar revisão:", error)
-    } finally {
-      setReviewLoading(false)
-    }
-  }, [userId, filteredErrors, reviewSession, period, filterType, customFrom, customTo])
+  // startNewReview é definida após filteredErrors (veja abaixo)
 
   const continueReview = useCallback(() => {
     setReviewMode(true)
@@ -417,6 +381,45 @@ function ResumoPeriodoContent() {
     const name = filterType.toLowerCase().trim()
     return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
   }, [periodErrors, filterType])
+
+  // Função para iniciar nova revisão (declarada após filteredErrors)
+  async function startNewReview() {
+    if (!userId || filteredErrors.length === 0) return
+    setReviewLoading(true)
+
+    try {
+      // Cancela sessão anterior se existir
+      if (reviewSession?.id) {
+        await fetch(`/api/review-sessions/${reviewSession.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cancel" })
+        })
+      }
+
+      // Cria nova sessão
+      const res = await fetch("/api/review-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          filters: { period, filterType, customFrom, customTo },
+          card_ids: filteredErrors.map(e => e.id)
+        })
+      })
+
+      const newSession = await res.json()
+      if (newSession && newSession.id) {
+        setReviewSession(newSession)
+        setReviewMode(true)
+        setShowReviewModal(false)
+      }
+    } catch (error) {
+      console.error("Erro ao iniciar revisão:", error)
+    } finally {
+      setReviewLoading(false)
+    }
+  }
 
   // Cards para exibição durante a revisão (exclui os já revisados)
   const reviewErrors = useMemo(() => {
