@@ -67,50 +67,61 @@ export async function GET(req: Request) {
       .eq("user_id", user_id)
       .single()
 
-    // Configuração padrão se não existir
-    const defaultConfig = {
-      status_weights: {},
-      review_threshold: 30,
-      efficiency_threshold: 150,
-      auto_flag_enabled: true
-    }
-
-    const config = preferences?.analysis_config || defaultConfig
-
-    // Busca os status do usuário para criar pesos padrão
+    // Busca os status do usuário
     const { data: errorStatuses } = await supabaseServer
       .from("error_statuses")
       .select("id, name, color")
       .eq("user_id", user_id)
       .order("created_at", { ascending: true })
 
-    // Se não há pesos configurados, cria pesos padrão baseado na ordem dos status
-    // INVERTIDO: primeiro status (difícil) = peso maior, último (consolidado) = peso menor
-    let statusWeights = config.status_weights || {}
-    if (Object.keys(statusWeights).length === 0 && errorStatuses) {
+    // Configuração padrão se não existir
+    const defaultConfig: {
+      status_config: { [key: string]: { weight: number; expected_reviews: number } }
+      auto_flag_enabled: boolean
+    } = {
+      status_config: {},
+      auto_flag_enabled: true
+    }
+
+    // Cria config padrão para cada status se não existir
+    if (errorStatuses) {
       const total = errorStatuses.length
       errorStatuses.forEach((status, index) => {
-        // Inverte: primeiro = peso alto, último = peso baixo
-        statusWeights[status.name] = total - 1 - index
+        defaultConfig.status_config[status.name] = {
+          // Peso invertido: primeiro status = peso alto, último = peso baixo
+          weight: total - 1 - index,
+          // Revisões esperadas padrão: 5
+          expected_reviews: 5
+        }
+      })
+    }
+
+    const config = preferences?.analysis_config || defaultConfig
+
+    // Mescla configs padrão com configs do usuário (para status novos)
+    const statusConfig: { [key: string]: { weight: number; expected_reviews: number } } = { ...defaultConfig.status_config }
+    if (config.status_config) {
+      Object.keys(config.status_config).forEach(key => {
+        statusConfig[key] = config.status_config[key]
       })
     }
 
     // Calcula índice de problema para cada card
+    // NOVA LÓGICA: excesso = revisões - esperadas, índice = excesso × peso
     const analysisData = (errors ?? []).map(error => {
       const statusName = error.error_status || ""
-      const weight = statusWeights[statusName] ?? 0
+      const statusCfg = statusConfig[statusName] || { weight: 1, expected_reviews: 5 }
       const reviewCount = error.review_count || 0
       
-      // Índice de Problema: revisões × peso (quanto MAIOR, pior)
-      // Cards com status de peso alto (difícil) e muitas revisões = problemático
-      // Cards com status de peso baixo (consolidado) = índice baixo = ok
-      const problemIndex = reviewCount * weight
+      // Calcula excesso de revisões
+      const excessReviews = Math.max(0, reviewCount - statusCfg.expected_reviews)
+      
+      // Índice de Problema: excesso × peso (quanto MAIOR, pior)
+      // Só conta o excesso, não o total de revisões
+      const problemIndex = excessReviews * statusCfg.weight
 
-      // Determina se precisa de atenção baseado nos thresholds
-      // Card problemático: muitas revisões E índice acima do threshold
-      const needsAttention = 
-        reviewCount >= config.review_threshold && 
-        problemIndex > config.efficiency_threshold
+      // Precisa de atenção se tem excesso (passou das revisões esperadas)
+      const needsAttention = excessReviews > 0
 
       // Acessa topics (vem como array do Supabase)
       const topicsArray = error.topics as unknown as { id: string; name: string; subject_id: string; subjects: { id: string; name: string }[] }[] | null
@@ -124,7 +135,9 @@ export async function GET(req: Request) {
         error_status: error.error_status,
         error_type: error.error_type,
         review_count: reviewCount,
-        status_weight: weight,
+        expected_reviews: statusCfg.expected_reviews,
+        excess_reviews: excessReviews,
+        status_weight: statusCfg.weight,
         problem_index: problemIndex,
         needs_attention: needsAttention,
         needs_intervention: error.needs_intervention || false,
@@ -169,8 +182,8 @@ export async function GET(req: Request) {
           : null
       },
       config: {
-        ...config,
-        status_weights: statusWeights
+        status_config: statusConfig,
+        auto_flag_enabled: config.auto_flag_enabled ?? true
       },
       statuses: errorStatuses || []
     })

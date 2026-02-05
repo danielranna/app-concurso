@@ -22,6 +22,8 @@ type AnalysisCard = {
   error_status: string
   error_type: string
   review_count: number
+  expected_reviews: number
+  excess_reviews: number
   status_weight: number
   problem_index: number
   needs_attention: boolean
@@ -35,10 +37,13 @@ type AnalysisCard = {
   topic_name: string
 }
 
+type StatusConfig = {
+  weight: number
+  expected_reviews: number
+}
+
 type AnalysisConfig = {
-  status_weights: { [key: string]: number }
-  review_threshold: number
-  efficiency_threshold: number
+  status_config: { [key: string]: StatusConfig }
   auto_flag_enabled: boolean
 }
 
@@ -73,9 +78,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     most_problematic_subject: { name: string; count: number } | null
   }>({ total: 0, flagged: 0, attention: 0, most_problematic_subject: null })
   const [config, setConfig] = useState<AnalysisConfig>({
-    status_weights: {},
-    review_threshold: 30,
-    efficiency_threshold: 150,
+    status_config: {},
     auto_flag_enabled: true
   })
   const [loading, setLoading] = useState(true)
@@ -126,6 +129,15 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     loadAnalysisData()
   }, [loadAnalysisData])
 
+  // Mapeamento de status para índice no eixo Y (para mostrar nomes)
+  const statusIndexMap = useMemo(() => {
+    const map: { [key: string]: number } = {}
+    errorStatuses.forEach((status, index) => {
+      map[status.name] = index
+    })
+    return map
+  }, [errorStatuses])
+
   // Dados para o gráfico
   const chartData = useMemo(() => {
     return cards
@@ -133,21 +145,18 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
       .map(card => ({
         ...card,
         x: card.review_count,
-        y: card.status_weight,
+        y: statusIndexMap[card.error_status] ?? 0, // Índice do status para eixo Y
         // Cor baseada no status de atenção/flag
         color: card.needs_intervention 
           ? "#ef4444" // Vermelho para flagados
           : card.needs_attention 
-            ? "#f59e0b" // Laranja para zona de atenção
+            ? "#f59e0b" // Laranja para zona de atenção (excesso > 0)
             : "#22c55e" // Verde para ok
       }))
-  }, [cards])
+  }, [cards, statusIndexMap])
 
-  // Maior peso de status (para o eixo Y)
-  const maxStatusWeight = useMemo(() => {
-    const weights = Object.values(config.status_weights)
-    return weights.length > 0 ? Math.max(...weights) + 1 : 5
-  }, [config.status_weights])
+  // Número de status (para o eixo Y)
+  const maxStatusIndex = errorStatuses.length
 
   // Aplicar flag em cards selecionados
   const applyFlag = async (flag: boolean) => {
@@ -210,13 +219,22 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           <div className="space-y-1 text-xs text-slate-600">
             <p><span className="font-medium">Matéria:</span> {card.subject_name}</p>
             <p><span className="font-medium">Status:</span> {card.error_status}</p>
-            <p><span className="font-medium">Revisões:</span> {card.review_count}</p>
-            <p><span className="font-medium">Índice de Problema:</span> {card.problem_index}</p>
+            <p><span className="font-medium">Revisões:</span> {card.review_count} / {card.expected_reviews} esperadas</p>
+            {card.excess_reviews > 0 && (
+              <p className="text-amber-600">
+                <span className="font-medium">Excesso:</span> +{card.excess_reviews} revisões
+              </p>
+            )}
+            {card.problem_index > 0 && (
+              <p className="text-red-600">
+                <span className="font-medium">Índice de Problema:</span> {card.problem_index}
+              </p>
+            )}
           </div>
           {(card.needs_attention || card.needs_intervention) && (
             <div className="mt-2 flex items-center gap-1 text-xs font-medium text-red-600">
               <AlertTriangle className="h-3 w-3" />
-              {card.needs_intervention ? "Flagado para intervenção" : "Zona de atenção"}
+              {card.needs_intervention ? "Flagado para intervenção" : "Excedeu revisões esperadas"}
             </div>
           )}
         </div>
@@ -425,10 +443,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           </div>
         </div>
 
-        <div style={{ width: "100%", height: 400 }}>
+        <div style={{ width: "100%", height: Math.max(400, errorStatuses.length * 60) }}>
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+              <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 100 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
                   type="number"
@@ -436,26 +454,20 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   name="Revisões"
                   stroke="#64748b"
                   style={{ fontSize: "12px" }}
-                  label={{ value: "Número de Revisões", position: "bottom", offset: 0, style: { fontSize: "12px", fill: "#64748b" } }}
+                  label={{ value: "Número de Revisões", position: "bottom", offset: 10, style: { fontSize: "12px", fill: "#64748b" } }}
                 />
                 <YAxis
                   type="number"
                   dataKey="y"
                   name="Status"
                   stroke="#64748b"
-                  style={{ fontSize: "12px" }}
-                  domain={[0, maxStatusWeight]}
-                  label={{ value: "Peso do Status", angle: -90, position: "insideLeft", style: { fontSize: "12px", fill: "#64748b" } }}
+                  style={{ fontSize: "11px" }}
+                  domain={[-0.5, maxStatusIndex - 0.5]}
+                  ticks={errorStatuses.map((_, i) => i)}
+                  tickFormatter={(value) => errorStatuses[value]?.name || ""}
+                  width={90}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                
-                {/* Linha de threshold de revisões */}
-                <ReferenceLine
-                  x={config.review_threshold}
-                  stroke="#f59e0b"
-                  strokeDasharray="5 5"
-                  label={{ value: `${config.review_threshold} revisões`, position: "top", style: { fontSize: "10px", fill: "#f59e0b" } }}
-                />
 
                 <Scatter
                   data={chartData}
@@ -541,19 +553,31 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500">Revisões</label>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">{selectedCard.review_count}</p>
+                  <p className="mt-1 text-sm text-slate-800">
+                    <span className="font-semibold">{selectedCard.review_count}</span>
+                    <span className="text-slate-500"> / {selectedCard.expected_reviews} esperadas</span>
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500">Índice de Problema</label>
+                  <label className="text-xs font-medium text-slate-500">Excesso</label>
                   <p className={`mt-1 text-sm font-semibold ${
-                    selectedCard.problem_index > config.efficiency_threshold
-                      ? "text-red-600"
-                      : "text-green-600"
+                    selectedCard.excess_reviews > 0 ? "text-amber-600" : "text-green-600"
                   }`}>
-                    {selectedCard.problem_index}
+                    {selectedCard.excess_reviews > 0 ? `+${selectedCard.excess_reviews}` : "0"}
                   </p>
                 </div>
               </div>
+
+              {selectedCard.problem_index > 0 && (
+                <div className="rounded-lg bg-amber-50 p-3">
+                  <p className="text-sm text-amber-800">
+                    <span className="font-medium">Índice de Problema:</span> {selectedCard.problem_index}
+                    <span className="text-amber-600 text-xs ml-2">
+                      ({selectedCard.excess_reviews} excesso × {selectedCard.status_weight} peso)
+                    </span>
+                  </p>
+                </div>
+              )}
 
               {selectedCard.needs_intervention && (
                 <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -623,84 +647,77 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
               {/* Explicação geral */}
               <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
                 <p className="font-medium mb-1">Como funciona a análise?</p>
-                <p>O <strong>Índice de Problema</strong> é calculado: <strong>Revisões × Peso do Status</strong>.</p>
-                <p className="mt-1">Exemplo: Um card "Difícil" (peso 4) com 50 revisões = índice 200 (problemático!). Um card "Consolidado" (peso 0) com 50 revisões = índice 0 (resolvido).</p>
+                <p>Cada status tem um número de <strong>revisões esperadas</strong>. Quando um card ultrapassa esse limite, o <strong>excesso</strong> é multiplicado pelo <strong>peso</strong>.</p>
+                <p className="mt-1">Exemplo: Status "Normal" espera 3 revisões (peso 2). Se um card tem 7 revisões, o excesso é 4. Índice de problema = 4 × 2 = <strong>8</strong>.</p>
               </div>
 
-              {/* Pesos dos status */}
+              {/* Configuração por status */}
               <div>
                 <label className="text-sm font-medium text-slate-700">
-                  Peso de Dificuldade dos Status
+                  Configuração por Status
                 </label>
-                <p className="text-xs text-slate-500 mb-1">
-                  Defina um valor numérico para cada status representando seu nível de dificuldade.
-                </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  <strong>Dica:</strong> Status problemáticos (ex: "Difícil") devem ter pesos maiores. Status resolvidos (ex: "Consolidado") devem ter peso 0 ou baixo.
+                  Defina quantas revisões são esperadas para cada status e o peso do excesso. Status problemáticos devem ter menos revisões esperadas e peso maior.
                 </p>
-                <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-                  {errorStatuses.map((status, index) => (
-                    <div key={status.id} className="flex items-center gap-3">
-                      <span
-                        className="h-3 w-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: status.color || DEFAULT_STATUS_COLOR }}
-                      />
-                      <span className="flex-1 text-sm text-slate-700">{status.name}</span>
-                      <input
-                        type="number"
-                        value={tempConfig.status_weights[status.name] ?? (errorStatuses.length - 1 - index)}
-                        onChange={(e) => {
-                          const newWeights = { ...tempConfig.status_weights }
-                          newWeights[status.name] = parseInt(e.target.value) || 0
-                          setTempConfig({ ...tempConfig, status_weights: newWeights })
-                        }}
-                        className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm text-center"
-                        min={0}
-                      />
-                    </div>
-                  ))}
+                
+                {/* Cabeçalho da tabela */}
+                <div className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-500 border-b border-slate-200">
+                  <span className="flex-1">Status</span>
+                  <span className="w-20 text-center">Esperadas</span>
+                  <span className="w-16 text-center">Peso</span>
                 </div>
-              </div>
-
-              {/* Threshold de revisões */}
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Mínimo de Revisões para Análise
-                </label>
-                <p className="text-xs text-slate-500 mb-2">
-                  Só analisa cards com pelo menos este número de revisões. Cards com poucas revisões ainda não têm dados suficientes para avaliar.
+                
+                <div className="space-y-1 rounded-lg border border-slate-200 p-2">
+                  {errorStatuses.map((status, index) => {
+                    const statusConfig = tempConfig.status_config[status.name] || {
+                      expected_reviews: 5,
+                      weight: errorStatuses.length - 1 - index
+                    }
+                    return (
+                      <div key={status.id} className="flex items-center gap-2 py-1">
+                        <span
+                          className="h-3 w-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: status.color || DEFAULT_STATUS_COLOR }}
+                        />
+                        <span className="flex-1 text-sm text-slate-700 truncate">{status.name}</span>
+                        <input
+                          type="number"
+                          value={statusConfig.expected_reviews}
+                          onChange={(e) => {
+                            const newConfig = { ...tempConfig.status_config }
+                            newConfig[status.name] = {
+                              ...statusConfig,
+                              expected_reviews: parseInt(e.target.value) || 1
+                            }
+                            setTempConfig({ ...tempConfig, status_config: newConfig })
+                          }}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm text-center"
+                          min={1}
+                          placeholder="Esperadas"
+                        />
+                        <input
+                          type="number"
+                          value={statusConfig.weight}
+                          onChange={(e) => {
+                            const newConfig = { ...tempConfig.status_config }
+                            newConfig[status.name] = {
+                              ...statusConfig,
+                              weight: parseInt(e.target.value) || 0
+                            }
+                            setTempConfig({ ...tempConfig, status_config: newConfig })
+                          }}
+                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm text-center"
+                          min={0}
+                          placeholder="Peso"
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+                
+                <p className="mt-2 text-xs text-slate-400">
+                  <strong>Dica:</strong> "Consolidado" pode ter peso 0 (nunca gera índice). "Difícil" pode ter poucas revisões esperadas e peso alto.
                 </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={tempConfig.review_threshold}
-                    onChange={(e) => setTempConfig({ ...tempConfig, review_threshold: parseInt(e.target.value) || 0 })}
-                    className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    min={1}
-                  />
-                  <span className="text-sm text-slate-500">revisões</span>
-                </div>
-              </div>
-
-              {/* Threshold de índice de problema */}
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Índice Máximo Aceitável
-                </label>
-                <p className="text-xs text-slate-500 mb-2">
-                  Cards com índice de problema acima deste valor são considerados problemáticos. Quanto maior o número, mais tolerante.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={tempConfig.efficiency_threshold}
-                    onChange={(e) => setTempConfig({ ...tempConfig, efficiency_threshold: parseFloat(e.target.value) || 0 })}
-                    className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    min={0}
-                    step={10}
-                  />
-                  <span className="text-xs text-slate-500">(ex: 100 = rígido, 200 = moderado, 500 = tolerante)</span>
-                </div>
               </div>
 
               {/* Flag automática */}
@@ -712,10 +729,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
                     className="rounded border-slate-300"
                   />
-                  Sugerir flag automaticamente
+                  Destacar automaticamente cards com excesso
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Destaca automaticamente cards que ultrapassam o mínimo de revisões e têm índice de problema acima do aceitável. Você ainda decide se quer aplicar a flag.
+                  Cards que ultrapassam as revisões esperadas aparecem em laranja no gráfico. Você decide quando aplicar a flag vermelha.
                 </p>
               </div>
             </div>

@@ -20,9 +20,7 @@ ON errors(user_id, needs_intervention) WHERE needs_intervention = TRUE;
 -- 3. Adicionar configurações de análise em user_preferences
 ALTER TABLE user_preferences
 ADD COLUMN IF NOT EXISTS analysis_config JSONB DEFAULT '{
-  "status_weights": {},
-  "review_threshold": 30,
-  "efficiency_threshold": 150,
+  "status_config": {},
   "auto_flag_enabled": true
 }'::jsonb;
 
