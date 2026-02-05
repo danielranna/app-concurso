@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
+import { ChevronDown } from "lucide-react"
 
 type Error = {
   id: string
@@ -34,6 +35,27 @@ const DEFAULT_STATUS_COLOR = "#64748b"
 
 export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Props) {
   const router = useRouter()
+  
+  // Estado para o status selecionado no gráfico de matérias por status
+  const [selectedStatusId, setSelectedStatusId] = useState<string | null>(null)
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false)
+  
+  // Inicializa o status selecionado quando os errorStatuses carregam
+  useEffect(() => {
+    if (errorStatuses.length > 0 && !selectedStatusId) {
+      // Tenta encontrar um status que tenha erros associados
+      const statusWithErrors = errorStatuses.find(status => 
+        errors.some(e => (e.error_status || "").toLowerCase().trim() === (status.name || "").toLowerCase().trim())
+      )
+      // Se não encontrar, usa o primeiro status disponível
+      setSelectedStatusId(statusWithErrors?.id || errorStatuses[0]?.id || null)
+    }
+  }, [errorStatuses, errors, selectedStatusId])
+  
+  // Status atualmente selecionado
+  const selectedStatus = useMemo(() => {
+    return errorStatuses.find(s => s.id === selectedStatusId) || errorStatuses[0] || null
+  }, [errorStatuses, selectedStatusId])
 
   // Total + contagem por status (lista dinâmica com cores)
   const totalErrors = errors.length
@@ -111,14 +133,17 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
       .sort((a, b) => b.quantidade - a.quantidade)
   }, [errors])
 
-  // ERROS REINCIDENTES NO LONGO PRAZO (matérias com mais erros com status "Reincidente")
-  const reincidentSubjects = useMemo(() => {
-    const subjectErrors: { [key: string]: number } = {}
+  // ERROS POR MATÉRIA PARA O STATUS SELECIONADO (dinâmico)
+  const subjectsBySelectedStatus = useMemo(() => {
+    if (!selectedStatus) return []
     
-    // Conta apenas erros com status "Reincidente"
+    const subjectErrors: { [key: string]: number } = {}
+    const selectedStatusName = (selectedStatus.name || "").toLowerCase().trim()
+    
+    // Conta apenas erros com o status selecionado
     errors.forEach(error => {
       const status = (error.error_status || "").toLowerCase().trim()
-      if (status === "reincidente") {
+      if (status === selectedStatusName) {
         const subjectName = error.topics?.subjects?.name || "Sem matéria"
         subjectErrors[subjectName] = (subjectErrors[subjectName] || 0) + 1
       }
@@ -131,7 +156,7 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
       }))
       .sort((a, b) => b.quantidade - a.quantidade)
       .slice(0, 8)
-  }, [errors])
+  }, [errors, selectedStatus])
 
   return (
     <div className="space-y-6">
@@ -384,15 +409,78 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
         </div>
       </div>
 
-      {/* ERROS REINCIDENTES NO LONGO PRAZO */}
+      {/* ERROS POR MATÉRIA - STATUS SELECIONADO */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-lg font-semibold text-slate-800">
-          Matérias com Maior Reincidência (Histórico)
-        </h3>
-        <div style={{ width: "100%", height: Math.max(250, reincidentSubjects.length * 50) }}>
-          {reincidentSubjects.length > 0 ? (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-lg font-semibold text-slate-800">
+            Matérias por Status (Histórico)
+          </h3>
+          
+          {/* Dropdown para selecionar o status */}
+          {errorStatuses.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium transition hover:bg-slate-50"
+                style={{ 
+                  borderLeftWidth: 4, 
+                  borderLeftColor: selectedStatus?.color || DEFAULT_STATUS_COLOR 
+                }}
+              >
+                <span 
+                  className="h-3 w-3 rounded-full" 
+                  style={{ backgroundColor: selectedStatus?.color || DEFAULT_STATUS_COLOR }}
+                />
+                <span className="text-slate-700">{selectedStatus?.name || "Selecionar status"}</span>
+                <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${isStatusDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {isStatusDropdownOpen && (
+                <>
+                  {/* Overlay para fechar o dropdown ao clicar fora */}
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setIsStatusDropdownOpen(false)}
+                  />
+                  
+                  {/* Dropdown menu */}
+                  <div className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    {errorStatuses.map((status) => {
+                      const isSelected = status.id === selectedStatusId
+                      const statusColor = status.color || DEFAULT_STATUS_COLOR
+                      return (
+                        <button
+                          key={status.id}
+                          onClick={() => {
+                            setSelectedStatusId(status.id)
+                            setIsStatusDropdownOpen(false)
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-50 ${
+                            isSelected ? 'bg-slate-100' : ''
+                          }`}
+                        >
+                          <span 
+                            className="h-3 w-3 rounded-full" 
+                            style={{ backgroundColor: statusColor }}
+                          />
+                          <span className="text-slate-700">{status.name}</span>
+                          {isSelected && (
+                            <span className="ml-auto text-slate-400">✓</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        
+        <div style={{ width: "100%", height: Math.max(250, subjectsBySelectedStatus.length * 50) }}>
+          {subjectsBySelectedStatus.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={reincidentSubjects} layout="vertical">
+              <BarChart data={subjectsBySelectedStatus} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis 
                   type="number"
@@ -414,17 +502,19 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
                     borderRadius: "8px",
                     padding: "8px 12px"
                   }}
+                  formatter={(value: number) => [value, selectedStatus?.name || "Quantidade"]}
                 />
                 <Bar 
                   dataKey="quantidade" 
-                  fill="#dc2626"
+                  fill={selectedStatus?.color || DEFAULT_STATUS_COLOR}
                   radius={[0, 8, 8, 0]}
                 />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex h-full items-center justify-center text-slate-500">
-              Nenhum dado disponível
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-500">
+              <p>Nenhum erro com status "{selectedStatus?.name || '...'}"</p>
+              <p className="text-sm text-slate-400">Selecione outro status para visualizar</p>
             </div>
           )}
         </div>
