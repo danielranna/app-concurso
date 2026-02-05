@@ -71,7 +71,7 @@ export async function GET(req: Request) {
     const defaultConfig = {
       status_weights: {},
       review_threshold: 30,
-      efficiency_threshold: 0.1,
+      efficiency_threshold: 150,
       auto_flag_enabled: true
     }
 
@@ -85,30 +85,32 @@ export async function GET(req: Request) {
       .order("created_at", { ascending: true })
 
     // Se não há pesos configurados, cria pesos padrão baseado na ordem dos status
+    // INVERTIDO: primeiro status (difícil) = peso maior, último (consolidado) = peso menor
     let statusWeights = config.status_weights || {}
     if (Object.keys(statusWeights).length === 0 && errorStatuses) {
+      const total = errorStatuses.length
       errorStatuses.forEach((status, index) => {
-        statusWeights[status.name] = index
+        // Inverte: primeiro = peso alto, último = peso baixo
+        statusWeights[status.name] = total - 1 - index
       })
     }
 
-    // Calcula eficiência para cada card
+    // Calcula índice de problema para cada card
     const analysisData = (errors ?? []).map(error => {
       const statusName = error.error_status || ""
       const weight = statusWeights[statusName] ?? 0
       const reviewCount = error.review_count || 0
       
-      // Eficiência: peso / revisões (quanto maior, melhor)
-      // Se não tem revisões, eficiência é null (não calculável)
-      const efficiency = reviewCount > 0 
-        ? Math.round((weight / reviewCount) * 10000) / 10000 
-        : null
+      // Índice de Problema: revisões × peso (quanto MAIOR, pior)
+      // Cards com status de peso alto (difícil) e muitas revisões = problemático
+      // Cards com status de peso baixo (consolidado) = índice baixo = ok
+      const problemIndex = reviewCount * weight
 
       // Determina se precisa de atenção baseado nos thresholds
+      // Card problemático: muitas revisões E índice acima do threshold
       const needsAttention = 
         reviewCount >= config.review_threshold && 
-        efficiency !== null && 
-        efficiency < config.efficiency_threshold
+        problemIndex > config.efficiency_threshold
 
       // Acessa topics (vem como array do Supabase)
       const topicsArray = error.topics as unknown as { id: string; name: string; subject_id: string; subjects: { id: string; name: string }[] }[] | null
@@ -123,7 +125,7 @@ export async function GET(req: Request) {
         error_type: error.error_type,
         review_count: reviewCount,
         status_weight: weight,
-        efficiency,
+        problem_index: problemIndex,
         needs_attention: needsAttention,
         needs_intervention: error.needs_intervention || false,
         intervention_flagged_at: error.intervention_flagged_at,

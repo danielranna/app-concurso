@@ -22,7 +22,7 @@ ALTER TABLE user_preferences
 ADD COLUMN IF NOT EXISTS analysis_config JSONB DEFAULT '{
   "status_weights": {},
   "review_threshold": 30,
-  "efficiency_threshold": 0.1,
+  "efficiency_threshold": 150,
   "auto_flag_enabled": true
 }'::jsonb;
 

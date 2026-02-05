@@ -23,7 +23,7 @@ type AnalysisCard = {
   error_type: string
   review_count: number
   status_weight: number
-  efficiency: number | null
+  problem_index: number
   needs_attention: boolean
   needs_intervention: boolean
   intervention_flagged_at: string | null
@@ -76,7 +76,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
   const [config, setConfig] = useState<AnalysisConfig>({
     status_weights: {},
     review_threshold: 30,
-    efficiency_threshold: 0.1,
+    efficiency_threshold: 150,
     auto_flag_enabled: true
   })
   const [loading, setLoading] = useState(true)
@@ -217,7 +217,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
             <p><span className="font-medium">Matéria:</span> {card.subject_name}</p>
             <p><span className="font-medium">Status:</span> {card.error_status}</p>
             <p><span className="font-medium">Revisões:</span> {card.review_count}</p>
-            <p><span className="font-medium">Eficiência:</span> {card.efficiency?.toFixed(4) || "N/A"}</p>
+            <p><span className="font-medium">Índice de Problema:</span> {card.problem_index}</p>
           </div>
           {(card.needs_attention || card.needs_intervention) && (
             <div className="mt-2 flex items-center gap-1 text-xs font-medium text-red-600">
@@ -550,13 +550,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                   <p className="mt-1 text-sm font-semibold text-slate-800">{selectedCard.review_count}</p>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500">Eficiência</label>
+                  <label className="text-xs font-medium text-slate-500">Índice de Problema</label>
                   <p className={`mt-1 text-sm font-semibold ${
-                    selectedCard.efficiency && selectedCard.efficiency < config.efficiency_threshold
+                    selectedCard.problem_index > config.efficiency_threshold
                       ? "text-red-600"
                       : "text-green-600"
                   }`}>
-                    {selectedCard.efficiency?.toFixed(4) || "N/A"}
+                    {selectedCard.problem_index}
                   </p>
                 </div>
               </div>
@@ -611,8 +611,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
       {/* PAINEL DE CONFIGURAÇÕES */}
       {showConfigPanel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
+          <div className="w-full max-w-md max-h-[90vh] flex flex-col rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-200">
               <h3 className="text-lg font-semibold text-slate-800">Configurações de Análise</h3>
               <button
                 onClick={() => {
@@ -625,24 +625,24 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
               </button>
             </div>
 
-            <div className="space-y-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Explicação geral */}
               <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
                 <p className="font-medium mb-1">Como funciona a análise?</p>
-                <p>A eficiência de um card é calculada: <strong>Peso do Status ÷ Número de Revisões</strong>.</p>
-                <p className="mt-1">Exemplo: Um card "Consolidado" (peso 4) com 20 revisões tem eficiência de 0.20. Um card "Difícil" (peso 1) com 50 revisões tem eficiência de 0.02 — muito baixa, precisa de atenção.</p>
+                <p>O <strong>Índice de Problema</strong> é calculado: <strong>Revisões × Peso do Status</strong>.</p>
+                <p className="mt-1">Exemplo: Um card "Difícil" (peso 4) com 50 revisões = índice 200 (problemático!). Um card "Consolidado" (peso 0) com 50 revisões = índice 0 (resolvido).</p>
               </div>
 
               {/* Pesos dos status */}
               <div>
                 <label className="text-sm font-medium text-slate-700">
-                  Pesos dos Status
+                  Peso de Dificuldade dos Status
                 </label>
                 <p className="text-xs text-slate-500 mb-1">
-                  Defina um valor numérico para cada status representando seu nível de progresso.
+                  Defina um valor numérico para cada status representando seu nível de dificuldade.
                 </p>
                 <p className="text-xs text-slate-500 mb-3">
-                  <strong>Dica:</strong> Status mais avançados (ex: "Consolidado") devem ter pesos maiores. Status iniciais (ex: "Difícil") devem ter pesos menores.
+                  <strong>Dica:</strong> Status problemáticos (ex: "Difícil") devem ter pesos maiores. Status resolvidos (ex: "Consolidado") devem ter peso 0 ou baixo.
                 </p>
                 <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                   {errorStatuses.map((status, index) => (
@@ -654,7 +654,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                       <span className="flex-1 text-sm text-slate-700">{status.name}</span>
                       <input
                         type="number"
-                        value={tempConfig.status_weights[status.name] ?? index}
+                        value={tempConfig.status_weights[status.name] ?? (errorStatuses.length - 1 - index)}
                         onChange={(e) => {
                           const newWeights = { ...tempConfig.status_weights }
                           newWeights[status.name] = parseInt(e.target.value) || 0
@@ -688,13 +688,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                 </div>
               </div>
 
-              {/* Threshold de eficiência */}
+              {/* Threshold de índice de problema */}
               <div>
                 <label className="text-sm font-medium text-slate-700">
-                  Eficiência Mínima Aceitável
+                  Índice Máximo Aceitável
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Cards com eficiência abaixo deste valor são considerados problemáticos. Quanto menor o número, mais tolerante.
+                  Cards com índice de problema acima deste valor são considerados problemáticos. Quanto maior o número, mais tolerante.
                 </p>
                 <div className="flex items-center gap-2">
                   <input
@@ -703,10 +703,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                     onChange={(e) => setTempConfig({ ...tempConfig, efficiency_threshold: parseFloat(e.target.value) || 0 })}
                     className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     min={0}
-                    max={1}
-                    step={0.01}
+                    step={10}
                   />
-                  <span className="text-xs text-slate-500">(0.05 = muito rígido, 0.2 = moderado, 0.5 = tolerante)</span>
+                  <span className="text-xs text-slate-500">(ex: 100 = rígido, 200 = moderado, 500 = tolerante)</span>
                 </div>
               </div>
 
@@ -722,27 +721,28 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
                   Sugerir flag automaticamente
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Destaca automaticamente cards que ultrapassam o mínimo de revisões e têm eficiência abaixo do aceitável. Você ainda decide se quer aplicar a flag.
+                  Destaca automaticamente cards que ultrapassam o mínimo de revisões e têm índice de problema acima do aceitável. Você ainda decide se quer aplicar a flag.
                 </p>
               </div>
+            </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => {
-                    setTempConfig(config)
-                    setShowConfigPanel(false)
-                  }}
-                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={saveConfig}
-                  className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-                >
-                  Salvar
-                </button>
-              </div>
+            {/* Botões fixos no rodapé */}
+            <div className="flex gap-2 p-6 pt-4 border-t border-slate-200">
+              <button
+                onClick={() => {
+                  setTempConfig(config)
+                  setShowConfigPanel(false)
+                }}
+                className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveConfig}
+                className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+              >
+                Salvar
+              </button>
             </div>
           </div>
         </div>
