@@ -149,32 +149,49 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     return map
   }, [statusesByWeight])
 
+  // Calcula o percentil 90 dos índices (para identificar outliers)
+  const percentile90 = useMemo(() => {
+    const indices = cards
+      .map(c => Number(c.problem_index) || 0)
+      .filter(idx => idx > 0) // Só considera cards com índice > 0
+      .sort((a, b) => a - b)
+    
+    if (indices.length === 0) return Infinity
+    
+    const p90Index = Math.floor(indices.length * 0.9)
+    return indices[p90Index] || indices[indices.length - 1]
+  }, [cards])
+
   // Dados para o gráfico
   const chartData = useMemo(() => {
+    const threshold = Number(config.problem_threshold) || 10
+    
     return cards
       .filter(card => card.review_count > 0) // Só mostra cards com revisões
       .map(card => {
-        // Cor baseada no ÍNDICE DE PROBLEMA, não no excesso
-        // Se peso = 0, índice = 0, então fica verde mesmo com muitas revisões
+        // Cor baseada SOMENTE no ÍNDICE DE PROBLEMA
+        const problemIdx = Number(card.problem_index) || 0
+        
         let color = "#22c55e" // Verde por padrão (índice = 0)
         
         if (card.needs_intervention) {
           color = "#ef4444" // Vermelho - flagado manualmente
-        } else if (card.problem_index >= config.problem_threshold) {
-          color = "#ef4444" // Vermelho - índice crítico
-        } else if (card.problem_index > 0) {
-          color = "#f59e0b" // Laranja - tem índice mas abaixo do threshold
+        } else if (problemIdx >= percentile90 && problemIdx > 0) {
+          color = "#ef4444" // Vermelho - top 10% outliers
+        } else if (problemIdx >= threshold) {
+          color = "#f59e0b" // Laranja - acima do threshold
         }
-        // Se problem_index = 0 (peso 0 ou sem excesso), fica verde
+        // Se índice < threshold ou índice = 0, fica verde
         
         return {
           ...card,
           x: card.review_count,
-          y: statusWeightIndexMap[card.error_status] ?? 0, // Ordenado por peso
-          color
+          y: statusWeightIndexMap[card.error_status] ?? 0,
+          color,
+          isOutlier: problemIdx >= percentile90 && problemIdx > 0
         }
       })
-  }, [cards, statusWeightIndexMap, config.problem_threshold])
+  }, [cards, statusWeightIndexMap, config.problem_threshold, percentile90])
 
   // Aplicar flag em cards selecionados
   const applyFlag = async (flag: boolean) => {
@@ -492,39 +509,30 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
-                {/* Linha de referência - mediana do excesso (só se houver cards em excesso) */}
+                {/* Linha de referência - mediana das revisões dos cards em excesso */}
                 {(() => {
                   // Filtra apenas cards com excesso > 0
                   const cardsWithExcess = cards.filter(c => c.excess_reviews > 0)
                   if (cardsWithExcess.length === 0) return null
                   
-                  // Calcula mediana do excesso
-                  const excessValues = cardsWithExcess
-                    .map(c => c.excess_reviews)
+                  // Calcula mediana do review_count dos cards em excesso
+                  // Isso representa onde está o card problemático "típico" no eixo X
+                  const reviewCounts = cardsWithExcess
+                    .map(c => c.review_count)
                     .sort((a, b) => a - b)
-                  const mid = Math.floor(excessValues.length / 2)
-                  const medianExcess = excessValues.length % 2 === 0
-                    ? (excessValues[mid - 1] + excessValues[mid]) / 2
-                    : excessValues[mid]
-                  
-                  // Para posicionar no eixo X, usa a mediana das revisões esperadas + mediana do excesso
-                  const expectedValues = Object.values(config.status_config)
-                    .map(cfg => cfg.expected_reviews)
-                    .sort((a, b) => a - b)
-                  const midExp = Math.floor(expectedValues.length / 2)
-                  const medianExpected = expectedValues.length === 0 ? 5 :
-                    expectedValues.length % 2 === 0
-                      ? (expectedValues[midExp - 1] + expectedValues[midExp]) / 2
-                      : expectedValues[midExp]
+                  const mid = Math.floor(reviewCounts.length / 2)
+                  const medianReviews = reviewCounts.length % 2 === 0
+                    ? (reviewCounts[mid - 1] + reviewCounts[mid]) / 2
+                    : reviewCounts[mid]
                   
                   return (
                     <ReferenceLine
-                      x={Math.round(medianExpected + medianExcess)}
+                      x={medianReviews}
                       stroke="#f59e0b"
                       strokeDasharray="5 5"
                       strokeWidth={2}
                       label={{ 
-                        value: `Mediana excesso: ${medianExcess.toFixed(1)}`, 
+                        value: `Mediana: ${medianReviews} rev.`, 
                         position: "top", 
                         style: { fontSize: "10px", fill: "#f59e0b" } 
                       }}
@@ -790,7 +798,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   Índice de Problema Crítico
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Cards com índice acima deste valor ficam vermelhos. Índice entre 0 e threshold ficam laranja. Índice = 0 (peso 0 ou sem excesso) ficam verdes.
+                  Cards com índice acima deste valor ficam laranja. Os 10% com maior índice (outliers) ficam vermelhos e são flagados. Índice = 0 fica verde.
                 </p>
                 <div className="flex items-center gap-2">
                   <input
@@ -813,10 +821,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
                     className="rounded border-slate-300"
                   />
-                  Destacar cards baseado no índice
+                  Flag automática para outliers (top 10%)
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Cor baseada no índice: verde (0), laranja (acima de 0), vermelho (acima do threshold). Peso 0 = sempre verde.
+                  Cards no top 10% de índice são automaticamente flagados como críticos (vermelho).
                 </p>
               </div>
             </div>
