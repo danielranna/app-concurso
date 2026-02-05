@@ -45,6 +45,8 @@ export async function GET(req: Request) {
           error_status,
           error_type,
           created_at,
+          review_count,
+          needs_intervention,
           topics!inner (
             id,
             name,

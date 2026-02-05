@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useMemo, Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
 import ReviewSessionModal from "@/components/ReviewSessionModal"
@@ -17,6 +17,8 @@ type Error = {
   reference_link?: string
   error_status?: string
   error_type?: string
+  review_count?: number
+  needs_intervention?: boolean
   topics: {
     id: string
     name: string
@@ -102,6 +104,12 @@ function ResumoPeriodoContent() {
   const [showTypeDropdown, setShowTypeDropdown] = useState(false)
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false)
   const [showDatePicker, setShowDatePicker] = useState(false)
+  
+  // Filtro de flags (cards problemáticos)
+  const [showOnlyFlagged, setShowOnlyFlagged] = useState(() => {
+    if (typeof window === "undefined") return false
+    return new URLSearchParams(window.location.search).get("flagged") === "true"
+  })
 
   // Estados de revisão
   const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null)
@@ -282,7 +290,8 @@ function ResumoPeriodoContent() {
     const typeFromUrl = searchParams?.get("type") ?? "total"
     const periodFromUrl = searchParams?.get("period") ?? ""
     const allFromUrl = searchParams?.get("all") ?? ""
-    if (!statusFromUrl && typeFromUrl === "total" && !periodFromUrl && !allFromUrl) return
+    const flaggedFromUrl = searchParams?.get("flagged") ?? ""
+    if (!statusFromUrl && typeFromUrl === "total" && !periodFromUrl && !allFromUrl && !flaggedFromUrl) return
 
     if (statusFromUrl) {
       try { setFilterType(decodeURIComponent(statusFromUrl)) } catch { setFilterType(statusFromUrl) }
@@ -299,6 +308,8 @@ function ResumoPeriodoContent() {
         setCustomTo(t)
       }
     }
+    // Sincroniza filtro de flagged
+    setShowOnlyFlagged(flaggedFromUrl === "true")
   }, [searchString])
 
   function updateUrlPeriod(next: Period) {
@@ -340,6 +351,18 @@ function ResumoPeriodoContent() {
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
+  function toggleFlaggedFilter() {
+    const newValue = !showOnlyFlagged
+    setShowOnlyFlagged(newValue)
+    const params = new URLSearchParams(searchParams?.toString() || "")
+    if (newValue) {
+      params.set("flagged", "true")
+    } else {
+      params.delete("flagged")
+    }
+    router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
+  }
+
   const periodErrors = useMemo(() => {
     if (period === "accumulated") return errors
 
@@ -377,10 +400,21 @@ function ResumoPeriodoContent() {
   }, [errors, period, fromParam, toParam])
 
   const filteredErrors = useMemo(() => {
-    if (filterType === "total") return periodErrors
-    const name = filterType.toLowerCase().trim()
-    return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
-  }, [periodErrors, filterType])
+    let result = periodErrors
+    
+    // Filtro por flag (problemáticos)
+    if (showOnlyFlagged) {
+      result = result.filter(e => e.needs_intervention === true)
+    }
+    
+    // Filtro por status
+    if (filterType !== "total") {
+      const name = filterType.toLowerCase().trim()
+      result = result.filter(e => (e.error_status || "").toLowerCase().trim() === name)
+    }
+    
+    return result
+  }, [periodErrors, filterType, showOnlyFlagged])
 
   // Função para iniciar nova revisão (declarada após filteredErrors)
   async function startNewReview() {
@@ -456,11 +490,18 @@ function ResumoPeriodoContent() {
 
   const getTitle = () => {
     const suffix = getPeriodLabel()
+    if (showOnlyFlagged) {
+      const flaggedCount = periodErrors.filter(e => e.needs_intervention).length
+      return `Cards Flagados (${flaggedCount})${suffix}`
+    }
     if (filterType === "total") return `Total de Erros${suffix}`
     return `Erros: ${filterType}${suffix}`
   }
 
   const emptyMessage = () => {
+    if (showOnlyFlagged) {
+      return "Nenhum card flagado para intervenção. Ótimo trabalho!"
+    }
     const base = filterType === "total"
       ? "Nenhum erro registrado"
       : `Nenhum erro com status "${filterType}"`
@@ -655,6 +696,24 @@ function ResumoPeriodoContent() {
             Editar datas
           </button>
         )}
+
+        {/* Toggle de Flagados */}
+        <button
+          onClick={toggleFlaggedFilter}
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+            showOnlyFlagged
+              ? "border-red-300 bg-red-50 text-red-700"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Flag className={`h-4 w-4 ${showOnlyFlagged ? "text-red-500" : "text-slate-400"}`} />
+          <span>Flagados</span>
+          {showOnlyFlagged && (
+            <span className="rounded bg-red-200 px-1.5 py-0.5 text-xs font-semibold text-red-700">
+              {periodErrors.filter(e => e.needs_intervention).length}
+            </span>
+          )}
+        </button>
 
         {/* Spacer */}
         <div className="flex-1" />

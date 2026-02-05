@@ -207,12 +207,6 @@ export default function Home() {
                   userId={userId}
                   subjects={subjects}
                   errorStatuses={errorStatuses}
-                  onStartReview={(cardIds) => {
-                    // Navega para a página de revisão com os cards problemáticos
-                    const params = new URLSearchParams()
-                    params.set("card_ids", cardIds.join(","))
-                    router.push(`/subject/review?${params}`)
-                  }}
                 />
               )
             }

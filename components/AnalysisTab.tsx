@@ -57,12 +57,11 @@ type Props = {
   userId: string
   subjects: Subject[]
   errorStatuses: ErrorStatus[]
-  onStartReview?: (cardIds: string[]) => void
 }
 
 const DEFAULT_STATUS_COLOR = "#64748b"
 
-export default function AnalysisTab({ userId, subjects, errorStatuses, onStartReview }: Props) {
+export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) {
   const router = useRouter()
 
   // Estados principais
@@ -193,15 +192,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses, onStartRe
     }
   }
 
-  // Iniciar revisão dos cards problemáticos
+  // Iniciar revisão dos cards problemáticos - redireciona para resumo-periodo com filtro de flagged
   const startProblematicReview = () => {
-    const problematicIds = cards
-      .filter(c => c.needs_attention || c.needs_intervention)
-      .map(c => c.id)
-    
-    if (problematicIds.length > 0 && onStartReview) {
-      onStartReview(problematicIds)
-    }
+    // Redireciona para a página de resumo com filtro de flagados ativo
+    router.push("/resumo-periodo?flagged=true&period=accumulated")
   }
 
   // Tooltip customizado para o gráfico
