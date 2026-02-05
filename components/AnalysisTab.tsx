@@ -75,9 +75,11 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   const [stats, setStats] = useState<{
     total: number
     flagged: number
-    attention: number
+    critical_zone: number
+    outliers: number
+    percentile_90: number | null
     most_problematic_subject: { name: string; count: number } | null
-  }>({ total: 0, flagged: 0, attention: 0, most_problematic_subject: null })
+  }>({ total: 0, flagged: 0, critical_zone: 0, outliers: 0, percentile_90: null, most_problematic_subject: null })
   const [config, setConfig] = useState<AnalysisConfig>({
     status_config: {},
     problem_threshold: 10,
@@ -307,15 +309,19 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
             <p className="text-sm text-red-700">Flagados</p>
           </div>
           <p className="mt-1 text-2xl font-bold text-red-700">{stats.flagged}</p>
-          <p className="mt-1 text-xs text-red-600">Precisam intervenção</p>
+          <p className="mt-1 text-xs text-red-600">
+            {stats.outliers > 0 ? `${stats.outliers} outliers (top 10%)` : "Precisam intervenção"}
+          </p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <p className="text-sm text-amber-700">Zona de Atenção</p>
+            <p className="text-sm text-amber-700">Zona Crítica</p>
           </div>
-          <p className="mt-1 text-2xl font-bold text-amber-700">{stats.attention}</p>
-          <p className="mt-1 text-xs text-amber-600">Baixa eficiência</p>
+          <p className="mt-1 text-2xl font-bold text-amber-700">{stats.critical_zone}</p>
+          <p className="mt-1 text-xs text-amber-600">
+            Índice ≥ {config.problem_threshold}
+          </p>
         </div>
         {stats.most_problematic_subject && (
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -792,13 +798,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 </p>
               </div>
 
-              {/* Threshold de índice de problema */}
+              {/* Threshold da Zona Crítica */}
               <div>
                 <label className="text-sm font-medium text-slate-700">
-                  Índice de Problema Crítico
+                  Zona Crítica (threshold)
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Cards com índice acima deste valor ficam laranja. Os 10% com maior índice (outliers) ficam vermelhos e são flagados. Índice = 0 fica verde.
+                  Cards com índice ≥ threshold ficam laranja (Zona Crítica). Os top 10% com maior índice (outliers) ficam vermelhos e são flagados automaticamente.
                 </p>
                 <div className="flex items-center gap-2">
                   <input

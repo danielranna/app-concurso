@@ -153,15 +153,34 @@ export async function GET(req: Request) {
       }
     })
 
-    // Estatísticas gerais
+    // Pega o threshold configurado
+    const problemThreshold = config.problem_threshold ?? 10
+    
+    // Calcula percentil 90 para identificar outliers
+    const indices = analysisData
+      .map(c => c.problem_index)
+      .filter(idx => idx > 0)
+      .sort((a, b) => a - b)
+    const p90Index = indices.length > 0 
+      ? indices[Math.floor(indices.length * 0.9)] || indices[indices.length - 1]
+      : Infinity
+    
+    // Estatísticas gerais baseadas no ÍNDICE
     const totalCards = analysisData.length
     const flaggedCards = analysisData.filter(c => c.needs_intervention).length
-    const attentionCards = analysisData.filter(c => c.needs_attention).length
+    // Zona Crítica: índice >= threshold (não outlier)
+    const criticalZoneCards = analysisData.filter(c => 
+      c.problem_index >= problemThreshold && !c.needs_intervention
+    ).length
+    // Outliers: top 10% dos índices
+    const outlierCards = analysisData.filter(c => 
+      c.problem_index >= p90Index && c.problem_index > 0
+    ).length
     
-    // Matéria mais problemática
+    // Matéria mais problemática (baseada no índice > 0)
     const subjectProblems: { [key: string]: { name: string; count: number } } = {}
     analysisData.forEach(card => {
-      if (card.needs_attention || card.needs_intervention) {
+      if (card.problem_index > 0) {
         const key = card.subject_id || "none"
         if (!subjectProblems[key]) {
           subjectProblems[key] = { name: card.subject_name, count: 0 }
@@ -178,14 +197,16 @@ export async function GET(req: Request) {
       stats: {
         total: totalCards,
         flagged: flaggedCards,
-        attention: attentionCards,
+        critical_zone: criticalZoneCards,
+        outliers: outlierCards,
+        percentile_90: p90Index === Infinity ? null : p90Index,
         most_problematic_subject: mostProblematicSubject 
           ? { name: mostProblematicSubject[1].name, count: mostProblematicSubject[1].count }
           : null
       },
       config: {
         status_config: statusConfig,
-        problem_threshold: config.problem_threshold ?? 10,
+        problem_threshold: problemThreshold,
         auto_flag_enabled: config.auto_flag_enabled ?? true
       },
       statuses: errorStatuses || []
