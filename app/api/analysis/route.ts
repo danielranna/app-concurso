@@ -160,9 +160,10 @@ export async function GET(req: Request) {
     const outlierPercentage = config.outlier_percentage ?? 10
     
     // Calcula o threshold de outliers baseado na porcentagem configurada
+    // IMPORTANTE: só considera outliers entre cards que JÁ passaram do threshold
     const indices = analysisData
       .map(c => c.problem_index)
-      .filter(idx => idx > 0)
+      .filter(idx => idx >= problemThreshold) // Só considera cards acima do threshold
       .sort((a, b) => a - b)
     const percentile = (100 - outlierPercentage) / 100
     const outlierThreshold = indices.length > 0 

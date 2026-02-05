@@ -68,6 +68,22 @@ type Props = {
 
 const DEFAULT_STATUS_COLOR = "#64748b"
 
+// Função para remover tags HTML e obter texto puro (para tooltips)
+function stripHtml(html: string): string {
+  if (!html) return ""
+  // Remove tags HTML
+  const text = html.replace(/<[^>]*>/g, "")
+  // Decodifica entidades HTML comuns
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim()
+}
+
 export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) {
   const router = useRouter()
 
@@ -154,19 +170,23 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   }, [statusesByWeight])
 
   // Calcula o percentil de outliers (baseado na porcentagem configurada)
+  // IMPORTANTE: só considera outliers entre cards que JÁ passaram do threshold
   const outlierThreshold = useMemo(() => {
+    const threshold = Number(config.problem_threshold) || 10
+    
+    // Filtra apenas cards com índice >= threshold (já são problemáticos)
     const indices = cards
       .map(c => Number(c.problem_index) || 0)
-      .filter(idx => idx > 0) // Só considera cards com índice > 0
+      .filter(idx => idx >= threshold) // Só considera cards acima do threshold
       .sort((a, b) => a - b)
     
     if (indices.length === 0) return Infinity
     
-    // Ex: outlier_percentage = 10 significa top 10%, então pega percentil 90
+    // Ex: outlier_percentage = 10 significa top 10% dos problemáticos
     const percentile = (100 - config.outlier_percentage) / 100
     const index = Math.floor(indices.length * percentile)
     return indices[index] || indices[indices.length - 1]
-  }, [cards, config.outlier_percentage])
+  }, [cards, config.outlier_percentage, config.problem_threshold])
 
   // Dados para o gráfico
   const chartData = useMemo(() => {
@@ -252,10 +272,12 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const card = payload[0].payload as AnalysisCard
+      // Usa stripHtml para mostrar texto limpo no tooltip
+      const cleanErrorText = stripHtml(card.error_text)
       return (
-        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg max-w-xs">
           <p className="mb-1 text-sm font-semibold text-slate-800 line-clamp-2">
-            {card.error_text}
+            {cleanErrorText || "Sem texto"}
           </p>
           <div className="space-y-1 text-xs text-slate-600">
             <p><span className="font-medium">Matéria:</span> {card.subject_name}</p>
@@ -278,6 +300,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
               {card.needs_intervention ? "Flagado para intervenção" : "Excedeu revisões esperadas"}
             </div>
           )}
+          <p className="mt-2 text-xs text-slate-400 italic">Clique para ver detalhes</p>
         </div>
       )
     }
@@ -597,10 +620,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
 
       {/* PAINEL DE DETALHES DO CARD */}
       {selectedCard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-start justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">Detalhes do Card</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedCard(null)}>
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between p-6 pb-4 border-b border-slate-200">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">Detalhes do Card</h3>
+                <p className="text-sm text-slate-500">{selectedCard.topic_name}</p>
+              </div>
               <button
                 onClick={() => setSelectedCard(null)}
                 className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
@@ -609,15 +635,23 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {/* Erro */}
               <div>
-                <label className="text-xs font-medium text-slate-500">Pergunta</label>
-                <p className="mt-1 text-sm text-slate-800">{selectedCard.error_text}</p>
+                <label className="text-xs font-semibold text-red-600">Erro</label>
+                <div 
+                  className="mt-1 text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: selectedCard.error_text }}
+                />
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-slate-500">Resposta</label>
-                <p className="mt-1 text-sm text-slate-800">{selectedCard.correction_text}</p>
+              {/* Correção */}
+              <div className="rounded-lg bg-green-50 p-3">
+                <label className="text-xs font-semibold text-green-700">Correção</label>
+                <div 
+                  className="mt-1 text-sm text-slate-800 leading-relaxed prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: selectedCard.correction_text }}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -669,42 +703,42 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   <span>Este card está flagado para intervenção</span>
                 </div>
               )}
+            </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  onClick={() => {
-                    // Toggle flag
-                    const cardIds = [selectedCard.id]
-                    fetch("/api/analysis", {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        user_id: userId,
-                        card_ids: cardIds,
-                        needs_intervention: !selectedCard.needs_intervention
-                      })
-                    }).then(() => {
-                      loadAnalysisData()
-                      setSelectedCard(null)
+            <div className="flex gap-2 p-6 pt-4 border-t border-slate-200">
+              <button
+                onClick={() => {
+                  // Toggle flag
+                  const cardIds = [selectedCard.id]
+                  fetch("/api/analysis", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      user_id: userId,
+                      card_ids: cardIds,
+                      needs_intervention: !selectedCard.needs_intervention
                     })
-                  }}
-                  className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    selectedCard.needs_intervention
-                      ? "bg-green-600 text-white hover:bg-green-700"
-                      : "bg-red-600 text-white hover:bg-red-700"
-                  }`}
-                >
-                  <Flag className="h-4 w-4" />
-                  {selectedCard.needs_intervention ? "Remover Flag" : "Flagear"}
-                </button>
-                <button
-                  onClick={() => router.push(`/subject/${selectedCard.subject_id}?card=${selectedCard.id}`)}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  <Edit3 className="h-4 w-4" />
-                  Editar Card
-                </button>
-              </div>
+                  }).then(() => {
+                    loadAnalysisData()
+                    setSelectedCard(null)
+                  })
+                }}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                  selectedCard.needs_intervention
+                    ? "bg-green-600 text-white hover:bg-green-700"
+                    : "bg-red-600 text-white hover:bg-red-700"
+                }`}
+              >
+                <Flag className="h-4 w-4" />
+                {selectedCard.needs_intervention ? "Remover Flag" : "Flagear"}
+              </button>
+              <button
+                onClick={() => router.push(`/subject/${selectedCard.subject_id}?card=${selectedCard.id}`)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                <Edit3 className="h-4 w-4" />
+                Editar Card
+              </button>
             </div>
           </div>
         </div>
