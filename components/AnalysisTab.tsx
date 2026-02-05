@@ -492,17 +492,23 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
-                {/* Linha de referência - média das revisões esperadas */}
+                {/* Linha de referência - mediana das revisões esperadas */}
                 <ReferenceLine
-                  x={Math.round(
-                    Object.values(config.status_config).reduce((sum, cfg) => sum + cfg.expected_reviews, 0) / 
-                    Math.max(Object.values(config.status_config).length, 1)
-                  )}
+                  x={(() => {
+                    const values = Object.values(config.status_config)
+                      .map(cfg => cfg.expected_reviews)
+                      .sort((a, b) => a - b)
+                    if (values.length === 0) return 5
+                    const mid = Math.floor(values.length / 2)
+                    return values.length % 2 === 0
+                      ? Math.round((values[mid - 1] + values[mid]) / 2)
+                      : values[mid]
+                  })()}
                   stroke="#f59e0b"
                   strokeDasharray="5 5"
                   strokeWidth={2}
                   label={{ 
-                    value: "Média esperada", 
+                    value: "Mediana esperada", 
                     position: "top", 
                     style: { fontSize: "10px", fill: "#f59e0b" } 
                   }}
@@ -747,7 +753,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                           }}
                           className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm text-center"
                           min={0}
-                          step={0.2}
+                          step={0.1}
                           placeholder="Peso"
                         />
                       </div>
