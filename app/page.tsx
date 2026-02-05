@@ -47,6 +47,36 @@ export default function Home() {
   const [errorStatuses, setErrorStatuses] = useState<ErrorStatus[]>([])
   const [errors, setErrors] = useState<Error[]>([])
   const [dashboardKey, setDashboardKey] = useState(0)
+  const [userPreferences, setUserPreferences] = useState<{ history_chart_statuses?: string[] }>({})
+
+  // Carrega preferências do usuário
+  async function loadUserPreferences(user_id: string) {
+    try {
+      const res = await fetch(`/api/user-preferences?user_id=${user_id}`)
+      const data = await res.json()
+      setUserPreferences(data || {})
+    } catch (error) {
+      console.error("Erro ao carregar preferências:", error)
+    }
+  }
+
+  // Salva preferência do status selecionado no gráfico
+  async function saveHistoryChartStatus(statusId: string) {
+    if (!userId) return
+    try {
+      await fetch("/api/user-preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          history_chart_statuses: [statusId]
+        })
+      })
+      setUserPreferences(prev => ({ ...prev, history_chart_statuses: [statusId] }))
+    } catch (error) {
+      console.error("Erro ao salvar preferência:", error)
+    }
+  }
 
   async function loadUser() {
     const {
@@ -58,6 +88,7 @@ export default function Home() {
       loadSubjects(user.id)
       loadErrorStatuses(user.id)
       loadErrors(user.id)
+      loadUserPreferences(user.id)
     } else {
       router.push("/login")
     }
@@ -164,6 +195,8 @@ export default function Home() {
                   errors={errors}
                   errorStatuses={errorStatuses}
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
+                  savedStatusId={userPreferences.history_chart_statuses?.[0]}
+                  onStatusChange={saveHistoryChartStatus}
                 />
               )
             }

@@ -28,12 +28,14 @@ type Props = {
   errors: Error[]
   errorStatuses: ErrorStatus[]
   onSubjectClick: (subjectId: string) => void
+  savedStatusId?: string
+  onStatusChange?: (statusId: string) => void
 }
 
 const COLORS = ['#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8']
 const DEFAULT_STATUS_COLOR = "#64748b"
 
-export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Props) {
+export default function HistoryTab({ errors, errorStatuses, onSubjectClick, savedStatusId, onStatusChange }: Props) {
   const router = useRouter()
   
   // Estado para o status selecionado no gráfico de matérias por status
@@ -43,14 +45,27 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
   // Inicializa o status selecionado quando os errorStatuses carregam
   useEffect(() => {
     if (errorStatuses.length > 0 && !selectedStatusId) {
-      // Tenta encontrar um status que tenha erros associados
+      // Primeiro tenta usar a preferência salva
+      if (savedStatusId && errorStatuses.some(s => s.id === savedStatusId)) {
+        setSelectedStatusId(savedStatusId)
+        return
+      }
+      
+      // Se não houver preferência, tenta encontrar um status que tenha erros associados
       const statusWithErrors = errorStatuses.find(status => 
         errors.some(e => (e.error_status || "").toLowerCase().trim() === (status.name || "").toLowerCase().trim())
       )
       // Se não encontrar, usa o primeiro status disponível
       setSelectedStatusId(statusWithErrors?.id || errorStatuses[0]?.id || null)
     }
-  }, [errorStatuses, errors, selectedStatusId])
+  }, [errorStatuses, errors, selectedStatusId, savedStatusId])
+
+  // Atualiza quando a preferência salva muda
+  useEffect(() => {
+    if (savedStatusId && errorStatuses.some(s => s.id === savedStatusId)) {
+      setSelectedStatusId(savedStatusId)
+    }
+  }, [savedStatusId, errorStatuses])
   
   // Status atualmente selecionado
   const selectedStatus = useMemo(() => {
@@ -454,6 +469,10 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
                           onClick={() => {
                             setSelectedStatusId(status.id)
                             setIsStatusDropdownOpen(false)
+                            // Salva a preferência
+                            if (onStatusChange) {
+                              onStatusChange(status.id)
+                            }
                           }}
                           className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-50 ${
                             isSelected ? 'bg-slate-100' : ''

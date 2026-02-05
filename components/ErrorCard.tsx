@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Eye } from "lucide-react"
+import { Eye, CheckCircle2 } from "lucide-react"
 import ErrorOptionsMenu from "@/components/ErrorOptionsMenu"
 
 type ErrorCardProps = {
@@ -25,6 +25,9 @@ type ErrorCardProps = {
   allCardsExpanded?: boolean
   availableStatuses?: Array<{ id: string; name: string; color?: string | null }>
   onStatusChange?: (errorId: string, newStatus: string) => void
+  // Props para modo revisão
+  reviewMode?: boolean
+  onMarkReviewed?: (errorId: string) => void
 }
 
 function getStatusStyle(status: string): { label: string; badge: string; border: string } {
@@ -93,7 +96,9 @@ export default function ErrorCard({
   onDeleted,
   allCardsExpanded = false,
   availableStatuses = [],
-  onStatusChange
+  onStatusChange,
+  reviewMode = false,
+  onMarkReviewed
 }: ErrorCardProps) {
   const [open, setOpen] = useState(false)
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
@@ -208,6 +213,18 @@ export default function ErrorCard({
           >
             <Eye size={16} />
           </button>
+
+          {/* Botão Revisado - só aparece em modo revisão */}
+          {reviewMode && onMarkReviewed && (
+            <button
+              onClick={() => onMarkReviewed(error.id)}
+              className="flex shrink-0 items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-green-700"
+              title="Marcar como revisado"
+            >
+              <CheckCircle2 size={14} />
+              <span className="hidden sm:inline">Revisado</span>
+            </button>
+          )}
 
           <div className="shrink-0">
             <ErrorOptionsMenu

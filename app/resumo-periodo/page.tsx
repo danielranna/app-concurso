@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useState, useMemo, Suspense } from "react"
+import { useEffect, useLayoutEffect, useState, useMemo, Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
+import ReviewSessionModal from "@/components/ReviewSessionModal"
 
 type Error = {
   id: string
@@ -24,6 +25,17 @@ type Error = {
       name: string
     }
   }
+}
+
+type ReviewSession = {
+  id: string
+  user_id: string
+  filters: Record<string, unknown>
+  card_ids: string[]
+  reviewed_card_ids: string[]
+  status: string
+  created_at: string
+  updated_at: string
 }
 
 function formatDateForInput(d: Date): string {
@@ -91,6 +103,13 @@ function ResumoPeriodoContent() {
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false)
   const [showDatePicker, setShowDatePicker] = useState(false)
 
+  // Estados de revisão
+  const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null)
+  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [reviewMode, setReviewMode] = useState(false)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [removingCardId, setRemovingCardId] = useState<string | null>(null)
+
   async function loadUser() {
     const {
       data: { user }
@@ -100,6 +119,7 @@ function ResumoPeriodoContent() {
       setUserId(user.id)
       loadErrors(user.id)
       loadErrorStatuses(user.id)
+      loadReviewSession(user.id)
     } else {
       router.push("/login")
     }
@@ -116,6 +136,128 @@ function ResumoPeriodoContent() {
     const data = await res.json()
     setErrorStatuses(data ?? [])
   }
+
+  // Funções de revisão
+  const loadReviewSession = useCallback(async (user_id: string) => {
+    try {
+      const res = await fetch(`/api/review-sessions?user_id=${user_id}`)
+      const data = await res.json()
+      if (data && data.id) {
+        setReviewSession(data)
+        setShowReviewModal(true)
+      } else {
+        setReviewSession(null)
+      }
+    } catch (error) {
+      console.error("Erro ao carregar sessão de revisão:", error)
+    }
+  }, [])
+
+  const startNewReview = useCallback(async () => {
+    if (!userId || filteredErrors.length === 0) return
+    setReviewLoading(true)
+
+    try {
+      // Cancela sessão anterior se existir
+      if (reviewSession?.id) {
+        await fetch(`/api/review-sessions/${reviewSession.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cancel" })
+        })
+      }
+
+      // Cria nova sessão
+      const res = await fetch("/api/review-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          filters: { period, filterType, customFrom, customTo },
+          card_ids: filteredErrors.map(e => e.id)
+        })
+      })
+
+      const newSession = await res.json()
+      if (newSession && newSession.id) {
+        setReviewSession(newSession)
+        setReviewMode(true)
+        setShowReviewModal(false)
+      }
+    } catch (error) {
+      console.error("Erro ao iniciar revisão:", error)
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [userId, filteredErrors, reviewSession, period, filterType, customFrom, customTo])
+
+  const continueReview = useCallback(() => {
+    setReviewMode(true)
+    setShowReviewModal(false)
+  }, [])
+
+  const cancelReview = useCallback(async () => {
+    if (!reviewSession?.id) return
+    setReviewLoading(true)
+
+    try {
+      await fetch(`/api/review-sessions/${reviewSession.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" })
+      })
+      setReviewSession(null)
+      setReviewMode(false)
+      setShowReviewModal(false)
+    } catch (error) {
+      console.error("Erro ao cancelar revisão:", error)
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [reviewSession])
+
+  const pauseReview = useCallback(() => {
+    setReviewMode(false)
+  }, [])
+
+  const markCardAsReviewed = useCallback(async (cardId: string) => {
+    if (!reviewSession?.id) return
+
+    // Animação de remoção
+    setRemovingCardId(cardId)
+
+    try {
+      const res = await fetch(`/api/review-sessions/${reviewSession.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_reviewed", card_id: cardId })
+      })
+
+      if (res.ok) {
+        // Atualiza sessão local
+        setTimeout(() => {
+          setReviewSession(prev => {
+            if (!prev) return null
+            const newReviewedIds = [...(prev.reviewed_card_ids || []), cardId]
+            
+            // Verifica se todos foram revisados
+            if (newReviewedIds.length >= prev.card_ids.length) {
+              setReviewMode(false)
+            }
+            
+            return {
+              ...prev,
+              reviewed_card_ids: newReviewedIds
+            }
+          })
+          setRemovingCardId(null)
+        }, 300) // Tempo da animação
+      }
+    } catch (error) {
+      console.error("Erro ao marcar card como revisado:", error)
+      setRemovingCardId(null)
+    }
+  }, [reviewSession])
 
   useEffect(() => {
     loadUser()
@@ -275,6 +417,31 @@ function ResumoPeriodoContent() {
     const name = filterType.toLowerCase().trim()
     return periodErrors.filter(e => (e.error_status || "").toLowerCase().trim() === name)
   }, [periodErrors, filterType])
+
+  // Cards para exibição durante a revisão (exclui os já revisados)
+  const reviewErrors = useMemo(() => {
+    if (!reviewMode || !reviewSession) return filteredErrors
+
+    const reviewedIds = new Set(reviewSession.reviewed_card_ids || [])
+    const sessionCardIds = new Set(reviewSession.card_ids || [])
+
+    // Mostra apenas cards da sessão que ainda não foram revisados
+    return filteredErrors.filter(e => 
+      sessionCardIds.has(e.id) && !reviewedIds.has(e.id)
+    )
+  }, [filteredErrors, reviewMode, reviewSession])
+
+  // Cards a serem exibidos (normal ou modo revisão)
+  const displayErrors = reviewMode ? reviewErrors : filteredErrors
+
+  // Progresso da revisão
+  const reviewProgress = useMemo(() => {
+    if (!reviewSession) return { reviewed: 0, total: 0, percentage: 0 }
+    const reviewed = reviewSession.reviewed_card_ids?.length || 0
+    const total = reviewSession.card_ids?.length || 0
+    const percentage = total > 0 ? (reviewed / total) * 100 : 0
+    return { reviewed, total, percentage }
+  }, [reviewSession])
 
   const getPeriodLabel = () => {
     if (period === "accumulated") return " (Acumulado)"
@@ -489,6 +656,19 @@ function ResumoPeriodoContent() {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Botão Iniciar Revisão (só aparece quando não está em modo revisão) */}
+        {!reviewMode && filteredErrors.length > 0 && (
+          <button
+            onClick={startNewReview}
+            disabled={reviewLoading}
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+          >
+            <PlayCircle className="h-4 w-4" />
+            <span className="hidden sm:inline">Iniciar Revisão</span>
+            <span className="sm:hidden">Revisar</span>
+          </button>
+        )}
+
         {/* Expandir/Recolher Tudo */}
         <button
           onClick={() => setAllCardsExpanded(!allCardsExpanded)}
@@ -507,6 +687,66 @@ function ResumoPeriodoContent() {
           )}
         </button>
       </div>
+
+      {/* Barra de progresso da revisão */}
+      {reviewMode && reviewSession && (
+        <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white">
+                <PlayCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-blue-900">Revisão em Andamento</p>
+                <p className="text-xs text-blue-700">
+                  {reviewProgress.reviewed} de {reviewProgress.total} revisados
+                </p>
+              </div>
+            </div>
+
+            {/* Barra de progresso */}
+            <div className="flex flex-1 items-center gap-3 min-w-[200px]">
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-blue-200">
+                <div
+                  className="h-full bg-blue-600 transition-all duration-300"
+                  style={{ width: `${reviewProgress.percentage}%` }}
+                />
+              </div>
+              <span className="text-sm font-medium text-blue-900">
+                {Math.round(reviewProgress.percentage)}%
+              </span>
+            </div>
+
+            {/* Botões de controle */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={pauseReview}
+                className="flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+              >
+                <Pause className="h-4 w-4" />
+                Pausar
+              </button>
+              <button
+                onClick={cancelReview}
+                disabled={reviewLoading}
+                className="flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+              >
+                <XCircle className="h-4 w-4" />
+                Cancelar
+              </button>
+            </div>
+          </div>
+
+          {/* Mensagem de conclusão */}
+          {reviewProgress.reviewed >= reviewProgress.total && reviewProgress.total > 0 && (
+            <div className="mt-4 rounded-lg bg-green-100 p-3 text-center">
+              <p className="text-sm font-semibold text-green-800">
+                🎉 Parabéns! Você concluiu a revisão de todos os {reviewProgress.total} cards!
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Popup para selecionar datas */}
       {showDatePicker && (
@@ -560,69 +800,92 @@ function ResumoPeriodoContent() {
       )}
 
       <div className="space-y-4">
-        {filteredErrors.length > 0 ? (
-          filteredErrors.map(error => (
-            <ErrorCard
+        {displayErrors.length > 0 ? (
+          displayErrors.map(error => (
+            <div
               key={error.id}
-              error={{
-                id: error.id,
-                error_text: error.error_text,
-                correction_text: error.correction_text,
-                description: error.description,
-                reference_link: error.reference_link,
-                error_status: error.error_status || "normal",
-                error_type: error.error_type,
-                topics: error.topics
-                  ? {
-                      name: error.topics.name,
-                      subjects: error.topics.subjects
-                    }
-                  : null
-              }}
-              onEdit={() => setEditingError(error)}
-              onDeleted={async () => {
-                await loadErrors(userId!)
-                await loadErrorStatuses(userId!)
-              }}
-              allCardsExpanded={allCardsExpanded}
-              availableStatuses={errorStatuses}
-              onStatusChange={async (errorId, newStatus) => {
-                const errorToUpdate = errors.find(e => e.id === errorId)
-                if (!errorToUpdate) return
-                const previousStatus = errorToUpdate.error_status ?? "normal"
-                // Atualização otimista: badge muda na hora
-                setErrors(prev =>
-                  prev.map(e =>
-                    e.id === errorId ? { ...e, error_status: newStatus } : e
-                  )
-                )
-                const res = await fetch(`/api/errors/${errorId}`, {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    user_id: userId,
-                    topic_id: errorToUpdate.topics.id,
-                    error_text: errorToUpdate.error_text,
-                    correction_text: errorToUpdate.correction_text,
-                    description: errorToUpdate.description,
-                    reference_link: errorToUpdate.reference_link,
-                    error_type: errorToUpdate.error_type,
-                    error_status: newStatus
-                  })
-                })
-                if (res.ok) {
+              className={`transition-all duration-300 ${
+                removingCardId === error.id 
+                  ? "opacity-0 -translate-x-4 h-0 overflow-hidden" 
+                  : "opacity-100 translate-x-0"
+              }`}
+            >
+              <ErrorCard
+                error={{
+                  id: error.id,
+                  error_text: error.error_text,
+                  correction_text: error.correction_text,
+                  description: error.description,
+                  reference_link: error.reference_link,
+                  error_status: error.error_status || "normal",
+                  error_type: error.error_type,
+                  topics: error.topics
+                    ? {
+                        name: error.topics.name,
+                        subjects: error.topics.subjects
+                      }
+                    : null
+                }}
+                onEdit={() => setEditingError(error)}
+                onDeleted={async () => {
+                  await loadErrors(userId!)
                   await loadErrorStatuses(userId!)
-                  // Não chama loadErrors para não sobrescrever com dados em cache antigos
-                } else {
+                }}
+                allCardsExpanded={allCardsExpanded}
+                availableStatuses={errorStatuses}
+                onStatusChange={async (errorId, newStatus) => {
+                  const errorToUpdate = errors.find(e => e.id === errorId)
+                  if (!errorToUpdate) return
+                  const previousStatus = errorToUpdate.error_status ?? "normal"
+                  // Atualização otimista: badge muda na hora
                   setErrors(prev =>
                     prev.map(e =>
-                      e.id === errorId ? { ...e, error_status: previousStatus } : e
+                      e.id === errorId ? { ...e, error_status: newStatus } : e
                     )
                   )
-                }
-              }}
-            />
+                  const res = await fetch(`/api/errors/${errorId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      user_id: userId,
+                      topic_id: errorToUpdate.topics.id,
+                      error_text: errorToUpdate.error_text,
+                      correction_text: errorToUpdate.correction_text,
+                      description: errorToUpdate.description,
+                      reference_link: errorToUpdate.reference_link,
+                      error_type: errorToUpdate.error_type,
+                      error_status: newStatus
+                    })
+                  })
+                  if (res.ok) {
+                    await loadErrorStatuses(userId!)
+                    // Não chama loadErrors para não sobrescrever com dados em cache antigos
+                  } else {
+                    setErrors(prev =>
+                      prev.map(e =>
+                        e.id === errorId ? { ...e, error_status: previousStatus } : e
+                      )
+                    )
+                  }
+                }}
+                reviewMode={reviewMode}
+                onMarkReviewed={markCardAsReviewed}
+              />
+            </div>
           ))
+        ) : reviewMode && reviewProgress.reviewed > 0 ? (
+          <div className="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
+            <p className="text-lg font-semibold text-green-800">🎉 Todos os cards foram revisados!</p>
+            <p className="mt-2 text-sm text-green-600">
+              Você revisou {reviewProgress.reviewed} cards nesta sessão.
+            </p>
+            <button
+              onClick={cancelReview}
+              className="mt-4 rounded-lg border border-green-300 bg-white px-4 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100"
+            >
+              Encerrar Revisão
+            </button>
+          </div>
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
             <p className="text-slate-500">{emptyMessage()}</p>
@@ -656,6 +919,17 @@ function ResumoPeriodoContent() {
           }}
         />
       )}
+
+      {/* Modal de revisão em andamento */}
+      <ReviewSessionModal
+        isOpen={showReviewModal}
+        session={reviewSession}
+        totalCurrentCards={filteredErrors.length}
+        onContinue={continueReview}
+        onCancel={cancelReview}
+        onNewReview={startNewReview}
+        onClose={() => setShowReviewModal(false)}
+      />
     </main>
   )
 }
