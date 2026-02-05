@@ -413,7 +413,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           </button>
 
           {/* Botão de revisar problemáticos */}
-          {(stats.flagged > 0 || stats.attention > 0) && (
+          {(stats.flagged > 0 || stats.critical_zone > 0) && (
             <button
               onClick={startProblematicReview}
               className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
