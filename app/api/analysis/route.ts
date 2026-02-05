@@ -78,10 +78,12 @@ export async function GET(req: Request) {
     const defaultConfig: {
       status_config: { [key: string]: { weight: number; expected_reviews: number } }
       problem_threshold: number
+      outlier_percentage: number
       auto_flag_enabled: boolean
     } = {
       status_config: {},
       problem_threshold: 10,
+      outlier_percentage: 10,
       auto_flag_enabled: true
     }
 
@@ -153,28 +155,33 @@ export async function GET(req: Request) {
       }
     })
 
-    // Pega o threshold configurado
+    // Pega as configurações
     const problemThreshold = config.problem_threshold ?? 10
+    const outlierPercentage = config.outlier_percentage ?? 10
     
-    // Calcula percentil 90 para identificar outliers
+    // Calcula o threshold de outliers baseado na porcentagem configurada
     const indices = analysisData
       .map(c => c.problem_index)
       .filter(idx => idx > 0)
       .sort((a, b) => a - b)
-    const p90Index = indices.length > 0 
-      ? indices[Math.floor(indices.length * 0.9)] || indices[indices.length - 1]
+    const percentile = (100 - outlierPercentage) / 100
+    const outlierThreshold = indices.length > 0 
+      ? indices[Math.floor(indices.length * percentile)] || indices[indices.length - 1]
       : Infinity
     
     // Estatísticas gerais baseadas no ÍNDICE
     const totalCards = analysisData.length
+    // Flagados manualmente no banco
     const flaggedCards = analysisData.filter(c => c.needs_intervention).length
-    // Zona Crítica: índice >= threshold (não outlier)
-    const criticalZoneCards = analysisData.filter(c => 
-      c.problem_index >= problemThreshold && !c.needs_intervention
-    ).length
-    // Outliers: top 10% dos índices
+    // Outliers: top X% dos índices (não flagados ainda)
     const outlierCards = analysisData.filter(c => 
-      c.problem_index >= p90Index && c.problem_index > 0
+      c.problem_index >= outlierThreshold && c.problem_index > 0 && !c.needs_intervention
+    ).length
+    // Zona de Atenção: índice >= threshold (não outlier e não flagado)
+    const attentionZoneCards = analysisData.filter(c => 
+      c.problem_index >= problemThreshold && 
+      c.problem_index < outlierThreshold &&
+      !c.needs_intervention
     ).length
     
     // Matéria mais problemática (baseada no índice > 0)
@@ -197,9 +204,9 @@ export async function GET(req: Request) {
       stats: {
         total: totalCards,
         flagged: flaggedCards,
-        critical_zone: criticalZoneCards,
         outliers: outlierCards,
-        percentile_90: p90Index === Infinity ? null : p90Index,
+        attention_zone: attentionZoneCards,
+        outlier_threshold: outlierThreshold === Infinity ? null : outlierThreshold,
         most_problematic_subject: mostProblematicSubject 
           ? { name: mostProblematicSubject[1].name, count: mostProblematicSubject[1].count }
           : null
@@ -207,6 +214,7 @@ export async function GET(req: Request) {
       config: {
         status_config: statusConfig,
         problem_threshold: problemThreshold,
+        outlier_percentage: outlierPercentage,
         auto_flag_enabled: config.auto_flag_enabled ?? true
       },
       statuses: errorStatuses || []

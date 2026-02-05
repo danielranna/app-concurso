@@ -45,6 +45,7 @@ type StatusConfig = {
 type AnalysisConfig = {
   status_config: { [key: string]: StatusConfig }
   problem_threshold: number
+  outlier_percentage: number
   auto_flag_enabled: boolean
 }
 
@@ -75,14 +76,15 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   const [stats, setStats] = useState<{
     total: number
     flagged: number
-    critical_zone: number
     outliers: number
-    percentile_90: number | null
+    attention_zone: number
+    outlier_threshold: number | null
     most_problematic_subject: { name: string; count: number } | null
-  }>({ total: 0, flagged: 0, critical_zone: 0, outliers: 0, percentile_90: null, most_problematic_subject: null })
+  }>({ total: 0, flagged: 0, outliers: 0, attention_zone: 0, outlier_threshold: null, most_problematic_subject: null })
   const [config, setConfig] = useState<AnalysisConfig>({
     status_config: {},
     problem_threshold: 10,
+    outlier_percentage: 10,
     auto_flag_enabled: true
   })
   const [loading, setLoading] = useState(true)
@@ -151,8 +153,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     return map
   }, [statusesByWeight])
 
-  // Calcula o percentil 90 dos índices (para identificar outliers)
-  const percentile90 = useMemo(() => {
+  // Calcula o percentil de outliers (baseado na porcentagem configurada)
+  const outlierThreshold = useMemo(() => {
     const indices = cards
       .map(c => Number(c.problem_index) || 0)
       .filter(idx => idx > 0) // Só considera cards com índice > 0
@@ -160,9 +162,11 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     
     if (indices.length === 0) return Infinity
     
-    const p90Index = Math.floor(indices.length * 0.9)
-    return indices[p90Index] || indices[indices.length - 1]
-  }, [cards])
+    // Ex: outlier_percentage = 10 significa top 10%, então pega percentil 90
+    const percentile = (100 - config.outlier_percentage) / 100
+    const index = Math.floor(indices.length * percentile)
+    return indices[index] || indices[indices.length - 1]
+  }, [cards, config.outlier_percentage])
 
   // Dados para o gráfico
   const chartData = useMemo(() => {
@@ -177,9 +181,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         let color = "#22c55e" // Verde por padrão (índice = 0)
         
         if (card.needs_intervention) {
-          color = "#ef4444" // Vermelho - flagado manualmente
-        } else if (problemIdx >= percentile90 && problemIdx > 0) {
-          color = "#ef4444" // Vermelho - top 10% outliers
+          color = "#ef4444" // Vermelho - flagado (Zona Crítica)
+        } else if (problemIdx >= outlierThreshold && problemIdx > 0) {
+          color = "#ef4444" // Vermelho - outlier (Zona Crítica)
         } else if (problemIdx >= threshold) {
           color = "#f59e0b" // Laranja - acima do threshold
         }
@@ -190,10 +194,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           x: card.review_count,
           y: statusWeightIndexMap[card.error_status] ?? 0,
           color,
-          isOutlier: problemIdx >= percentile90 && problemIdx > 0
+          isOutlier: problemIdx >= outlierThreshold && problemIdx > 0
         }
       })
-  }, [cards, statusWeightIndexMap, config.problem_threshold, percentile90])
+  }, [cards, statusWeightIndexMap, config.problem_threshold, outlierThreshold])
 
   // Aplicar flag em cards selecionados
   const applyFlag = async (flag: boolean) => {
@@ -306,19 +310,22 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm">
           <div className="flex items-center gap-2">
             <Flag className="h-4 w-4 text-red-600" />
-            <p className="text-sm text-red-700">Flagados</p>
+            <p className="text-sm text-red-700">Zona Crítica</p>
           </div>
-          <p className="mt-1 text-2xl font-bold text-red-700">{stats.flagged}</p>
+          <p className="mt-1 text-2xl font-bold text-red-700">{stats.flagged + stats.outliers}</p>
           <p className="mt-1 text-xs text-red-600">
-            {stats.outliers > 0 ? `${stats.outliers} outliers (top 10%)` : "Precisam intervenção"}
+            {stats.flagged > 0 && `${stats.flagged} flagados`}
+            {stats.flagged > 0 && stats.outliers > 0 && " + "}
+            {stats.outliers > 0 && `${stats.outliers} outliers (top ${config.outlier_percentage}%)`}
+            {stats.flagged === 0 && stats.outliers === 0 && "Nenhum"}
           </p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <p className="text-sm text-amber-700">Zona Crítica</p>
+            <p className="text-sm text-amber-700">Zona de Atenção</p>
           </div>
-          <p className="mt-1 text-2xl font-bold text-amber-700">{stats.critical_zone}</p>
+          <p className="mt-1 text-2xl font-bold text-amber-700">{stats.attention_zone}</p>
           <p className="mt-1 text-xs text-amber-600">
             Índice ≥ {config.problem_threshold}
           </p>
@@ -413,7 +420,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           </button>
 
           {/* Botão de revisar problemáticos */}
-          {(stats.flagged > 0 || stats.critical_zone > 0) && (
+          {(stats.flagged > 0 || stats.outliers > 0 || stats.attention_zone > 0) && (
             <button
               onClick={startProblematicReview}
               className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
@@ -798,13 +805,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 </p>
               </div>
 
-              {/* Threshold da Zona Crítica */}
+              {/* Threshold do índice (laranja) */}
               <div>
                 <label className="text-sm font-medium text-slate-700">
-                  Zona Crítica (threshold)
+                  Threshold de Atenção
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Cards com índice ≥ threshold ficam laranja (Zona Crítica). Os top 10% com maior índice (outliers) ficam vermelhos e são flagados automaticamente.
+                  Cards com índice ≥ threshold ficam laranja. Abaixo disso ficam verdes.
                 </p>
                 <div className="flex items-center gap-2">
                   <input
@@ -818,6 +825,27 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 </div>
               </div>
 
+              {/* Porcentagem de outliers (vermelho) */}
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Zona Crítica (outliers)
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Os top X% com maior índice são considerados outliers e ficam vermelhos (Zona Crítica).
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={tempConfig.outlier_percentage}
+                    onChange={(e) => setTempConfig({ ...tempConfig, outlier_percentage: Math.max(1, Math.min(50, parseInt(e.target.value) || 10)) })}
+                    className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    min={1}
+                    max={50}
+                  />
+                  <span className="text-xs text-slate-500">% (ex: 10 = top 10%, 20 = top 20%)</span>
+                </div>
+              </div>
+
               {/* Flag automática */}
               <div className="rounded-lg border border-slate-200 p-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -827,10 +855,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
                     className="rounded border-slate-300"
                   />
-                  Flag automática para outliers (top 10%)
+                  Flag automática para Zona Crítica
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Cards no top 10% de índice são automaticamente flagados como críticos (vermelho).
+                  Outliers (top {tempConfig.outlier_percentage}%) são automaticamente flagados no banco.
                 </p>
               </div>
             </div>

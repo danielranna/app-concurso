@@ -123,6 +123,7 @@ ALTER TABLE user_preferences
 ADD COLUMN IF NOT EXISTS analysis_config JSONB DEFAULT '{
   "status_config": {},
   "problem_threshold": 10,
+  "outlier_percentage": 10,
   "auto_flag_enabled": true
 }'::jsonb;
 
