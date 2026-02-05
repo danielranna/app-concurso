@@ -110,6 +110,11 @@ export async function GET(req: Request) {
         efficiency !== null && 
         efficiency < config.efficiency_threshold
 
+      // Acessa topics (pode vir como objeto ou array dependendo da query)
+      const topics = error.topics as { id: string; name: string; subject_id: string; subjects: { id: string; name: string } | { id: string; name: string }[] } | null
+      const subjects = topics?.subjects
+      const subjectData = Array.isArray(subjects) ? subjects[0] : subjects
+
       return {
         id: error.id,
         error_text: error.error_text,
@@ -124,10 +129,10 @@ export async function GET(req: Request) {
         intervention_flagged_at: error.intervention_flagged_at,
         intervention_resolved_at: error.intervention_resolved_at,
         created_at: error.created_at,
-        subject_id: error.topics?.subjects?.id,
-        subject_name: error.topics?.subjects?.name || "Sem matéria",
-        topic_id: error.topics?.id,
-        topic_name: error.topics?.name
+        subject_id: subjectData?.id || null,
+        subject_name: subjectData?.name || "Sem matéria",
+        topic_id: topics?.id || null,
+        topic_name: topics?.name || null
       }
     })
 
