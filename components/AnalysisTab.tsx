@@ -13,7 +13,7 @@ import {
   Cell,
   ReferenceLine
 } from "recharts"
-import { AlertTriangle, Flag, Settings2, Play, Check, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
+import { AlertTriangle, Flag, Settings2, Play, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
 
 type AnalysisCard = {
   id: string
@@ -117,9 +117,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   // Card selecionado para detalhes
   const [selectedCard, setSelectedCard] = useState<AnalysisCard | null>(null)
 
-  // Seleção múltipla para ações em lote
-  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
-
   // Carrega dados de análise
   const loadAnalysisData = useCallback(async () => {
     setLoading(true)
@@ -218,30 +215,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         }
       })
   }, [cards, statusWeightIndexMap, config.problem_threshold, outlierThreshold])
-
-  // Aplicar flag em cards selecionados
-  const applyFlag = async (flag: boolean) => {
-    if (selectedCardIds.size === 0) return
-
-    try {
-      const res = await fetch("/api/analysis", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          card_ids: Array.from(selectedCardIds),
-          needs_intervention: flag
-        })
-      })
-
-      if (res.ok) {
-        setSelectedCardIds(new Set())
-        loadAnalysisData()
-      }
-    } catch (error) {
-      console.error("Erro ao aplicar flag:", error)
-    }
-  }
 
   // Salvar configurações
   const saveConfig = async () => {
@@ -455,38 +428,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         </div>
       </div>
 
-      {/* AÇÕES EM LOTE (quando há seleção) */}
-      {selectedCardIds.size > 0 && (
-        <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <span className="text-sm font-medium text-blue-800">
-            {selectedCardIds.size} card(s) selecionado(s)
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => applyFlag(true)}
-              className="flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
-            >
-              <Flag className="h-3 w-3" />
-              Flagear
-            </button>
-            <button
-              onClick={() => applyFlag(false)}
-              className="flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-green-700"
-            >
-              <Check className="h-3 w-3" />
-              Remover Flag
-            </button>
-            <button
-              onClick={() => setSelectedCardIds(new Set())}
-              className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              <X className="h-3 w-3" />
-              Limpar
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* GRÁFICO DE DISPERSÃO */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
@@ -588,22 +529,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     <Cell
                       key={`cell-${index}`}
                       fill={entry.color}
-                      stroke={selectedCardIds.has(entry.id) ? "#3b82f6" : "transparent"}
-                      strokeWidth={selectedCardIds.has(entry.id) ? 3 : 0}
+                      stroke={entry.needs_intervention ? "#991b1b" : "transparent"}
+                      strokeWidth={entry.needs_intervention ? 2 : 0}
                       cursor="pointer"
-                      onClick={(e: any) => {
-                        e.stopPropagation?.()
-                        // Toggle seleção
-                        setSelectedCardIds(prev => {
-                          const next = new Set(prev)
-                          if (next.has(entry.id)) {
-                            next.delete(entry.id)
-                          } else {
-                            next.add(entry.id)
-                          }
-                          return next
-                        })
-                      }}
                     />
                   ))}
                 </Scatter>
@@ -705,7 +633,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
               )}
             </div>
 
-            <div className="flex gap-2 p-6 pt-4 border-t border-slate-200">
+            <div className="flex flex-col gap-2 p-6 pt-4 border-t border-slate-200">
+              {/* Botão principal: Revisado */}
               <button
                 onClick={async () => {
                   try {
@@ -727,18 +656,53 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     console.error("Erro ao marcar como revisado:", error)
                   }
                 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-green-700"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 Revisado
               </button>
-              <button
-                onClick={() => router.push(`/subject/${selectedCard.subject_id}?card=${selectedCard.id}`)}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                <Edit3 className="h-4 w-4" />
-                Editar Card
-              </button>
+              
+              {/* Botões secundários */}
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      // Toggle flag de Zona Crítica
+                      const res = await fetch("/api/analysis", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          user_id: userId,
+                          card_ids: [selectedCard.id],
+                          needs_intervention: !selectedCard.needs_intervention
+                        })
+                      })
+                      
+                      if (res.ok) {
+                        loadAnalysisData()
+                        setSelectedCard(null)
+                      }
+                    } catch (error) {
+                      console.error("Erro ao alterar flag:", error)
+                    }
+                  }}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                    selectedCard.needs_intervention
+                      ? "border border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                      : "border border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                  }`}
+                >
+                  <Flag className="h-4 w-4" />
+                  {selectedCard.needs_intervention ? "Remover da Zona Crítica" : "Zona Crítica"}
+                </button>
+                <button
+                  onClick={() => router.push(`/subject/${selectedCard.subject_id}?card=${selectedCard.id}`)}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Editar
+                </button>
+              </div>
             </div>
           </div>
         </div>
