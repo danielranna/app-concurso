@@ -50,7 +50,8 @@ export async function PUT(req: Request) {
 
   const {
     user_id,
-    history_chart_statuses
+    history_chart_statuses,
+    analysis_config
   } = body
 
   if (!user_id) {
@@ -61,18 +62,30 @@ export async function PUT(req: Request) {
   }
 
   try {
+    // Monta objeto de atualização apenas com campos enviados
+    const updateData: {
+      user_id: string
+      history_chart_statuses?: string[]
+      analysis_config?: {
+        status_weights: { [key: string]: number }
+        review_threshold: number
+        efficiency_threshold: number
+        auto_flag_enabled: boolean
+      }
+    } = { user_id }
+
+    if (history_chart_statuses !== undefined) {
+      updateData.history_chart_statuses = history_chart_statuses || []
+    }
+
+    if (analysis_config !== undefined) {
+      updateData.analysis_config = analysis_config
+    }
+
     // Upsert - insere ou atualiza se já existir
     const { data, error } = await supabaseServer
       .from("user_preferences")
-      .upsert(
-        {
-          user_id,
-          history_chart_statuses: history_chart_statuses || []
-        },
-        {
-          onConflict: "user_id"
-        }
-      )
+      .upsert(updateData, { onConflict: "user_id" })
       .select()
       .single()
 

@@ -9,6 +9,7 @@ import DashboardTabs from "@/components/DashboardTabs"
 import WeekTab from "@/components/WeekTab"
 import TrendTab from "@/components/TrendTab"
 import HistoryTab from "@/components/HistoryTab"
+import AnalysisTab from "@/components/AnalysisTab"
 import { Plus, Settings } from "lucide-react"
 import { useDataCache } from "@/contexts/DataCacheContext"
 
@@ -197,6 +198,21 @@ export default function Home() {
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
                   savedStatusId={userPreferences.history_chart_statuses?.[0]}
                   onStatusChange={saveHistoryChartStatus}
+                />
+              )
+            }
+            if (activeTab === "analise") {
+              return (
+                <AnalysisTab
+                  userId={userId}
+                  subjects={subjects}
+                  errorStatuses={errorStatuses}
+                  onStartReview={(cardIds) => {
+                    // Navega para a página de revisão com os cards problemáticos
+                    const params = new URLSearchParams()
+                    params.set("card_ids", cardIds.join(","))
+                    router.push(`/subject/review?${params}`)
+                  }}
                 />
               )
             }

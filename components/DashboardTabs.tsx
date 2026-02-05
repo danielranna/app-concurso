@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Calendar, TrendingUp, Clock } from "lucide-react"
+import { Calendar, TrendingUp, Clock, Lightbulb } from "lucide-react"
 
-type TabId = "semana" | "tendencia" | "historico"
+type TabId = "semana" | "tendencia" | "historico" | "analise"
 
 type Props = {
   children: (activeTab: TabId) => React.ReactNode
@@ -48,6 +48,17 @@ export default function DashboardTabs({ children }: Props) {
         >
           <Clock className="h-4 w-4" />
           Histórico
+        </button>
+        <button
+          onClick={() => setActiveTab("analise")}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition ${
+            activeTab === "analise"
+              ? "border-b-2 border-slate-900 text-slate-900"
+              : "text-slate-600 hover:text-slate-800"
+          }`}
+        >
+          <Lightbulb className="h-4 w-4" />
+          Análise
         </button>
       </div>
 
