@@ -492,27 +492,45 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
-                {/* Linha de referência - mediana das revisões esperadas */}
-                <ReferenceLine
-                  x={(() => {
-                    const values = Object.values(config.status_config)
-                      .map(cfg => cfg.expected_reviews)
-                      .sort((a, b) => a - b)
-                    if (values.length === 0) return 5
-                    const mid = Math.floor(values.length / 2)
-                    return values.length % 2 === 0
-                      ? Math.round((values[mid - 1] + values[mid]) / 2)
-                      : values[mid]
-                  })()}
-                  stroke="#f59e0b"
-                  strokeDasharray="5 5"
-                  strokeWidth={2}
-                  label={{ 
-                    value: "Mediana esperada", 
-                    position: "top", 
-                    style: { fontSize: "10px", fill: "#f59e0b" } 
-                  }}
-                />
+                {/* Linha de referência - mediana do excesso (só se houver cards em excesso) */}
+                {(() => {
+                  // Filtra apenas cards com excesso > 0
+                  const cardsWithExcess = cards.filter(c => c.excess_reviews > 0)
+                  if (cardsWithExcess.length === 0) return null
+                  
+                  // Calcula mediana do excesso
+                  const excessValues = cardsWithExcess
+                    .map(c => c.excess_reviews)
+                    .sort((a, b) => a - b)
+                  const mid = Math.floor(excessValues.length / 2)
+                  const medianExcess = excessValues.length % 2 === 0
+                    ? (excessValues[mid - 1] + excessValues[mid]) / 2
+                    : excessValues[mid]
+                  
+                  // Para posicionar no eixo X, usa a mediana das revisões esperadas + mediana do excesso
+                  const expectedValues = Object.values(config.status_config)
+                    .map(cfg => cfg.expected_reviews)
+                    .sort((a, b) => a - b)
+                  const midExp = Math.floor(expectedValues.length / 2)
+                  const medianExpected = expectedValues.length === 0 ? 5 :
+                    expectedValues.length % 2 === 0
+                      ? (expectedValues[midExp - 1] + expectedValues[midExp]) / 2
+                      : expectedValues[midExp]
+                  
+                  return (
+                    <ReferenceLine
+                      x={Math.round(medianExpected + medianExcess)}
+                      stroke="#f59e0b"
+                      strokeDasharray="5 5"
+                      strokeWidth={2}
+                      label={{ 
+                        value: `Mediana excesso: ${medianExcess.toFixed(1)}`, 
+                        position: "top", 
+                        style: { fontSize: "10px", fill: "#f59e0b" } 
+                      }}
+                    />
+                  )
+                })()}
 
                 <Scatter
                   data={chartData}
