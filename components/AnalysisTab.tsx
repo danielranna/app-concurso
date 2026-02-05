@@ -131,46 +131,50 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     loadAnalysisData()
   }, [loadAnalysisData])
 
-  // Mapeamento de status para índice no eixo Y (para mostrar nomes)
-  const statusIndexMap = useMemo(() => {
+  // Ordena status pelo peso (para eixo Y)
+  const statusesByWeight = useMemo(() => {
+    return [...errorStatuses].sort((a, b) => {
+      const weightA = config.status_config[a.name]?.weight ?? 0
+      const weightB = config.status_config[b.name]?.weight ?? 0
+      return weightA - weightB // Menor peso embaixo, maior peso em cima
+    })
+  }, [errorStatuses, config.status_config])
+
+  // Mapa de status -> índice ordenado por peso
+  const statusWeightIndexMap = useMemo(() => {
     const map: { [key: string]: number } = {}
-    errorStatuses.forEach((status, index) => {
+    statusesByWeight.forEach((status, index) => {
       map[status.name] = index
     })
     return map
-  }, [errorStatuses])
+  }, [statusesByWeight])
 
   // Dados para o gráfico
   const chartData = useMemo(() => {
     return cards
       .filter(card => card.review_count > 0) // Só mostra cards com revisões
       .map(card => {
-        // Determina a cor baseado em:
-        // 1. Flagado manualmente = vermelho
-        // 2. Índice de problema >= threshold = vermelho (crítico)
-        // 3. Tem excesso (needs_attention) = laranja
-        // 4. Sem excesso = verde
-        let color = "#22c55e" // Verde por padrão
+        // Cor baseada no ÍNDICE DE PROBLEMA, não no excesso
+        // Se peso = 0, índice = 0, então fica verde mesmo com muitas revisões
+        let color = "#22c55e" // Verde por padrão (índice = 0)
         
         if (card.needs_intervention) {
-          color = "#ef4444" // Vermelho - flagado
+          color = "#ef4444" // Vermelho - flagado manualmente
         } else if (card.problem_index >= config.problem_threshold) {
-          color = "#ef4444" // Vermelho - crítico
-        } else if (card.needs_attention) {
-          color = "#f59e0b" // Laranja - tem excesso
+          color = "#ef4444" // Vermelho - índice crítico
+        } else if (card.problem_index > 0) {
+          color = "#f59e0b" // Laranja - tem índice mas abaixo do threshold
         }
+        // Se problem_index = 0 (peso 0 ou sem excesso), fica verde
         
         return {
           ...card,
           x: card.review_count,
-          y: statusIndexMap[card.error_status] ?? 0,
+          y: statusWeightIndexMap[card.error_status] ?? 0, // Ordenado por peso
           color
         }
       })
-  }, [cards, statusIndexMap, config.problem_threshold])
-
-  // Número de status (para o eixo Y)
-  const maxStatusIndex = errorStatuses.length
+  }, [cards, statusWeightIndexMap, config.problem_threshold])
 
   // Aplicar flag em cards selecionados
   const applyFlag = async (flag: boolean) => {
@@ -476,10 +480,15 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   name="Status"
                   stroke="#64748b"
                   style={{ fontSize: "11px" }}
-                  domain={[-0.5, maxStatusIndex - 0.5]}
-                  ticks={errorStatuses.map((_, i) => i)}
-                  tickFormatter={(value) => errorStatuses[value]?.name || ""}
-                  width={90}
+                  domain={[-0.5, statusesByWeight.length - 0.5]}
+                  ticks={statusesByWeight.map((_, i) => i)}
+                  tickFormatter={(value) => {
+                    const status = statusesByWeight[value]
+                    if (!status) return ""
+                    const weight = config.status_config[status.name]?.weight ?? 0
+                    return `${status.name} (${weight})`
+                  }}
+                  width={120}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 
@@ -732,12 +741,13 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                             const newConfig = { ...tempConfig.status_config }
                             newConfig[status.name] = {
                               ...statusConfig,
-                              weight: parseInt(e.target.value) || 0
+                              weight: parseFloat(e.target.value) || 0
                             }
                             setTempConfig({ ...tempConfig, status_config: newConfig })
                           }}
                           className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm text-center"
                           min={0}
+                          step={0.2}
                           placeholder="Peso"
                         />
                       </div>
@@ -756,7 +766,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   Índice de Problema Crítico
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
-                  Cards com índice acima deste valor são considerados críticos (vermelho). Cards com índice menor aparecem em laranja se tiverem excesso.
+                  Cards com índice acima deste valor ficam vermelhos. Índice entre 0 e threshold ficam laranja. Índice = 0 (peso 0 ou sem excesso) ficam verdes.
                 </p>
                 <div className="flex items-center gap-2">
                   <input
@@ -779,10 +789,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     onChange={(e) => setTempConfig({ ...tempConfig, auto_flag_enabled: e.target.checked })}
                     className="rounded border-slate-300"
                   />
-                  Destacar automaticamente cards com excesso
+                  Destacar cards baseado no índice
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Cards que ultrapassam as revisões esperadas aparecem em laranja. Cards acima do índice crítico aparecem em vermelho.
+                  Cor baseada no índice: verde (0), laranja (acima de 0), vermelho (acima do threshold). Peso 0 = sempre verde.
                 </p>
               </div>
             </div>
