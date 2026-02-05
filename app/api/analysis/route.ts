@@ -110,10 +110,10 @@ export async function GET(req: Request) {
         efficiency !== null && 
         efficiency < config.efficiency_threshold
 
-      // Acessa topics (pode vir como objeto ou array dependendo da query)
-      const topics = error.topics as { id: string; name: string; subject_id: string; subjects: { id: string; name: string } | { id: string; name: string }[] } | null
-      const subjects = topics?.subjects
-      const subjectData = Array.isArray(subjects) ? subjects[0] : subjects
+      // Acessa topics (vem como array do Supabase)
+      const topicsArray = error.topics as unknown as { id: string; name: string; subject_id: string; subjects: { id: string; name: string }[] }[] | null
+      const topics = topicsArray?.[0]
+      const subjectData = topics?.subjects?.[0]
 
       return {
         id: error.id,
