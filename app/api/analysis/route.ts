@@ -127,10 +127,18 @@ export async function GET(req: Request) {
       // Precisa de atenção se tem excesso (passou das revisões esperadas)
       const needsAttention = excessReviews > 0
 
-      // Acessa topics (vem como array do Supabase)
-      const topicsArray = error.topics as unknown as { id: string; name: string; subject_id: string; subjects: { id: string; name: string }[] }[] | null
-      const topics = topicsArray?.[0]
-      const subjectData = topics?.subjects?.[0]
+      // Acessa topics - pode vir como objeto ou array dependendo da versão do Supabase
+      const topicsData = error.topics as unknown as 
+        | { id: string; name: string; subject_id: string; subjects: { id: string; name: string } | { id: string; name: string }[] | null }
+        | { id: string; name: string; subject_id: string; subjects: { id: string; name: string } | { id: string; name: string }[] | null }[]
+        | null
+      
+      // Normaliza: se for array, pega o primeiro elemento
+      const topics = Array.isArray(topicsData) ? topicsData[0] : topicsData
+      
+      // subjects também pode vir como objeto ou array
+      const subjectsData = topics?.subjects
+      const subjectData = Array.isArray(subjectsData) ? subjectsData[0] : subjectsData
 
       return {
         id: error.id,

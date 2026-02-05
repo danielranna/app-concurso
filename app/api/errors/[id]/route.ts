@@ -67,6 +67,37 @@ export async function PUT(
 
   const body = await req.json()
 
+  // Se for apenas para incrementar o review_count
+  if (body.increment_review === true) {
+    try {
+      // Usa a função RPC para incrementar o review_count
+      const { error: rpcError } = await supabaseServer.rpc("increment_review_count", { error_id: id })
+      
+      if (rpcError) {
+        throw new Error(rpcError.message)
+      }
+
+      // Busca user_id para revalidar o cache
+      const { data: errorData } = await supabaseServer
+        .from("errors")
+        .select("user_id")
+        .eq("id", id)
+        .single()
+
+      if (errorData?.user_id) {
+        const { revalidateTag } = await import("next/cache")
+        revalidateTag(`errors-${errorData.user_id}`, "max")
+      }
+
+      return NextResponse.json({ success: true })
+    } catch (error: any) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      )
+    }
+  }
+
   const {
     topic_id,
     error_text,

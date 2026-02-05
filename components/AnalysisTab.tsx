@@ -13,7 +13,7 @@ import {
   Cell,
   ReferenceLine
 } from "recharts"
-import { AlertTriangle, Flag, Settings2, Play, Check, X, ChevronDown, Edit3 } from "lucide-react"
+import { AlertTriangle, Flag, Settings2, Play, Check, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
 
 type AnalysisCard = {
   id: string
@@ -707,30 +707,30 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
 
             <div className="flex gap-2 p-6 pt-4 border-t border-slate-200">
               <button
-                onClick={() => {
-                  // Toggle flag
-                  const cardIds = [selectedCard.id]
-                  fetch("/api/analysis", {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      user_id: userId,
-                      card_ids: cardIds,
-                      needs_intervention: !selectedCard.needs_intervention
+                onClick={async () => {
+                  try {
+                    // Incrementa o review_count usando a API de errors
+                    const res = await fetch(`/api/errors/${selectedCard.id}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        increment_review: true
+                      })
                     })
-                  }).then(() => {
-                    loadAnalysisData()
-                    setSelectedCard(null)
-                  })
+                    
+                    if (res.ok) {
+                      // Atualiza os dados e fecha o modal
+                      loadAnalysisData()
+                      setSelectedCard(null)
+                    }
+                  } catch (error) {
+                    console.error("Erro ao marcar como revisado:", error)
+                  }
                 }}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                  selectedCard.needs_intervention
-                    ? "bg-green-600 text-white hover:bg-green-700"
-                    : "bg-red-600 text-white hover:bg-red-700"
-                }`}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700"
               >
-                <Flag className="h-4 w-4" />
-                {selectedCard.needs_intervention ? "Remover Flag" : "Flagear"}
+                <CheckCircle2 className="h-4 w-4" />
+                Revisado
               </button>
               <button
                 onClick={() => router.push(`/subject/${selectedCard.subject_id}?card=${selectedCard.id}`)}
