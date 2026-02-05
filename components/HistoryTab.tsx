@@ -502,7 +502,7 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick }: Pr
                     borderRadius: "8px",
                     padding: "8px 12px"
                   }}
-                  formatter={(value: number) => [value, selectedStatus?.name || "Quantidade"]}
+                  formatter={(value: number | undefined) => [value ?? 0, selectedStatus?.name || "Quantidade"]}
                 />
                 <Bar 
                   dataKey="quantidade" 
