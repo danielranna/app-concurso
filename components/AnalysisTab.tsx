@@ -44,6 +44,7 @@ type StatusConfig = {
 
 type AnalysisConfig = {
   status_config: { [key: string]: StatusConfig }
+  problem_threshold: number
   auto_flag_enabled: boolean
 }
 
@@ -79,6 +80,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   }>({ total: 0, flagged: 0, attention: 0, most_problematic_subject: null })
   const [config, setConfig] = useState<AnalysisConfig>({
     status_config: {},
+    problem_threshold: 10,
     auto_flag_enabled: true
   })
   const [loading, setLoading] = useState(true)
@@ -142,18 +144,30 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   const chartData = useMemo(() => {
     return cards
       .filter(card => card.review_count > 0) // Só mostra cards com revisões
-      .map(card => ({
-        ...card,
-        x: card.review_count,
-        y: statusIndexMap[card.error_status] ?? 0, // Índice do status para eixo Y
-        // Cor baseada no status de atenção/flag
-        color: card.needs_intervention 
-          ? "#ef4444" // Vermelho para flagados
-          : card.needs_attention 
-            ? "#f59e0b" // Laranja para zona de atenção (excesso > 0)
-            : "#22c55e" // Verde para ok
-      }))
-  }, [cards, statusIndexMap])
+      .map(card => {
+        // Determina a cor baseado em:
+        // 1. Flagado manualmente = vermelho
+        // 2. Índice de problema >= threshold = vermelho (crítico)
+        // 3. Tem excesso (needs_attention) = laranja
+        // 4. Sem excesso = verde
+        let color = "#22c55e" // Verde por padrão
+        
+        if (card.needs_intervention) {
+          color = "#ef4444" // Vermelho - flagado
+        } else if (card.problem_index >= config.problem_threshold) {
+          color = "#ef4444" // Vermelho - crítico
+        } else if (card.needs_attention) {
+          color = "#f59e0b" // Laranja - tem excesso
+        }
+        
+        return {
+          ...card,
+          x: card.review_count,
+          y: statusIndexMap[card.error_status] ?? 0,
+          color
+        }
+      })
+  }, [cards, statusIndexMap, config.problem_threshold])
 
   // Número de status (para o eixo Y)
   const maxStatusIndex = errorStatuses.length
@@ -468,6 +482,22 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   width={90}
                 />
                 <Tooltip content={<CustomTooltip />} />
+                
+                {/* Linha de referência - média das revisões esperadas */}
+                <ReferenceLine
+                  x={Math.round(
+                    Object.values(config.status_config).reduce((sum, cfg) => sum + cfg.expected_reviews, 0) / 
+                    Math.max(Object.values(config.status_config).length, 1)
+                  )}
+                  stroke="#f59e0b"
+                  strokeDasharray="5 5"
+                  strokeWidth={2}
+                  label={{ 
+                    value: "Média esperada", 
+                    position: "top", 
+                    style: { fontSize: "10px", fill: "#f59e0b" } 
+                  }}
+                />
 
                 <Scatter
                   data={chartData}
@@ -720,6 +750,26 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 </p>
               </div>
 
+              {/* Threshold de índice de problema */}
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Índice de Problema Crítico
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Cards com índice acima deste valor são considerados críticos (vermelho). Cards com índice menor aparecem em laranja se tiverem excesso.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={tempConfig.problem_threshold}
+                    onChange={(e) => setTempConfig({ ...tempConfig, problem_threshold: parseInt(e.target.value) || 0 })}
+                    className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    min={1}
+                  />
+                  <span className="text-xs text-slate-500">(ex: 5 = rígido, 10 = moderado, 20 = tolerante)</span>
+                </div>
+              </div>
+
               {/* Flag automática */}
               <div className="rounded-lg border border-slate-200 p-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -732,7 +782,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   Destacar automaticamente cards com excesso
                 </label>
                 <p className="mt-1 text-xs text-slate-500">
-                  Cards que ultrapassam as revisões esperadas aparecem em laranja no gráfico. Você decide quando aplicar a flag vermelha.
+                  Cards que ultrapassam as revisões esperadas aparecem em laranja. Cards acima do índice crítico aparecem em vermelho.
                 </p>
               </div>
             </div>

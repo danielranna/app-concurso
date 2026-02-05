@@ -122,6 +122,7 @@ ON errors(user_id, needs_intervention) WHERE needs_intervention = TRUE;
 ALTER TABLE user_preferences
 ADD COLUMN IF NOT EXISTS analysis_config JSONB DEFAULT '{
   "status_config": {},
+  "problem_threshold": 10,
   "auto_flag_enabled": true
 }'::jsonb;
 

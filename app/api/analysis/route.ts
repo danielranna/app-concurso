@@ -77,9 +77,11 @@ export async function GET(req: Request) {
     // Configuração padrão se não existir
     const defaultConfig: {
       status_config: { [key: string]: { weight: number; expected_reviews: number } }
+      problem_threshold: number
       auto_flag_enabled: boolean
     } = {
       status_config: {},
+      problem_threshold: 10,
       auto_flag_enabled: true
     }
 
@@ -183,6 +185,7 @@ export async function GET(req: Request) {
       },
       config: {
         status_config: statusConfig,
+        problem_threshold: config.problem_threshold ?? 10,
         auto_flag_enabled: config.auto_flag_enabled ?? true
       },
       statuses: errorStatuses || []
