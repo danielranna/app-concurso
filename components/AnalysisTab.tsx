@@ -12,7 +12,9 @@ import {
   ResponsiveContainer,
   Cell,
   ReferenceLine,
-  LabelList
+  LabelList,
+  Line,
+  ComposedChart
 } from "recharts"
 import { AlertTriangle, Flag, Settings2, Play, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
 
@@ -188,6 +190,80 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     const index = Math.floor(indices.length * percentile)
     return indices[index] || indices[indices.length - 1]
   }, [cards, config.outlier_percentage, config.problem_threshold])
+
+  // Dados para o gráfico de Índice vs Revisões (identificar real problema)
+  const problemChartData = useMemo(() => {
+    // Filtra apenas cards com revisões
+    const dataPoints = cards
+      .filter(card => card.review_count > 0)
+      .map(card => ({
+        ...card,
+        x: card.review_count,
+        y: card.problem_index || 0
+      }))
+    
+    if (dataPoints.length < 2) {
+      return { points: dataPoints, trendLine: [], slope: 0, intercept: 0 }
+    }
+    
+    // Calcula regressão linear (y = mx + b)
+    const n = dataPoints.length
+    const sumX = dataPoints.reduce((acc, p) => acc + p.x, 0)
+    const sumY = dataPoints.reduce((acc, p) => acc + p.y, 0)
+    const sumXY = dataPoints.reduce((acc, p) => acc + p.x * p.y, 0)
+    const sumXX = dataPoints.reduce((acc, p) => acc + p.x * p.x, 0)
+    
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX) || 0
+    const intercept = (sumY - slope * sumX) / n || 0
+    
+    // Calcula o erro padrão para identificar outliers
+    const errors = dataPoints.map(p => {
+      const expected = slope * p.x + intercept
+      return Math.abs(p.y - expected)
+    })
+    const meanError = errors.reduce((a, b) => a + b, 0) / errors.length
+    const stdError = Math.sqrt(
+      errors.reduce((acc, e) => acc + Math.pow(e - meanError, 2), 0) / errors.length
+    ) || 1
+    
+    // Marca pontos como outliers (> 1.5 desvios padrão acima da linha)
+    const pointsWithDeviation = dataPoints.map(p => {
+      const expected = slope * p.x + intercept
+      const deviation = p.y - expected
+      const normalizedDeviation = deviation / stdError
+      
+      // Cor baseada no desvio da tendência
+      let color = "#22c55e" // Verde - abaixo ou na tendência
+      if (normalizedDeviation > 2) {
+        color = "#ef4444" // Vermelho - muito acima da tendência
+      } else if (normalizedDeviation > 1) {
+        color = "#f59e0b" // Laranja - acima da tendência
+      }
+      
+      // Se já está flagado, sempre vermelho
+      if (p.needs_intervention) {
+        color = "#ef4444"
+      }
+      
+      return {
+        ...p,
+        expected,
+        deviation,
+        normalizedDeviation,
+        color
+      }
+    })
+    
+    // Gera pontos para a linha de tendência
+    const minX = Math.min(...dataPoints.map(p => p.x))
+    const maxX = Math.max(...dataPoints.map(p => p.x))
+    const trendLine = [
+      { x: minX, y: Math.max(0, slope * minX + intercept) },
+      { x: maxX, y: Math.max(0, slope * maxX + intercept) }
+    ]
+    
+    return { points: pointsWithDeviation, trendLine, slope, intercept, stdError }
+  }, [cards])
 
   // Dados para o gráfico - agrupados por posição (x, y)
   const chartData = useMemo(() => {
@@ -637,6 +713,164 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
             </div>
           )}
         </div>
+      </div>
+
+      {/* GRÁFICO DE ÍNDICE VS REVISÕES */}
+      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">
+              Diagnóstico de Problemas
+            </h3>
+            <p className="text-sm text-slate-500">
+              Cards acima da linha de tendência indicam problemas reais de aprendizado
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-1">
+              <span className="h-3 w-3 rounded-full bg-green-500" />
+              <span className="text-slate-600">Normal</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="h-3 w-3 rounded-full bg-amber-500" />
+              <span className="text-slate-600">+1σ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="h-3 w-3 rounded-full bg-red-500" />
+              <span className="text-slate-600">+2σ (outlier)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="h-0.5 w-6 bg-blue-500" style={{ borderStyle: 'dashed' }} />
+              <span className="text-slate-600">Tendência</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width: "100%", height: 400 }}>
+          {problemChartData.points.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart margin={{ top: 20, right: 20, bottom: 40, left: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis
+                  type="number"
+                  dataKey="x"
+                  name="Revisões"
+                  stroke="#64748b"
+                  style={{ fontSize: "12px" }}
+                  label={{ value: "Número de Revisões", position: "bottom", offset: 10, style: { fontSize: "12px", fill: "#64748b" } }}
+                  domain={['dataMin - 1', 'dataMax + 1']}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  name="Índice"
+                  stroke="#64748b"
+                  style={{ fontSize: "12px" }}
+                  label={{ value: "Índice de Problema (peso × excesso)", angle: -90, position: "insideLeft", style: { fontSize: "12px", fill: "#64748b", textAnchor: "middle" } }}
+                  domain={[0, 'dataMax + 5']}
+                />
+                <Tooltip
+                  content={({ active, payload }: any) => {
+                    if (active && payload && payload.length) {
+                      const point = payload[0].payload
+                      if (point.trendPoint) return null // Não mostra tooltip para linha de tendência
+                      
+                      const cleanErrorText = stripHtml(point.error_text || "")
+                      return (
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg max-w-xs">
+                          <p className="mb-1 text-sm font-semibold text-slate-800 line-clamp-2">
+                            {cleanErrorText || "Sem texto"}
+                          </p>
+                          <div className="space-y-1 text-xs text-slate-600">
+                            <p><span className="font-medium">Matéria:</span> {point.subject_name}</p>
+                            <p><span className="font-medium">Status:</span> {point.error_status} (peso: {point.status_weight})</p>
+                            <p><span className="font-medium">Revisões:</span> {point.review_count}</p>
+                            <p><span className="font-medium">Índice:</span> {point.problem_index}</p>
+                            <div className="pt-1 border-t border-slate-100 mt-1">
+                              <p><span className="font-medium">Esperado (tendência):</span> {point.expected?.toFixed(1)}</p>
+                              <p className={point.deviation > 0 ? "text-red-600" : "text-green-600"}>
+                                <span className="font-medium">Desvio:</span> {point.deviation > 0 ? "+" : ""}{point.deviation?.toFixed(1)}
+                                {point.normalizedDeviation !== undefined && (
+                                  <span className="ml-1">({point.normalizedDeviation > 0 ? "+" : ""}{point.normalizedDeviation?.toFixed(1)}σ)</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                          {point.normalizedDeviation > 1 && (
+                            <div className="mt-2 text-xs font-medium text-amber-600">
+                              ⚠️ Acima da tendência - possível problema real
+                            </div>
+                          )}
+                          <p className="mt-2 text-xs text-slate-400 italic">Clique para ver detalhes</p>
+                        </div>
+                      )
+                    }
+                    return null
+                  }}
+                />
+                
+                {/* Linha de tendência */}
+                <Line
+                  data={problemChartData.trendLine}
+                  type="linear"
+                  dataKey="y"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  strokeDasharray="8 4"
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
+                  isAnimationActive={false}
+                />
+
+                {/* Pontos dos cards */}
+                <Scatter
+                  data={problemChartData.points}
+                  onClick={(data: any) => {
+                    if (data) {
+                      setSelectedCard(data)
+                    }
+                  }}
+                >
+                  {problemChartData.points.map((entry, index) => (
+                    <Cell
+                      key={`cell-problem-${index}`}
+                      fill={entry.color}
+                      stroke={entry.needs_intervention ? "#991b1b" : "transparent"}
+                      strokeWidth={entry.needs_intervention ? 2 : 0}
+                      cursor="pointer"
+                    />
+                  ))}
+                </Scatter>
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-500">
+              <p>Nenhum card com revisões encontrado</p>
+              <p className="text-sm text-slate-400">Os cards aparecerão aqui após serem revisados</p>
+            </div>
+          )}
+        </div>
+
+        {/* Insights sobre os outliers */}
+        {problemChartData.points.filter(p => (p.normalizedDeviation ?? 0) > 1.5).length > 0 && (
+          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4">
+            <h4 className="text-sm font-semibold text-amber-800 mb-2">
+              📊 Análise da Tendência
+            </h4>
+            <div className="text-xs text-amber-700 space-y-1">
+              <p>
+                <strong>Cards problemáticos identificados:</strong>{" "}
+                {problemChartData.points.filter(p => (p.normalizedDeviation ?? 0) > 1.5).length} cards
+                estão significativamente acima da linha de tendência.
+              </p>
+              <p>
+                Esses cards têm um índice de problema maior do que esperado para seu número de revisões,
+                indicando possível dificuldade real de aprendizado (não apenas muitas revisões).
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SELETOR DE CARDS (quando há múltiplos no mesmo ponto) */}
