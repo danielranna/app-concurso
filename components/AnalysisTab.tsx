@@ -852,25 +852,42 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           )}
         </div>
 
-        {/* Insights sobre os outliers */}
-        {problemChartData.points.filter(p => (p.deviation ?? 0) > 0).length > 0 && (
-          <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4">
-            <h4 className="text-sm font-semibold text-amber-800 mb-2">
-              📊 Análise da Tendência
+        {/* Insights sobre a tendência */}
+        {problemChartData.points.length >= 2 && (
+          <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 p-4">
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">
+              📊 Como interpretar a linha de tendência
             </h4>
-            <div className="text-xs text-amber-700 space-y-1">
+            <div className="grid gap-3 md:grid-cols-2 text-xs">
+              <div className="rounded-lg bg-green-50 border border-green-200 p-3">
+                <p className="font-semibold text-green-800 mb-1">📉 Reta pouco inclinada (ideal)</p>
+                <p className="text-green-700 mb-2">
+                  O índice cresce lentamente com as revisões. Significa que você está aprendendo bem - 
+                  mesmo com mais revisões, os erros não são graves.
+                </p>
+                <p className="text-green-600 font-medium">
+                  ✓ Ação: Continue assim! O método está funcionando.
+                </p>
+              </div>
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                <p className="font-semibold text-red-800 mb-1">📈 Reta muito inclinada (problema)</p>
+                <p className="text-red-700 mb-2">
+                  O índice cresce rápido com as revisões. Indica que cards com muitas revisões 
+                  também têm erros graves - não está consolidando o aprendizado.
+                </p>
+                <p className="text-red-600 font-medium">
+                  ⚠️ Ação: Revise sua metodologia, divida cards complexos ou busque outras fontes.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
               <p>
-                <strong>Cards acima da tendência:</strong>{" "}
-                {problemChartData.points.filter(p => (p.deviation ?? 0) > 0).length} cards
-                estão acima da linha de tendência.
-              </p>
-              <p>
-                Esses cards têm um índice de problema maior do que esperado para seu número de revisões,
-                indicando possível dificuldade real de aprendizado (não apenas muitas revisões).
+                <strong>Cards acima da linha:</strong> Têm índice maior que o esperado para aquela quantidade de revisões - 
+                são os problemas reais a focar.
               </p>
               {problemChartData.points.filter(p => p.isOutlier).length > 0 && (
-                <p className="text-red-700 font-medium">
-                  <strong>{problemChartData.points.filter(p => p.isOutlier).length}</strong> na Zona Crítica (outliers)
+                <p className="mt-1 text-red-600 font-medium">
+                  🚨 <strong>{problemChartData.points.filter(p => p.isOutlier).length}</strong> cards na Zona Crítica
                 </p>
               )}
             </div>
