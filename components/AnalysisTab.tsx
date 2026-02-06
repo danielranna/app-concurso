@@ -11,7 +11,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
-  ReferenceLine
+  ReferenceLine,
+  LabelList
 } from "recharts"
 import { AlertTriangle, Flag, Settings2, Play, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
 
@@ -116,6 +117,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
 
   // Card selecionado para detalhes
   const [selectedCard, setSelectedCard] = useState<AnalysisCard | null>(null)
+  
+  // Cards em um ponto (quando há múltiplos no mesmo lugar)
+  const [cardsAtPoint, setCardsAtPoint] = useState<AnalysisCard[] | null>(null)
 
   // Carrega dados de análise
   const loadAnalysisData = useCallback(async () => {
@@ -185,11 +189,12 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     return indices[index] || indices[indices.length - 1]
   }, [cards, config.outlier_percentage, config.problem_threshold])
 
-  // Dados para o gráfico
+  // Dados para o gráfico - agrupados por posição (x, y)
   const chartData = useMemo(() => {
     const threshold = Number(config.problem_threshold) || 10
     
-    return cards
+    // Primeiro, processa todos os cards
+    const processedCards = cards
       .filter(card => card.review_count > 0) // Só mostra cards com revisões
       .map(card => {
         // Cor baseada SOMENTE no ÍNDICE DE PROBLEMA
@@ -214,6 +219,39 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           isOutlier: problemIdx >= outlierThreshold && problemIdx > 0
         }
       })
+    
+    // Agrupa cards pelo mesmo ponto (x, y)
+    const groupedByPosition: { [key: string]: typeof processedCards } = {}
+    processedCards.forEach(card => {
+      const key = `${card.x}-${card.y}`
+      if (!groupedByPosition[key]) {
+        groupedByPosition[key] = []
+      }
+      groupedByPosition[key].push(card)
+    })
+    
+    // Cria um ponto representativo para cada grupo
+    return Object.values(groupedByPosition).map(group => {
+      // Ordena o grupo por problem_index (mais problemático primeiro)
+      group.sort((a, b) => (b.problem_index || 0) - (a.problem_index || 0))
+      
+      // Usa a cor mais "grave" do grupo
+      let groupColor = "#22c55e" // Verde
+      const hasRed = group.some(c => c.color === "#ef4444")
+      const hasOrange = group.some(c => c.color === "#f59e0b")
+      if (hasRed) groupColor = "#ef4444"
+      else if (hasOrange) groupColor = "#f59e0b"
+      
+      const hasFlagged = group.some(c => c.needs_intervention)
+      
+      return {
+        ...group[0], // Usa o primeiro card como base
+        color: groupColor,
+        groupCount: group.length,
+        allCards: group, // Guarda todos os cards do grupo
+        hasFlagged
+      }
+    })
   }, [cards, statusWeightIndexMap, config.problem_threshold, outlierThreshold])
 
   // Salvar configurações
@@ -244,33 +282,67 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   // Tooltip customizado para o gráfico
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
-      const card = payload[0].payload as AnalysisCard
-      // Usa stripHtml para mostrar texto limpo no tooltip
-      const cleanErrorText = stripHtml(card.error_text)
+      const point = payload[0].payload as AnalysisCard & { groupCount: number; allCards: AnalysisCard[]; hasFlagged: boolean }
+      const count = point.groupCount || 1
+      
+      // Se há múltiplos cards no ponto
+      if (count > 1) {
+        const flaggedCount = point.allCards?.filter(c => c.needs_intervention).length || 0
+        const problemCount = point.allCards?.filter(c => c.problem_index > 0).length || 0
+        
+        return (
+          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg max-w-xs">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">
+                {count}
+              </span>
+              <span className="text-sm font-semibold text-slate-800">cards neste ponto</span>
+            </div>
+            <div className="space-y-1 text-xs text-slate-600">
+              <p><span className="font-medium">Status:</span> {point.error_status}</p>
+              <p><span className="font-medium">Revisões:</span> {point.review_count}</p>
+              {flaggedCount > 0 && (
+                <p className="text-red-600">
+                  <span className="font-medium">{flaggedCount}</span> na Zona Crítica
+                </p>
+              )}
+              {problemCount > 0 && (
+                <p className="text-amber-600">
+                  <span className="font-medium">{problemCount}</span> com excesso de revisões
+                </p>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-slate-400 italic">Clique para escolher qual visualizar</p>
+          </div>
+        )
+      }
+      
+      // Card único
+      const cleanErrorText = stripHtml(point.error_text)
       return (
         <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg max-w-xs">
           <p className="mb-1 text-sm font-semibold text-slate-800 line-clamp-2">
             {cleanErrorText || "Sem texto"}
           </p>
           <div className="space-y-1 text-xs text-slate-600">
-            <p><span className="font-medium">Matéria:</span> {card.subject_name}</p>
-            <p><span className="font-medium">Status:</span> {card.error_status}</p>
-            <p><span className="font-medium">Revisões:</span> {card.review_count} / {card.expected_reviews} esperadas</p>
-            {card.excess_reviews > 0 && (
+            <p><span className="font-medium">Matéria:</span> {point.subject_name}</p>
+            <p><span className="font-medium">Status:</span> {point.error_status}</p>
+            <p><span className="font-medium">Revisões:</span> {point.review_count} / {point.expected_reviews} esperadas</p>
+            {point.excess_reviews > 0 && (
               <p className="text-amber-600">
-                <span className="font-medium">Excesso:</span> +{card.excess_reviews} revisões
+                <span className="font-medium">Excesso:</span> +{point.excess_reviews} revisões
               </p>
             )}
-            {card.problem_index > 0 && (
+            {point.problem_index > 0 && (
               <p className="text-red-600">
-                <span className="font-medium">Índice de Problema:</span> {card.problem_index}
+                <span className="font-medium">Índice de Problema:</span> {point.problem_index}
               </p>
             )}
           </div>
-          {(card.needs_attention || card.needs_intervention) && (
+          {(point.needs_attention || point.needs_intervention) && (
             <div className="mt-2 flex items-center gap-1 text-xs font-medium text-red-600">
               <AlertTriangle className="h-3 w-3" />
-              {card.needs_intervention ? "Flagado para intervenção" : "Excedeu revisões esperadas"}
+              {point.needs_intervention ? "Flagado para intervenção" : "Excedeu revisões esperadas"}
             </div>
           )}
           <p className="mt-2 text-xs text-slate-400 italic">Clique para ver detalhes</p>
@@ -521,7 +593,14 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   data={chartData}
                   onClick={(data: any) => {
                     if (data) {
-                      setSelectedCard(data)
+                      const point = data as { groupCount?: number; allCards?: AnalysisCard[] }
+                      // Se há múltiplos cards no ponto, abre o seletor
+                      if (point.groupCount && point.groupCount > 1 && point.allCards) {
+                        setCardsAtPoint(point.allCards)
+                      } else {
+                        // Card único, abre direto
+                        setSelectedCard(data)
+                      }
                     }
                   }}
                 >
@@ -529,11 +608,22 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     <Cell
                       key={`cell-${index}`}
                       fill={entry.color}
-                      stroke={entry.needs_intervention ? "#991b1b" : "transparent"}
-                      strokeWidth={entry.needs_intervention ? 2 : 0}
+                      stroke={entry.hasFlagged ? "#991b1b" : "transparent"}
+                      strokeWidth={entry.hasFlagged ? 2 : 0}
                       cursor="pointer"
                     />
                   ))}
+                  <LabelList 
+                    dataKey="groupCount" 
+                    position="top"
+                    offset={8}
+                    formatter={(value: number) => value > 1 ? value : ""}
+                    style={{ 
+                      fontSize: "11px", 
+                      fontWeight: "bold",
+                      fill: "#374151"
+                    }}
+                  />
                 </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
@@ -545,6 +635,77 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           )}
         </div>
       </div>
+
+      {/* SELETOR DE CARDS (quando há múltiplos no mesmo ponto) */}
+      {cardsAtPoint && cardsAtPoint.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCardsAtPoint(null)}>
+          <div className="w-full max-w-md max-h-[80vh] flex flex-col rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-sm font-bold text-white">
+                  {cardsAtPoint.length}
+                </span>
+                <h3 className="text-lg font-semibold text-slate-800">cards neste ponto</h3>
+              </div>
+              <button
+                onClick={() => setCardsAtPoint(null)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-2">
+              <p className="px-2 pb-2 text-xs text-slate-500">Selecione um card para ver os detalhes:</p>
+              <div className="space-y-1">
+                {cardsAtPoint.map((card, index) => {
+                  const cleanText = stripHtml(card.error_text)
+                  return (
+                    <button
+                      key={card.id}
+                      onClick={() => {
+                        setSelectedCard(card as any)
+                        setCardsAtPoint(null)
+                      }}
+                      className={`w-full rounded-lg border p-3 text-left transition hover:bg-slate-50 ${
+                        card.needs_intervention 
+                          ? "border-red-300 bg-red-50/50" 
+                          : card.problem_index > 0 
+                            ? "border-amber-300 bg-amber-50/50"
+                            : "border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 line-clamp-2">
+                            {cleanText || "Sem texto"}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {card.subject_name} • {card.topic_name}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {card.needs_intervention && (
+                            <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+                              <Flag className="h-3 w-3" />
+                              Crítico
+                            </span>
+                          )}
+                          {card.problem_index > 0 && !card.needs_intervention && (
+                            <span className="text-xs font-medium text-amber-600">
+                              Índice: {card.problem_index}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PAINEL DE DETALHES DO CARD */}
       {selectedCard && (
