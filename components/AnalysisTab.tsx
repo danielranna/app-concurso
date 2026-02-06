@@ -203,7 +203,15 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
       }))
     
     if (dataPoints.length < 2) {
-      return { points: dataPoints, trendLine: [], slope: 0, intercept: 0 }
+      // Retorna com valores padrão para evitar erro de tipo
+      const pointsWithDefaults = dataPoints.map(p => ({
+        ...p,
+        expected: 0,
+        deviation: 0,
+        normalizedDeviation: 0,
+        color: p.needs_intervention ? "#ef4444" : "#22c55e"
+      }))
+      return { points: pointsWithDefaults, trendLine: [], slope: 0, intercept: 0, stdError: 1 }
     }
     
     // Calcula regressão linear (y = mx + b)
