@@ -193,25 +193,38 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
 
   // Dados para o gráfico de Índice vs Revisões (identificar real problema)
   const problemChartData = useMemo(() => {
-    // Filtra apenas cards com revisões
+    const threshold = Number(config.problem_threshold) || 10
+    
+    // Filtra apenas cards com revisões E com índice > 0 (só quem tem problema)
     const dataPoints = cards
-      .filter(card => card.review_count > 0)
-      .map(card => ({
-        ...card,
-        x: card.review_count,
-        y: card.problem_index || 0
-      }))
+      .filter(card => card.review_count > 0 && (card.problem_index || 0) > 0)
+      .map(card => {
+        const problemIdx = Number(card.problem_index) || 0
+        
+        // Mesma lógica de cores do gráfico principal
+        let color = "#f59e0b" // Laranja - acima do zero mas abaixo do outlier
+        
+        if (card.needs_intervention) {
+          color = "#ef4444" // Vermelho - flagado (Zona Crítica)
+        } else if (problemIdx >= outlierThreshold && problemIdx > 0) {
+          color = "#ef4444" // Vermelho - outlier (Zona Crítica)
+        } else if (problemIdx >= threshold) {
+          color = "#f59e0b" // Laranja - acima do threshold
+        } else {
+          color = "#22c55e" // Verde - abaixo do threshold (índice > 0 mas baixo)
+        }
+        
+        return {
+          ...card,
+          x: card.review_count,
+          y: problemIdx,
+          color,
+          isOutlier: problemIdx >= outlierThreshold && problemIdx > 0
+        }
+      })
     
     if (dataPoints.length < 2) {
-      // Retorna com valores padrão para evitar erro de tipo
-      const pointsWithDefaults = dataPoints.map(p => ({
-        ...p,
-        expected: 0,
-        deviation: 0,
-        normalizedDeviation: 0,
-        color: p.needs_intervention ? "#ef4444" : "#22c55e"
-      }))
-      return { points: pointsWithDefaults, trendLine: [], slope: 0, intercept: 0, stdError: 1 }
+      return { points: dataPoints, trendLine: [], slope: 0, intercept: 0 }
     }
     
     // Calcula regressão linear (y = mx + b)
@@ -224,41 +237,14 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX) || 0
     const intercept = (sumY - slope * sumX) / n || 0
     
-    // Calcula o erro padrão para identificar outliers
-    const errors = dataPoints.map(p => {
-      const expected = slope * p.x + intercept
-      return Math.abs(p.y - expected)
-    })
-    const meanError = errors.reduce((a, b) => a + b, 0) / errors.length
-    const stdError = Math.sqrt(
-      errors.reduce((acc, e) => acc + Math.pow(e - meanError, 2), 0) / errors.length
-    ) || 1
-    
-    // Marca pontos como outliers (> 1.5 desvios padrão acima da linha)
+    // Calcula o desvio de cada ponto em relação à linha
     const pointsWithDeviation = dataPoints.map(p => {
       const expected = slope * p.x + intercept
       const deviation = p.y - expected
-      const normalizedDeviation = deviation / stdError
-      
-      // Cor baseada no desvio da tendência
-      let color = "#22c55e" // Verde - abaixo ou na tendência
-      if (normalizedDeviation > 2) {
-        color = "#ef4444" // Vermelho - muito acima da tendência
-      } else if (normalizedDeviation > 1) {
-        color = "#f59e0b" // Laranja - acima da tendência
-      }
-      
-      // Se já está flagado, sempre vermelho
-      if (p.needs_intervention) {
-        color = "#ef4444"
-      }
-      
       return {
         ...p,
         expected,
-        deviation,
-        normalizedDeviation,
-        color
+        deviation
       }
     })
     
@@ -270,8 +256,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
       { x: maxX, y: Math.max(0, slope * maxX + intercept) }
     ]
     
-    return { points: pointsWithDeviation, trendLine, slope, intercept, stdError }
-  }, [cards])
+    return { points: pointsWithDeviation, trendLine, slope, intercept }
+  }, [cards, config.problem_threshold, outlierThreshold])
 
   // Dados para o gráfico - agrupados por posição (x, y)
   const chartData = useMemo(() => {
@@ -737,15 +723,15 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           <div className="flex items-center gap-4 text-xs">
             <div className="flex items-center gap-1">
               <span className="h-3 w-3 rounded-full bg-green-500" />
-              <span className="text-slate-600">Normal</span>
+              <span className="text-slate-600">Baixo índice</span>
             </div>
             <div className="flex items-center gap-1">
               <span className="h-3 w-3 rounded-full bg-amber-500" />
-              <span className="text-slate-600">+1σ</span>
+              <span className="text-slate-600">Atenção</span>
             </div>
             <div className="flex items-center gap-1">
               <span className="h-3 w-3 rounded-full bg-red-500" />
-              <span className="text-slate-600">+2σ (outlier)</span>
+              <span className="text-slate-600">Crítico</span>
             </div>
             <div className="flex items-center gap-1">
               <span className="h-0.5 w-6 bg-blue-500" style={{ borderStyle: 'dashed' }} />
@@ -781,7 +767,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   content={({ active, payload }: any) => {
                     if (active && payload && payload.length) {
                       const point = payload[0].payload
-                      if (point.trendPoint) return null // Não mostra tooltip para linha de tendência
+                      // Ignora pontos da linha de tendência (que não têm error_text)
+                      if (!point.error_text && !point.id) return null
                       
                       const cleanErrorText = stripHtml(point.error_text || "")
                       return (
@@ -792,21 +779,23 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                           <div className="space-y-1 text-xs text-slate-600">
                             <p><span className="font-medium">Matéria:</span> {point.subject_name}</p>
                             <p><span className="font-medium">Status:</span> {point.error_status} (peso: {point.status_weight})</p>
-                            <p><span className="font-medium">Revisões:</span> {point.review_count}</p>
-                            <p><span className="font-medium">Índice:</span> {point.problem_index}</p>
-                            <div className="pt-1 border-t border-slate-100 mt-1">
-                              <p><span className="font-medium">Esperado (tendência):</span> {point.expected?.toFixed(1)}</p>
-                              <p className={point.deviation > 0 ? "text-red-600" : "text-green-600"}>
-                                <span className="font-medium">Desvio:</span> {point.deviation > 0 ? "+" : ""}{point.deviation?.toFixed(1)}
-                                {point.normalizedDeviation !== undefined && (
-                                  <span className="ml-1">({point.normalizedDeviation > 0 ? "+" : ""}{point.normalizedDeviation?.toFixed(1)}σ)</span>
-                                )}
-                              </p>
-                            </div>
+                            <p><span className="font-medium">Revisões:</span> {point.review_count} / {point.expected_reviews} esperadas</p>
+                            <p><span className="font-medium">Excesso:</span> +{point.excess_reviews}</p>
+                            <p className="text-amber-600 font-medium">
+                              <span>Índice:</span> {point.problem_index} ({point.excess_reviews} × {point.status_weight})
+                            </p>
+                            {point.expected !== undefined && (
+                              <div className="pt-1 border-t border-slate-100 mt-1">
+                                <p><span className="font-medium">Tendência:</span> {point.expected?.toFixed(1)}</p>
+                                <p className={point.deviation > 0 ? "text-red-600" : "text-green-600"}>
+                                  <span className="font-medium">Desvio:</span> {point.deviation > 0 ? "+" : ""}{point.deviation?.toFixed(1)}
+                                </p>
+                              </div>
+                            )}
                           </div>
-                          {point.normalizedDeviation > 1 && (
+                          {point.deviation > 0 && (
                             <div className="mt-2 text-xs font-medium text-amber-600">
-                              ⚠️ Acima da tendência - possível problema real
+                              ⚠️ Acima da tendência
                             </div>
                           )}
                           <p className="mt-2 text-xs text-slate-400 italic">Clique para ver detalhes</p>
@@ -861,21 +850,26 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         </div>
 
         {/* Insights sobre os outliers */}
-        {problemChartData.points.filter(p => (p.normalizedDeviation ?? 0) > 1.5).length > 0 && (
+        {problemChartData.points.filter(p => (p.deviation ?? 0) > 0).length > 0 && (
           <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-4">
             <h4 className="text-sm font-semibold text-amber-800 mb-2">
               📊 Análise da Tendência
             </h4>
             <div className="text-xs text-amber-700 space-y-1">
               <p>
-                <strong>Cards problemáticos identificados:</strong>{" "}
-                {problemChartData.points.filter(p => (p.normalizedDeviation ?? 0) > 1.5).length} cards
-                estão significativamente acima da linha de tendência.
+                <strong>Cards acima da tendência:</strong>{" "}
+                {problemChartData.points.filter(p => (p.deviation ?? 0) > 0).length} cards
+                estão acima da linha de tendência.
               </p>
               <p>
                 Esses cards têm um índice de problema maior do que esperado para seu número de revisões,
                 indicando possível dificuldade real de aprendizado (não apenas muitas revisões).
               </p>
+              {problemChartData.points.filter(p => p.isOutlier).length > 0 && (
+                <p className="text-red-700 font-medium">
+                  <strong>{problemChartData.points.filter(p => p.isOutlier).length}</strong> na Zona Crítica (outliers)
+                </p>
+              )}
             </div>
           </div>
         )}
