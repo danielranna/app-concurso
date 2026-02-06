@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useMemo, Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag, AlertTriangle } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
 import ReviewSessionModal from "@/components/ReviewSessionModal"
@@ -105,11 +105,20 @@ function ResumoPeriodoContent() {
   const [showPeriodDropdown, setShowPeriodDropdown] = useState(false)
   const [showDatePicker, setShowDatePicker] = useState(false)
   
-  // Filtro de flags (cards problemáticos)
-  const [showOnlyFlagged, setShowOnlyFlagged] = useState(() => {
+  // Filtro de zonas (cards problemáticos)
+  const [showCriticalZone, setShowCriticalZone] = useState(() => {
     if (typeof window === "undefined") return false
-    return new URLSearchParams(window.location.search).get("flagged") === "true"
+    const params = new URLSearchParams(window.location.search)
+    return params.get("critical") === "true" || params.get("flagged") === "true"
   })
+  const [showAttentionZone, setShowAttentionZone] = useState(() => {
+    if (typeof window === "undefined") return false
+    return new URLSearchParams(window.location.search).get("attention") === "true"
+  })
+  
+  // IDs de cards por zona (carregados da API de análise)
+  const [criticalCardIds, setCriticalCardIds] = useState<Set<string>>(new Set())
+  const [attentionCardIds, setAttentionCardIds] = useState<Set<string>>(new Set())
 
   // Estados de revisão
   const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null)
@@ -117,6 +126,48 @@ function ResumoPeriodoContent() {
   const [reviewMode, setReviewMode] = useState(false)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [removingCardId, setRemovingCardId] = useState<string | null>(null)
+
+  async function loadAnalysisZones(user_id: string) {
+    try {
+      const res = await fetch(`/api/analysis?user_id=${user_id}`)
+      const data = await res.json()
+      
+      if (data.cards && data.config) {
+        const threshold = data.config.problem_threshold ?? 10
+        const outlierPercentage = data.config.outlier_percentage ?? 10
+        
+        // Calcula threshold de outliers
+        const indices = data.cards
+          .map((c: { problem_index: number }) => c.problem_index)
+          .filter((idx: number) => idx >= threshold)
+          .sort((a: number, b: number) => a - b)
+        const percentile = (100 - outlierPercentage) / 100
+        const outlierThreshold = indices.length > 0 
+          ? indices[Math.floor(indices.length * percentile)] || indices[indices.length - 1]
+          : Infinity
+        
+        // IDs da Zona Crítica (flagados + outliers)
+        const critical = new Set<string>()
+        // IDs da Zona de Atenção (índice >= threshold mas < outlier e não flagado)
+        const attention = new Set<string>()
+        
+        data.cards.forEach((card: { id: string; needs_intervention: boolean; problem_index: number }) => {
+          if (card.needs_intervention) {
+            critical.add(card.id)
+          } else if (card.problem_index >= outlierThreshold && card.problem_index > 0) {
+            critical.add(card.id)
+          } else if (card.problem_index >= threshold && card.problem_index > 0) {
+            attention.add(card.id)
+          }
+        })
+        
+        setCriticalCardIds(critical)
+        setAttentionCardIds(attention)
+      }
+    } catch (error) {
+      console.error("Erro ao carregar zonas de análise:", error)
+    }
+  }
 
   async function loadUser() {
     const {
@@ -128,6 +179,7 @@ function ResumoPeriodoContent() {
       loadErrors(user.id)
       loadErrorStatuses(user.id)
       loadReviewSession(user.id)
+      loadAnalysisZones(user.id)
     } else {
       router.push("/login")
     }
@@ -290,8 +342,10 @@ function ResumoPeriodoContent() {
     const typeFromUrl = searchParams?.get("type") ?? "total"
     const periodFromUrl = searchParams?.get("period") ?? ""
     const allFromUrl = searchParams?.get("all") ?? ""
-    const flaggedFromUrl = searchParams?.get("flagged") ?? ""
-    if (!statusFromUrl && typeFromUrl === "total" && !periodFromUrl && !allFromUrl && !flaggedFromUrl) return
+    const criticalFromUrl = searchParams?.get("critical") ?? ""
+    const attentionFromUrl = searchParams?.get("attention") ?? ""
+    const flaggedFromUrl = searchParams?.get("flagged") ?? "" // Compatibilidade com URL antiga
+    if (!statusFromUrl && typeFromUrl === "total" && !periodFromUrl && !allFromUrl && !criticalFromUrl && !attentionFromUrl && !flaggedFromUrl) return
 
     if (statusFromUrl) {
       try { setFilterType(decodeURIComponent(statusFromUrl)) } catch { setFilterType(statusFromUrl) }
@@ -308,8 +362,9 @@ function ResumoPeriodoContent() {
         setCustomTo(t)
       }
     }
-    // Sincroniza filtro de flagged
-    setShowOnlyFlagged(flaggedFromUrl === "true")
+    // Sincroniza filtros de zona (critical pode vir de flagged para compatibilidade)
+    setShowCriticalZone(criticalFromUrl === "true" || flaggedFromUrl === "true")
+    setShowAttentionZone(attentionFromUrl === "true")
   }, [searchString])
 
   function updateUrlPeriod(next: Period) {
@@ -351,14 +406,27 @@ function ResumoPeriodoContent() {
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
-  function toggleFlaggedFilter() {
-    const newValue = !showOnlyFlagged
-    setShowOnlyFlagged(newValue)
+  function toggleCriticalZone() {
+    const newValue = !showCriticalZone
+    setShowCriticalZone(newValue)
+    const params = new URLSearchParams(searchParams?.toString() || "")
+    params.delete("flagged") // Remove parâmetro antigo
+    if (newValue) {
+      params.set("critical", "true")
+    } else {
+      params.delete("critical")
+    }
+    router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
+  }
+
+  function toggleAttentionZone() {
+    const newValue = !showAttentionZone
+    setShowAttentionZone(newValue)
     const params = new URLSearchParams(searchParams?.toString() || "")
     if (newValue) {
-      params.set("flagged", "true")
+      params.set("attention", "true")
     } else {
-      params.delete("flagged")
+      params.delete("attention")
     }
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
@@ -402,9 +470,18 @@ function ResumoPeriodoContent() {
   const filteredErrors = useMemo(() => {
     let result = periodErrors
     
-    // Filtro por flag (problemáticos)
-    if (showOnlyFlagged) {
-      result = result.filter(e => e.needs_intervention === true)
+    // Filtro por zonas (crítica e/ou atenção)
+    if (showCriticalZone || showAttentionZone) {
+      result = result.filter(e => {
+        if (showCriticalZone && showAttentionZone) {
+          return criticalCardIds.has(e.id) || attentionCardIds.has(e.id)
+        } else if (showCriticalZone) {
+          return criticalCardIds.has(e.id)
+        } else if (showAttentionZone) {
+          return attentionCardIds.has(e.id)
+        }
+        return true
+      })
     }
     
     // Filtro por status
@@ -414,7 +491,7 @@ function ResumoPeriodoContent() {
     }
     
     return result
-  }, [periodErrors, filterType, showOnlyFlagged])
+  }, [periodErrors, filterType, showCriticalZone, showAttentionZone, criticalCardIds, attentionCardIds])
 
   // Função para iniciar nova revisão (declarada após filteredErrors)
   async function startNewReview() {
@@ -490,17 +567,28 @@ function ResumoPeriodoContent() {
 
   const getTitle = () => {
     const suffix = getPeriodLabel()
-    if (showOnlyFlagged) {
-      const flaggedCount = periodErrors.filter(e => e.needs_intervention).length
-      return `Cards Flagados (${flaggedCount})${suffix}`
+    if (showCriticalZone && showAttentionZone) {
+      return `Zona Crítica + Atenção (${filteredErrors.length})${suffix}`
+    }
+    if (showCriticalZone) {
+      return `Zona Crítica (${criticalCardIds.size})${suffix}`
+    }
+    if (showAttentionZone) {
+      return `Zona de Atenção (${attentionCardIds.size})${suffix}`
     }
     if (filterType === "total") return `Total de Erros${suffix}`
     return `Erros: ${filterType}${suffix}`
   }
 
   const emptyMessage = () => {
-    if (showOnlyFlagged) {
-      return "Nenhum card flagado para intervenção. Ótimo trabalho!"
+    if (showCriticalZone && showAttentionZone) {
+      return "Nenhum card na Zona Crítica ou de Atenção. Ótimo trabalho!"
+    }
+    if (showCriticalZone) {
+      return "Nenhum card na Zona Crítica. Ótimo trabalho!"
+    }
+    if (showAttentionZone) {
+      return "Nenhum card na Zona de Atenção. Continue assim!"
     }
     const base = filterType === "total"
       ? "Nenhum erro registrado"
@@ -697,20 +785,38 @@ function ResumoPeriodoContent() {
           </button>
         )}
 
-        {/* Toggle de Flagados */}
+        {/* Toggle de Zona Crítica */}
         <button
-          onClick={toggleFlaggedFilter}
+          onClick={toggleCriticalZone}
           className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-            showOnlyFlagged
+            showCriticalZone
               ? "border-red-300 bg-red-50 text-red-700"
               : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           }`}
         >
-          <Flag className={`h-4 w-4 ${showOnlyFlagged ? "text-red-500" : "text-slate-400"}`} />
-          <span>Flagados</span>
-          {showOnlyFlagged && (
+          <Flag className={`h-4 w-4 ${showCriticalZone ? "text-red-500" : "text-slate-400"}`} />
+          <span>Zona Crítica</span>
+          {showCriticalZone && criticalCardIds.size > 0 && (
             <span className="rounded bg-red-200 px-1.5 py-0.5 text-xs font-semibold text-red-700">
-              {periodErrors.filter(e => e.needs_intervention).length}
+              {criticalCardIds.size}
+            </span>
+          )}
+        </button>
+
+        {/* Toggle de Zona de Atenção */}
+        <button
+          onClick={toggleAttentionZone}
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+            showAttentionZone
+              ? "border-amber-300 bg-amber-50 text-amber-700"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <AlertTriangle className={`h-4 w-4 ${showAttentionZone ? "text-amber-500" : "text-slate-400"}`} />
+          <span>Zona de Atenção</span>
+          {showAttentionZone && attentionCardIds.size > 0 && (
+            <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-semibold text-amber-700">
+              {attentionCardIds.size}
             </span>
           )}
         </button>

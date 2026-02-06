@@ -180,6 +180,8 @@ export async function GET(req: Request) {
     
     // Estatísticas gerais baseadas no ÍNDICE
     const totalCards = analysisData.length
+    // Total de revisões (soma de todos os review_count)
+    const totalReviews = analysisData.reduce((sum, c) => sum + c.review_count, 0)
     // Flagados manualmente no banco
     const flaggedCards = analysisData.filter(c => c.needs_intervention).length
     // Outliers: top X% dos índices (não flagados ainda)
@@ -212,6 +214,7 @@ export async function GET(req: Request) {
       cards: analysisData,
       stats: {
         total: totalCards,
+        total_reviews: totalReviews,
         flagged: flaggedCards,
         outliers: outlierCards,
         attention_zone: attentionZoneCards,
