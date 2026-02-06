@@ -12,9 +12,7 @@ import {
   ResponsiveContainer,
   Cell,
   ReferenceLine,
-  LabelList,
-  Line,
-  ComposedChart
+  LabelList
 } from "recharts"
 import { AlertTriangle, Flag, Settings2, Play, X, ChevronDown, Edit3, CheckCircle2 } from "lucide-react"
 
@@ -749,7 +747,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
         <div style={{ width: "100%", height: 400 }}>
           {problemChartData.points.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart margin={{ top: 20, right: 20, bottom: 40, left: 60 }}>
+              <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 60 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
                   type="number"
@@ -758,7 +756,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   stroke="#64748b"
                   style={{ fontSize: "12px" }}
                   label={{ value: "Número de Revisões", position: "bottom", offset: 10, style: { fontSize: "12px", fill: "#64748b" } }}
-                  domain={['dataMin - 1', 'dataMax + 1']}
                 />
                 <YAxis
                   type="number"
@@ -767,15 +764,11 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   stroke="#64748b"
                   style={{ fontSize: "12px" }}
                   label={{ value: "Índice de Problema (peso × excesso)", angle: -90, position: "insideLeft", style: { fontSize: "12px", fill: "#64748b", textAnchor: "middle" } }}
-                  domain={[0, 'dataMax + 5']}
                 />
                 <Tooltip
                   content={({ active, payload }: any) => {
                     if (active && payload && payload.length) {
                       const point = payload[0].payload
-                      // Ignora pontos da linha de tendência (que não têm error_text)
-                      if (!point.error_text && !point.id) return null
-                      
                       const cleanErrorText = stripHtml(point.error_text || "")
                       return (
                         <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-lg max-w-xs">
@@ -790,7 +783,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                             <p className="text-amber-600 font-medium">
                               <span>Índice:</span> {point.problem_index} ({point.excess_reviews} × {point.status_weight})
                             </p>
-                            {point.expected !== undefined && (
+                            {point.expected !== undefined && point.expected > 0 && (
                               <div className="pt-1 border-t border-slate-100 mt-1">
                                 <p><span className="font-medium">Tendência:</span> {point.expected?.toFixed(1)}</p>
                                 <p className={point.deviation > 0 ? "text-red-600" : "text-green-600"}>
@@ -813,18 +806,22 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                 />
                 
                 {/* Linha de tendência */}
-                <Line
-                  data={problemChartData.trendLine}
-                  type="linear"
-                  dataKey="y"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  strokeDasharray="8 4"
-                  dot={false}
-                  activeDot={false}
-                  legendType="none"
-                  isAnimationActive={false}
-                />
+                {problemChartData.trendLine.length >= 2 && (
+                  <ReferenceLine
+                    segment={[
+                      { x: problemChartData.trendLine[0].x, y: problemChartData.trendLine[0].y },
+                      { x: problemChartData.trendLine[1].x, y: problemChartData.trendLine[1].y }
+                    ]}
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    strokeDasharray="8 4"
+                    label={{
+                      value: "Tendência",
+                      position: "insideTopRight",
+                      style: { fontSize: "10px", fill: "#3b82f6" }
+                    }}
+                  />
+                )}
 
                 {/* Pontos dos cards */}
                 <Scatter
@@ -845,12 +842,12 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     />
                   ))}
                 </Scatter>
-              </ComposedChart>
+              </ScatterChart>
             </ResponsiveContainer>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-500">
-              <p>Nenhum card com revisões encontrado</p>
-              <p className="text-sm text-slate-400">Os cards aparecerão aqui após serem revisados</p>
+              <p>Nenhum card com índice de problema encontrado</p>
+              <p className="text-sm text-slate-400">Apenas cards com excesso de revisões aparecem aqui</p>
             </div>
           )}
         </div>
