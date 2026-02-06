@@ -303,11 +303,11 @@ export async function PUT(req: Request) {
     }
 
     // Revalida o cache após atualização
-    revalidateTag(`analysis-${user_id}`)
-    revalidateTag('analysis-all')
+    revalidateTag(`analysis-${user_id}`, "max")
+    revalidateTag('analysis-all', "max")
     // Também revalida o cache de errors pois needs_intervention mudou
-    revalidateTag(`errors-${user_id}`)
-    revalidateTag('errors-all')
+    revalidateTag(`errors-${user_id}`, "max")
+    revalidateTag('errors-all', "max")
 
     return NextResponse.json({ success: true, updated: card_ids.length })
   } catch (error: any) {
