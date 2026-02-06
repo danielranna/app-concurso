@@ -33,10 +33,10 @@ type AnalysisCard = {
   intervention_flagged_at: string | null
   intervention_resolved_at: string | null
   created_at: string
-  subject_id: string
+  subject_id: string | null
   subject_name: string
-  topic_id: string
-  topic_name: string
+  topic_id: string | null
+  topic_name: string | null
 }
 
 type StatusConfig = {
