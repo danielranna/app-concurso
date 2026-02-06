@@ -617,7 +617,10 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     dataKey="groupCount" 
                     position="top"
                     offset={8}
-                    formatter={(value: number) => value > 1 ? value : ""}
+                    formatter={(value) => {
+                      const num = Number(value)
+                      return num > 1 ? num : ""
+                    }}
                     style={{ 
                       fontSize: "11px", 
                       fontWeight: "bold",
