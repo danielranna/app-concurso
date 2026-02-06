@@ -164,11 +164,14 @@ export async function POST(req: Request) {
   }
 
   // Revalida o cache após inserção
-  revalidateTag(`errors-${user_id}`, "max")
+  revalidateTag(`errors-${user_id}`)
   if (topic?.subject_id) {
-    revalidateTag(`errors-subject-${topic.subject_id}`, "max")
+    revalidateTag(`errors-subject-${topic.subject_id}`)
   }
-  revalidateTag('errors-all', "max")
+  revalidateTag('errors-all')
+  // Também revalida o cache de análise pois novos erros afetam as estatísticas
+  revalidateTag(`analysis-${user_id}`)
+  revalidateTag('analysis-all')
 
   return NextResponse.json({ success: true })
 }

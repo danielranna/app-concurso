@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { unstable_cache } from "next/cache"
 
 /* =========================
    GET /api/analysis
@@ -18,7 +19,13 @@ export async function GET(req: Request) {
     )
   }
 
-  try {
+  // Cache por 1 minuto (dados dinâmicos que mudam com revisões)
+  const getCachedAnalysis = unstable_cache(
+    async (
+      userId: string,
+      subjectId: string | null,
+      onlyFlagged: boolean
+    ) => {
     // Busca todos os erros com review_count
     let query = supabaseServer
       .from("errors")
@@ -43,14 +50,14 @@ export async function GET(req: Request) {
           )
         )
       `)
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .order("review_count", { ascending: false })
 
-    if (subject_id) {
-      query = query.eq("topics.subject_id", subject_id)
+    if (subjectId) {
+      query = query.eq("topics.subject_id", subjectId)
     }
 
-    if (only_flagged) {
+    if (onlyFlagged) {
       query = query.eq("needs_intervention", true)
     }
 
@@ -64,14 +71,14 @@ export async function GET(req: Request) {
     const { data: preferences } = await supabaseServer
       .from("user_preferences")
       .select("analysis_config")
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .single()
 
     // Busca os status do usuário
     const { data: errorStatuses } = await supabaseServer
       .from("error_statuses")
       .select("id, name, color")
-      .eq("user_id", user_id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: true })
 
     // Configuração padrão se não existir
@@ -210,7 +217,7 @@ export async function GET(req: Request) {
     const mostProblematicSubject = Object.entries(subjectProblems)
       .sort((a, b) => b[1].count - a[1].count)[0]
 
-    return NextResponse.json({
+    return {
       cards: analysisData,
       stats: {
         total: totalCards,
@@ -230,7 +237,21 @@ export async function GET(req: Request) {
         auto_flag_enabled: config.auto_flag_enabled ?? true
       },
       statuses: errorStatuses || []
-    })
+    }
+    },
+    ["analysis"],
+    {
+      revalidate: 60, // 1 minuto
+      tags: [
+        `analysis-${user_id}`,
+        subject_id ? `analysis-subject-${subject_id}` : 'analysis-all'
+      ],
+    }
+  )
+
+  try {
+    const data = await getCachedAnalysis(user_id, subject_id, only_flagged)
+    return NextResponse.json(data)
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message },
@@ -244,6 +265,7 @@ export async function GET(req: Request) {
    Atualiza flag de intervenção de um ou mais cards
 ========================= */
 export async function PUT(req: Request) {
+  const { revalidateTag } = await import("next/cache")
   const body = await req.json()
   const { user_id, card_ids, needs_intervention } = body
 
@@ -279,6 +301,13 @@ export async function PUT(req: Request) {
     if (error) {
       throw new Error(error.message)
     }
+
+    // Revalida o cache após atualização
+    revalidateTag(`analysis-${user_id}`)
+    revalidateTag('analysis-all')
+    // Também revalida o cache de errors pois needs_intervention mudou
+    revalidateTag(`errors-${user_id}`)
+    revalidateTag('errors-all')
 
     return NextResponse.json({ success: true, updated: card_ids.length })
   } catch (error: any) {

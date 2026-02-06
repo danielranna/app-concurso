@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { useDataCache } from "@/contexts/DataCacheContext"
 import {
   ScatterChart,
   Scatter,
@@ -87,6 +88,7 @@ function stripHtml(html: string): string {
 
 export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) {
   const router = useRouter()
+  const { getAnalysis, invalidateAnalysis, invalidateErrors } = useDataCache()
 
   // Estados principais
   const [cards, setCards] = useState<AnalysisCard[]>([])
@@ -123,24 +125,17 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   const [cardsAtPoint, setCardsAtPoint] = useState<AnalysisCard[] | null>(null)
   
 
-  // Carrega dados de análise
+  // Carrega dados de análise (com cache do cliente)
   const loadAnalysisData = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ user_id: userId })
-      if (selectedSubjectId) params.append("subject_id", selectedSubjectId)
-      if (showOnlyFlagged) params.append("only_flagged", "true")
-
-      const res = await fetch(`/api/analysis?${params}`)
-      const data = await res.json()
-
-      if (data.error) {
-        console.error("Erro ao carregar análise:", data.error)
-        return
-      }
+      const data = await getAnalysis(userId, {
+        subject_id: selectedSubjectId || undefined,
+        only_flagged: showOnlyFlagged || undefined
+      })
 
       setCards(data.cards || [])
-      setStats(data.stats || { total: 0, flagged: 0, attention: 0, most_problematic_subject: null })
+      setStats(data.stats || { total: 0, total_reviews: 0, flagged: 0, outliers: 0, attention_zone: 0, outlier_threshold: null, most_problematic_subject: null })
       setConfig(data.config || config)
       setTempConfig(data.config || config)
     } catch (error) {
@@ -148,7 +143,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     } finally {
       setLoading(false)
     }
-  }, [userId, selectedSubjectId, showOnlyFlagged])
+  }, [userId, selectedSubjectId, showOnlyFlagged, getAnalysis])
 
   useEffect(() => {
     loadAnalysisData()
@@ -343,6 +338,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
       })
       setConfig(tempConfig)
       setShowConfigPanel(false)
+      // Invalida o cache do cliente antes de recarregar
+      invalidateAnalysis(userId)
       loadAnalysisData()
     } catch (error) {
       console.error("Erro ao salvar configurações:", error)
@@ -1077,6 +1074,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                     })
                     
                     if (res.ok) {
+                      // Invalida os caches do cliente antes de recarregar
+                      invalidateAnalysis(userId)
+                      invalidateErrors(userId)
                       // Atualiza os dados e fecha o modal
                       loadAnalysisData()
                       setSelectedCard(null)
@@ -1108,6 +1108,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                       })
                       
                       if (res.ok) {
+                        // Invalida os caches do cliente antes de recarregar
+                        invalidateAnalysis(userId)
+                        invalidateErrors(userId)
                         loadAnalysisData()
                         setSelectedCard(null)
                       }

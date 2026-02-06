@@ -38,16 +38,60 @@ type Error = {
   }
 }
 
+type AnalysisCard = {
+  id: string
+  error_text: string
+  correction_text: string
+  error_status: string
+  error_type: string
+  review_count: number
+  expected_reviews: number
+  excess_reviews: number
+  status_weight: number
+  problem_index: number
+  needs_attention: boolean
+  needs_intervention: boolean
+  intervention_flagged_at: string | null
+  intervention_resolved_at: string | null
+  created_at: string
+  subject_id: string | null
+  subject_name: string
+  topic_id: string | null
+  topic_name: string | null
+}
+
+type AnalysisData = {
+  cards: AnalysisCard[]
+  stats: {
+    total: number
+    total_reviews: number
+    flagged: number
+    outliers: number
+    attention_zone: number
+    outlier_threshold: number | null
+    most_problematic_subject: { name: string; count: number } | null
+  }
+  config: {
+    status_config: { [key: string]: { weight: number; expected_reviews: number } }
+    problem_threshold: number
+    outlier_percentage: number
+    auto_flag_enabled: boolean
+  }
+  statuses: { id: string; name: string; color?: string | null }[]
+}
+
 type CacheData = {
   subjects: Map<string, Subject[]>
   errorTypes: Map<string, ErrorType[]>
   errorStatuses: Map<string, ErrorStatus[]>
   errors: Map<string, Error[]>
+  analysis: Map<string, AnalysisData>
   timestamps: {
     subjects: Map<string, number>
     errorTypes: Map<string, number>
     errorStatuses: Map<string, number>
     errors: Map<string, number>
+    analysis: Map<string, number>
   }
 }
 
@@ -73,6 +117,13 @@ type DataCacheContextType = {
   }) => Promise<Error[]>
   invalidateErrors: (userId: string, subjectId?: string) => void
   
+  // Analysis
+  getAnalysis: (userId: string, params?: {
+    subject_id?: string
+    only_flagged?: boolean
+  }) => Promise<AnalysisData>
+  invalidateAnalysis: (userId: string, subjectId?: string) => void
+  
   // Invalidate all for a user
   invalidateAll: (userId: string) => void
 }
@@ -84,6 +135,7 @@ const CACHE_DURATION = {
   errorTypes: 5 * 60 * 1000, // 5 minutos
   errorStatuses: 5 * 60 * 1000, // 5 minutos
   errors: 1 * 60 * 1000, // 1 minuto
+  analysis: 1 * 60 * 1000, // 1 minuto
 }
 
 export function DataCacheProvider({ children }: { children: ReactNode }) {
@@ -92,11 +144,13 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     errorTypes: new Map(),
     errorStatuses: new Map(),
     errors: new Map(),
+    analysis: new Map(),
     timestamps: {
       subjects: new Map(),
       errorTypes: new Map(),
       errorStatuses: new Map(),
       errors: new Map(),
+      analysis: new Map(),
     },
   })
 
@@ -353,12 +407,80 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  // Analysis
+  const getAnalysis = useCallback(async (
+    userId: string,
+    params?: {
+      subject_id?: string
+      only_flagged?: boolean
+    }
+  ): Promise<AnalysisData> => {
+    const cacheKey = getCacheKey(userId, params)
+    
+    if (isCacheValid(cacheKey, 'analysis')) {
+      const cached = cache.analysis.get(cacheKey)
+      if (cached) {
+        return cached
+      }
+    }
+
+    const urlParams = new URLSearchParams({ user_id: userId })
+    if (params?.subject_id) urlParams.set('subject_id', params.subject_id)
+    if (params?.only_flagged) urlParams.set('only_flagged', 'true')
+
+    const res = await fetch(`/api/analysis?${urlParams.toString()}`)
+    const data = await res.json()
+    
+    if (data.error) {
+      throw new Error(data.error)
+    }
+    
+    setCache(prev => ({
+      ...prev,
+      analysis: new Map(prev.analysis).set(cacheKey, data),
+      timestamps: {
+        ...prev.timestamps,
+        analysis: new Map(prev.timestamps.analysis).set(cacheKey, Date.now()),
+      },
+    }))
+
+    return data
+  }, [cache, isCacheValid, getCacheKey])
+
+  const invalidateAnalysis = useCallback((userId: string, subjectId?: string) => {
+    setCache(prev => {
+      const newAnalysis = new Map(prev.analysis)
+      const newTimestamps = new Map(prev.timestamps.analysis)
+      
+      // Remove todas as entradas de cache de análise para este usuário
+      // Se subjectId for fornecido, remove apenas as relacionadas
+      for (const [key] of prev.analysis) {
+        if (key.startsWith(userId)) {
+          if (!subjectId || key.includes(`subject_id:${subjectId}`)) {
+            newAnalysis.delete(key)
+            newTimestamps.delete(key)
+          }
+        }
+      }
+      
+      return {
+        ...prev,
+        analysis: newAnalysis,
+        timestamps: {
+          ...prev.timestamps,
+          analysis: newTimestamps,
+        },
+      }
+    })
+  }, [])
+
   const invalidateAll = useCallback((userId: string) => {
     invalidateSubjects(userId)
     invalidateErrorTypes(userId)
     invalidateErrorStatuses(userId)
     invalidateErrors(userId)
-  }, [invalidateSubjects, invalidateErrorTypes, invalidateErrorStatuses, invalidateErrors])
+    invalidateAnalysis(userId)
+  }, [invalidateSubjects, invalidateErrorTypes, invalidateErrorStatuses, invalidateErrors, invalidateAnalysis])
 
   return (
     <DataCacheContext.Provider
@@ -371,6 +493,8 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
         invalidateErrorStatuses,
         getErrors,
         invalidateErrors,
+        getAnalysis,
+        invalidateAnalysis,
         invalidateAll,
       }}
     >
