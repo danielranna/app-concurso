@@ -122,9 +122,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
   // Cards em um ponto (quando há múltiplos no mesmo lugar)
   const [cardsAtPoint, setCardsAtPoint] = useState<AnalysisCard[] | null>(null)
   
-  // Modal de seleção de zonas para revisão
-  const [showZoneSelector, setShowZoneSelector] = useState(false)
-  const [selectedZones, setSelectedZones] = useState<{ critical: boolean; attention: boolean }>({ critical: true, attention: false })
 
   // Carrega dados de análise
   const loadAnalysisData = useCallback(async () => {
@@ -352,25 +349,9 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     }
   }
 
-  // Iniciar revisão dos cards problemáticos - redireciona para resumo-periodo com filtros de zona
+  // Iniciar revisão dos cards problemáticos - redireciona para resumo-periodo com ambas zonas selecionadas
   const startProblematicReview = () => {
-    const params = new URLSearchParams()
-    params.set("period", "accumulated")
-    
-    if (selectedZones.critical && selectedZones.attention) {
-      // Ambas zonas: usa critical=true&attention=true
-      params.set("critical", "true")
-      params.set("attention", "true")
-    } else if (selectedZones.critical) {
-      // Só zona crítica (flagueados + outliers)
-      params.set("critical", "true")
-    } else if (selectedZones.attention) {
-      // Só zona de atenção
-      params.set("attention", "true")
-    }
-    
-    router.push(`/resumo-periodo?${params.toString()}`)
-    setShowZoneSelector(false)
+    router.push("/resumo-periodo?period=accumulated&critical=true&attention=true")
   }
 
   // Tooltip customizado para o gráfico
@@ -592,7 +573,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
           {/* Botão de revisar problemáticos */}
           {(stats.flagged > 0 || stats.outliers > 0 || stats.attention_zone > 0) && (
             <button
-              onClick={() => setShowZoneSelector(true)}
+              onClick={startProblematicReview}
               className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
             >
               <Play className="h-4 w-4" />
@@ -1151,105 +1132,6 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
                   Editar
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE SELEÇÃO DE ZONAS PARA REVISÃO */}
-      {showZoneSelector && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowZoneSelector(false)}>
-          <div className="w-full max-w-sm rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-800">Selecionar Zonas para Revisão</h3>
-              <button
-                onClick={() => setShowZoneSelector(false)}
-                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-600">
-                Selecione quais zonas você deseja revisar:
-              </p>
-
-              {/* Opção Zona Crítica */}
-              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition ${
-                selectedZones.critical 
-                  ? "border-red-300 bg-red-50" 
-                  : "border-slate-200 hover:bg-slate-50"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedZones.critical}
-                  onChange={(e) => setSelectedZones(prev => ({ ...prev, critical: e.target.checked }))}
-                  className="mt-0.5 rounded border-slate-300"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <Flag className="h-4 w-4 text-red-600" />
-                    <span className="font-medium text-slate-800">Zona Crítica</span>
-                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
-                      {stats.flagged + stats.outliers}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Cards flagados manualmente + outliers (top {config.outlier_percentage}%)
-                  </p>
-                </div>
-              </label>
-
-              {/* Opção Zona de Atenção */}
-              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition ${
-                selectedZones.attention 
-                  ? "border-amber-300 bg-amber-50" 
-                  : "border-slate-200 hover:bg-slate-50"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedZones.attention}
-                  onChange={(e) => setSelectedZones(prev => ({ ...prev, attention: e.target.checked }))}
-                  className="mt-0.5 rounded border-slate-300"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-amber-600" />
-                    <span className="font-medium text-slate-800">Zona de Atenção</span>
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                      {stats.attention_zone}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Cards com índice ≥ {config.problem_threshold} (acima do threshold)
-                  </p>
-                </div>
-              </label>
-
-              {/* Aviso se nenhum selecionado */}
-              {!selectedZones.critical && !selectedZones.attention && (
-                <p className="text-xs text-amber-600 text-center">
-                  Selecione pelo menos uma zona para revisar
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2 p-6 pt-0">
-              <button
-                onClick={() => setShowZoneSelector(false)}
-                className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={startProblematicReview}
-                disabled={!selectedZones.critical && !selectedZones.attention}
-                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Play className="h-4 w-4" />
-                Iniciar Revisão
-              </button>
             </div>
           </div>
         </div>
