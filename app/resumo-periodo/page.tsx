@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState, useMemo, Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag, AlertTriangle } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag, AlertTriangle, RotateCcw } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
 
@@ -45,6 +45,8 @@ type ReviewFilters = {
   reviewName: string
   subjectIds: string[]
   errorTypes: string[]
+  /** Vazio = todos os status (comportamento igual ao "Total" do dropdown) */
+  errorStatuses?: string[]
   period: Period
   customFrom?: string
   customTo?: string
@@ -141,6 +143,8 @@ function ResumoPeriodoContent() {
   const [reviewName, setReviewName] = useState("")
   const [reviewSubjectIds, setReviewSubjectIds] = useState<string[]>([])
   const [reviewErrorTypes, setReviewErrorTypes] = useState<string[]>([])
+  /** "all" = todos os status; array = apenas esses (OR) */
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<"all" | string[]>("all")
   const [reviewPeriod, setReviewPeriod] = useState<Period>("last_week")
   const [reviewCustomFrom, setReviewCustomFrom] = useState(getDefaultCustomRange().from)
   const [reviewCustomTo, setReviewCustomTo] = useState(getDefaultCustomRange().to)
@@ -606,6 +610,24 @@ function ResumoPeriodoContent() {
     })
   }
 
+  const reviewPeriodErrorsForModal = useMemo(
+    () => filterErrorsByReviewPeriod(errors, reviewPeriod, reviewCustomFrom, reviewCustomTo),
+    [errors, reviewPeriod, reviewCustomFrom, reviewCustomTo]
+  )
+
+  const reviewStatusOptionsForModal = useMemo(() => {
+    const total = reviewPeriodErrorsForModal.length
+    const statuses = (errorStatuses || []).map(s => {
+      const name = (typeof s === "string" ? s : (s.name ?? "")).trim()
+      const color = typeof s === "object" && s.color ? s.color : "#64748b"
+      const count = reviewPeriodErrorsForModal.filter(
+        e => (e.error_status || "").toLowerCase().trim() === name.toLowerCase()
+      ).length
+      return { name, color, count }
+    })
+    return { total, statuses }
+  }, [reviewPeriodErrorsForModal, errorStatuses])
+
   const startNewReview = useCallback(async () => {
     if (!userId) return
     setReviewLoading(true)
@@ -632,6 +654,13 @@ function ResumoPeriodoContent() {
         )
       }
 
+      if (reviewStatusFilter !== "all" && reviewStatusFilter.length > 0) {
+        const allowed = new Set(reviewStatusFilter.map(s => s.toLowerCase().trim()))
+        reviewCandidates = reviewCandidates.filter(error =>
+          allowed.has((error.error_status || "").toLowerCase().trim())
+        )
+      }
+
       if (reviewCandidates.length === 0) {
         setReviewLoading(false)
         return
@@ -641,6 +670,7 @@ function ResumoPeriodoContent() {
         reviewName: reviewName.trim(),
         subjectIds: reviewSubjectIds,
         errorTypes: reviewErrorTypes,
+        errorStatuses: reviewStatusFilter === "all" ? [] : reviewStatusFilter,
         period: reviewPeriod,
         customFrom: reviewPeriod === "custom" ? reviewCustomFrom : undefined,
         customTo: reviewPeriod === "custom" ? reviewCustomTo : undefined
@@ -672,7 +702,7 @@ function ResumoPeriodoContent() {
     } finally {
       setReviewLoading(false)
     }
-  }, [userId, errors, reviewPeriod, reviewCustomFrom, reviewCustomTo, reviewSubjectIds, reviewErrorTypes, reviewName, reviewSessions])
+  }, [userId, errors, reviewPeriod, reviewCustomFrom, reviewCustomTo, reviewSubjectIds, reviewErrorTypes, reviewStatusFilter, reviewName, reviewSessions])
 
   // Cards para exibição durante a revisão (exclui os já revisados)
   const reviewErrors = useMemo(() => {
@@ -804,10 +834,26 @@ function ResumoPeriodoContent() {
     setReviewName("")
     setReviewSubjectIds([])
     setReviewErrorTypes([])
+    setReviewStatusFilter("all")
     setReviewPeriod(period)
     setReviewCustomFrom(customFrom)
     setReviewCustomTo(customTo)
     setShowReviewConfigModal(true)
+  }
+
+  const openNewReviewFromSelector = () => {
+    setShowReviewSelectorModal(false)
+    openReviewConfigModal()
+  }
+
+  const toggleReviewStatusInModal = (statusName: string) => {
+    setReviewStatusFilter(prev => {
+      if (prev === "all") return [statusName]
+      const next = prev.includes(statusName)
+        ? prev.filter(x => x !== statusName)
+        : [...prev, statusName]
+      return next.length === 0 ? "all" : next
+    })
   }
 
   const setCurrentReviewSession = (session: ReviewSession) => {
@@ -1380,6 +1426,71 @@ function ResumoPeriodoContent() {
               </div>
 
               <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Status (Erros)</label>
+                <p className="mb-2 text-xs text-slate-500">
+                  Mesmas categorias do filtro da página: Total ou marque um ou mais status.
+                </p>
+                <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                  <label className="flex cursor-pointer items-center justify-between gap-2 border-l-4 border-l-slate-300 py-2 pl-2 pr-1 text-sm text-slate-700">
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reviewStatusFilter === "all"}
+                        onChange={() => setReviewStatusFilter("all")}
+                        className="rounded border-slate-300"
+                      />
+                      <span className="font-medium">Total</span>
+                    </span>
+                    <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">
+                      {reviewStatusOptionsForModal.total}
+                    </span>
+                  </label>
+                  {reviewStatusOptionsForModal.statuses.map(s => {
+                    const isHex = s.color?.startsWith("#")
+                    const borderColor = isHex ? s.color : undefined
+                    const isChecked =
+                      reviewStatusFilter !== "all" && reviewStatusFilter.includes(s.name)
+                    return (
+                      <label
+                        key={s.name}
+                        className={`flex cursor-pointer items-center justify-between gap-2 border-l-4 py-2 pl-2 pr-1 text-sm ${
+                          !borderColor ? "border-l-slate-300" : ""
+                        }`}
+                        style={borderColor ? { borderLeftColor: borderColor } : undefined}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleReviewStatusInModal(s.name)}
+                            className="rounded border-slate-300"
+                          />
+                          <span
+                            className={
+                              isHex
+                                ? "font-medium"
+                                : `${getTypeColorClasses(s.color, false).replace("hover:bg-slate-50", "").replace("hover:bg-red-50", "").replace("hover:bg-orange-50", "").replace("hover:bg-green-50", "")} font-medium`
+                            }
+                            style={isHex ? { color: s.color } : undefined}
+                          >
+                            {s.name}
+                          </span>
+                        </span>
+                        <span
+                          className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-white ${
+                            isHex ? "" : getTypeColorClasses(s.color, true)
+                          }`}
+                          style={isHex ? { backgroundColor: s.color } : undefined}
+                        >
+                          {s.count}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div>
                 <label className="mb-2 block text-sm font-medium text-slate-600">Período</label>
                 <select
                   value={reviewPeriod}
@@ -1478,21 +1589,33 @@ function ResumoPeriodoContent() {
               )}
             </div>
 
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 flex flex-col gap-2">
               <button
-                onClick={continueReview}
-                disabled={!reviewSession}
-                className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                type="button"
+                onClick={openNewReviewFromSelector}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
-                Continuar
+                <RotateCcw className="h-4 w-4 shrink-0" />
+                Nova revisão
               </button>
-              <button
-                onClick={cancelReview}
-                disabled={!reviewSession || reviewLoading}
-                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-              >
-                Cancelar selecionada
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={continueReview}
+                  disabled={!reviewSession}
+                  className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Continuar
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelReview}
+                  disabled={!reviewSession || reviewLoading}
+                  className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                >
+                  Cancelar selecionada
+                </button>
+              </div>
             </div>
           </div>
         </div>
