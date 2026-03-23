@@ -52,6 +52,10 @@ type ReviewFilters = {
   customTo?: string
 }
 
+/** Quando só existe 1 opção e o usuário desmarca, não podemos usar [] (que significa "todos") */
+const REVIEW_NONE_SUBJECT = "__review_no_subject__"
+const REVIEW_NONE_ERROR_TYPE = "__review_no_error_type__"
+
 function formatDateForInput(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
@@ -641,17 +645,25 @@ function ResumoPeriodoContent() {
       )
 
       if (reviewSubjectIds.length > 0) {
-        const selectedSubjects = new Set(reviewSubjectIds)
-        reviewCandidates = reviewCandidates.filter(error =>
-          selectedSubjects.has(error.topics?.subjects?.id || "")
-        )
+        if (reviewSubjectIds[0] === REVIEW_NONE_SUBJECT) {
+          reviewCandidates = []
+        } else {
+          const selectedSubjects = new Set(reviewSubjectIds)
+          reviewCandidates = reviewCandidates.filter(error =>
+            selectedSubjects.has(error.topics?.subjects?.id || "")
+          )
+        }
       }
 
       if (reviewErrorTypes.length > 0) {
-        const selectedTypes = new Set(reviewErrorTypes)
-        reviewCandidates = reviewCandidates.filter(error =>
-          selectedTypes.has((error.error_type || "").trim())
-        )
+        if (reviewErrorTypes[0] === REVIEW_NONE_ERROR_TYPE) {
+          reviewCandidates = []
+        } else {
+          const selectedTypes = new Set(reviewErrorTypes)
+          reviewCandidates = reviewCandidates.filter(error =>
+            selectedTypes.has((error.error_type || "").trim())
+          )
+        }
       }
 
       if (reviewStatusFilter !== "all" && reviewStatusFilter.length > 0) {
@@ -854,6 +866,86 @@ function ResumoPeriodoContent() {
         : [...prev, statusName]
       return next.length === 0 ? "all" : next
     })
+  }
+
+  /** [] = todas as matérias; senão filtra pelo subconjunto */
+  const toggleReviewSubject = (subjectId: string) => {
+    setReviewSubjectIds(prev => {
+      if (subjectOptions.length === 0) return prev
+      if (prev[0] === REVIEW_NONE_SUBJECT) {
+        return [subjectId]
+      }
+      if (prev.length === 0) {
+        const rest = subjectOptions.map(s => s.id).filter(id => id !== subjectId)
+        return rest.length === 0 ? [REVIEW_NONE_SUBJECT] : rest
+      }
+      if (prev.includes(subjectId)) {
+        return prev.filter(id => id !== subjectId)
+      }
+      const next = [...prev, subjectId]
+      if (next.length === subjectOptions.length && subjectOptions.every(s => next.includes(s.id))) {
+        return []
+      }
+      return next
+    })
+  }
+
+  /** [] = todos os tipos; senão filtra pelo subconjunto */
+  const toggleReviewErrorTypeOption = (type: string) => {
+    setReviewErrorTypes(prev => {
+      if (errorTypeOptions.length === 0) return prev
+      if (prev[0] === REVIEW_NONE_ERROR_TYPE) {
+        return [type]
+      }
+      if (prev.length === 0) {
+        const rest = errorTypeOptions.filter(t => t !== type)
+        return rest.length === 0 ? [REVIEW_NONE_ERROR_TYPE] : rest
+      }
+      if (prev.includes(type)) {
+        return prev.filter(x => x !== type)
+      }
+      const next = [...prev, type]
+      if (next.length === errorTypeOptions.length && errorTypeOptions.every(t => next.includes(t))) {
+        return []
+      }
+      return next
+    })
+  }
+
+  const subjectsAllSelected =
+    subjectOptions.length === 0 ||
+    reviewSubjectIds.length === 0 ||
+    (reviewSubjectIds.length === subjectOptions.length &&
+      subjectOptions.every(s => reviewSubjectIds.includes(s.id)))
+
+  const errorTypesAllSelected =
+    errorTypeOptions.length === 0 ||
+    reviewErrorTypes.length === 0 ||
+    (reviewErrorTypes.length === errorTypeOptions.length &&
+      errorTypeOptions.every(t => reviewErrorTypes.includes(t)))
+
+  const toggleSubjectsTodos = () => {
+    if (subjectsAllSelected) {
+      if (subjectOptions.length <= 1) {
+        setReviewSubjectIds([])
+      } else {
+        setReviewSubjectIds([subjectOptions[0].id])
+      }
+    } else {
+      setReviewSubjectIds([])
+    }
+  }
+
+  const toggleErrorTypesTodos = () => {
+    if (errorTypesAllSelected) {
+      if (errorTypeOptions.length <= 1) {
+        setReviewErrorTypes([])
+      } else {
+        setReviewErrorTypes([errorTypeOptions[0]])
+      }
+    } else {
+      setReviewErrorTypes([])
+    }
   }
 
   const setCurrentReviewSession = (session: ReviewSession) => {
@@ -1380,22 +1472,34 @@ function ResumoPeriodoContent() {
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-600">Matérias</label>
                 <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
-                  {subjectOptions.length > 0 ? subjectOptions.map(subject => (
-                    <label key={subject.id} className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={reviewSubjectIds.includes(subject.id)}
-                        onChange={() => {
-                          setReviewSubjectIds(prev =>
-                            prev.includes(subject.id)
-                              ? prev.filter(id => id !== subject.id)
-                              : [...prev, subject.id]
-                          )
-                        }}
-                      />
-                      <span>{subject.name}</span>
-                    </label>
-                  )) : (
+                  {subjectOptions.length > 0 ? (
+                    <>
+                      <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 pb-2 text-sm font-medium text-slate-800">
+                        <input
+                          type="checkbox"
+                          checked={subjectsAllSelected}
+                          onChange={toggleSubjectsTodos}
+                          className="rounded border-slate-300"
+                        />
+                        <span>Todos</span>
+                      </label>
+                      {subjectOptions.map(subject => (
+                        <label key={subject.id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={
+                              reviewSubjectIds.length === 0 ||
+                              (reviewSubjectIds[0] !== REVIEW_NONE_SUBJECT &&
+                                reviewSubjectIds.includes(subject.id))
+                            }
+                            onChange={() => toggleReviewSubject(subject.id)}
+                            className="rounded border-slate-300"
+                          />
+                          <span>{subject.name}</span>
+                        </label>
+                      ))}
+                    </>
+                  ) : (
                     <p className="text-sm text-slate-500">Nenhuma matéria encontrada.</p>
                   )}
                 </div>
@@ -1404,22 +1508,34 @@ function ResumoPeriodoContent() {
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-600">Tipos de erro</label>
                 <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
-                  {errorTypeOptions.length > 0 ? errorTypeOptions.map(errorType => (
-                    <label key={errorType} className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={reviewErrorTypes.includes(errorType)}
-                        onChange={() => {
-                          setReviewErrorTypes(prev =>
-                            prev.includes(errorType)
-                              ? prev.filter(type => type !== errorType)
-                              : [...prev, errorType]
-                          )
-                        }}
-                      />
-                      <span>{errorType}</span>
-                    </label>
-                  )) : (
+                  {errorTypeOptions.length > 0 ? (
+                    <>
+                      <label className="flex cursor-pointer items-center gap-2 border-b border-slate-100 pb-2 text-sm font-medium text-slate-800">
+                        <input
+                          type="checkbox"
+                          checked={errorTypesAllSelected}
+                          onChange={toggleErrorTypesTodos}
+                          className="rounded border-slate-300"
+                        />
+                        <span>Todos</span>
+                      </label>
+                      {errorTypeOptions.map(errorType => (
+                        <label key={errorType} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={
+                              reviewErrorTypes.length === 0 ||
+                              (reviewErrorTypes[0] !== REVIEW_NONE_ERROR_TYPE &&
+                                reviewErrorTypes.includes(errorType))
+                            }
+                            onChange={() => toggleReviewErrorTypeOption(errorType)}
+                            className="rounded border-slate-300"
+                          />
+                          <span>{errorType}</span>
+                        </label>
+                      ))}
+                    </>
+                  ) : (
                     <p className="text-sm text-slate-500">Nenhum tipo de erro encontrado.</p>
                   )}
                 </div>
