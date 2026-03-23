@@ -252,13 +252,14 @@ function ResumoPeriodoContent() {
 
   // startNewReview é definida após filteredErrors (veja abaixo)
 
-  const continueReview = useCallback(async () => {
-    if (!reviewSession?.id) return
+  const continueReview = useCallback(async (sessionOverride?: ReviewSession) => {
+    const s = sessionOverride ?? reviewSession
+    if (!s?.id) return
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("active_review_session_id", reviewSession.id)
+      window.localStorage.setItem("active_review_session_id", s.id)
     }
     try {
-      await fetch(`/api/review-sessions/${reviewSession.id}`, {
+      await fetch(`/api/review-sessions/${s.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "resume" })
@@ -266,34 +267,49 @@ function ResumoPeriodoContent() {
     } catch (error) {
       console.error("Erro ao retomar revisão:", error)
     }
+    setReviewSession(s)
     setReviewMode(true)
     setShowReviewSelectorModal(false)
   }, [reviewSession])
 
+  const cancelSessionById = useCallback(
+    async (sessionId: string) => {
+      setReviewLoading(true)
+      try {
+        await fetch(`/api/review-sessions/${sessionId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cancel" })
+        })
+        const remaining = reviewSessions.filter(s => s.id !== sessionId)
+        setReviewSessions(remaining)
+        if (reviewSession?.id === sessionId) {
+          setReviewSession(remaining[0] || null)
+          setReviewMode(false)
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem("active_review_session_id")
+            if (remaining[0]) {
+              window.localStorage.setItem("active_review_session_id", remaining[0].id)
+            }
+          }
+        }
+        if (remaining.length === 0) {
+          setShowReviewSelectorModal(false)
+        }
+      } catch (error) {
+        console.error("Erro ao cancelar revisão:", error)
+      } finally {
+        setReviewLoading(false)
+      }
+    },
+    [reviewSession, reviewSessions]
+  )
+
   const cancelReview = useCallback(async () => {
     if (!reviewSession?.id) return
-    setReviewLoading(true)
-
-    try {
-      await fetch(`/api/review-sessions/${reviewSession.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cancel" })
-      })
-      const remainingSessions = reviewSessions.filter(s => s.id !== reviewSession.id)
-      setReviewSessions(remainingSessions)
-      setReviewSession(remainingSessions[0] || null)
-      setReviewMode(false)
-      setShowReviewSelectorModal(false)
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("active_review_session_id")
-      }
-    } catch (error) {
-      console.error("Erro ao cancelar revisão:", error)
-    } finally {
-      setReviewLoading(false)
-    }
-  }, [reviewSession, reviewSessions])
+    await cancelSessionById(reviewSession.id)
+    setShowReviewSelectorModal(false)
+  }, [reviewSession, cancelSessionById])
 
   const pauseReview = useCallback(() => {
     setReviewMode(false)
@@ -945,13 +961,6 @@ function ResumoPeriodoContent() {
       }
     } else {
       setReviewErrorTypes([])
-    }
-  }
-
-  const setCurrentReviewSession = (session: ReviewSession) => {
-    setReviewSession(session)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("active_review_session_id", session.id)
     }
   }
 
@@ -1666,10 +1675,11 @@ function ResumoPeriodoContent() {
       {/* Modal para selecionar revisão em andamento */}
       {showReviewSelectorModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-2">
               <h3 className="text-lg font-semibold text-slate-800">Revisões em andamento</h3>
               <button
+                type="button"
                 onClick={() => setShowReviewSelectorModal(false)}
                 className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
               >
@@ -1677,35 +1687,82 @@ function ResumoPeriodoContent() {
               </button>
             </div>
 
-            <div className="max-h-80 space-y-2 overflow-y-auto">
-              {reviewSessions.length > 0 ? reviewSessions.map(session => {
-                const reviewed = session.reviewed_card_ids?.length || 0
-                const total = session.card_ids?.length || 0
-                const sessionFilters = (session.filters || {}) as ReviewFilters
-                const isSelected = reviewSession?.id === session.id
+            <div className="max-h-[min(70vh,520px)] space-y-3 overflow-y-auto pr-0.5">
+              {reviewSessions.length > 0 ? (
+                reviewSessions.map(session => {
+                  const reviewed = session.reviewed_card_ids?.length || 0
+                  const total = session.card_ids?.length || 0
+                  const pct = total > 0 ? (reviewed / total) * 100 : 0
+                  const sessionFilters = (session.filters || {}) as ReviewFilters
+                  const title = sessionFilters.reviewName?.trim()
+                    ? `Revisão: ${sessionFilters.reviewName}`
+                    : "Revisão sem nome"
+                  const isActive = reviewSession?.id === session.id
 
-                return (
-                  <button
-                    key={session.id}
-                    onClick={() => setCurrentReviewSession(session)}
-                    className={`w-full rounded-lg border p-3 text-left transition ${
-                      isSelected ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    <p className="text-sm font-semibold text-slate-800">
-                      {sessionFilters.reviewName?.trim() || "Revisão sem nome"}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      {reviewed} / {total} revisados
-                    </p>
-                  </button>
-                )
-              }) : (
-                <p className="py-4 text-center text-sm text-slate-500">Nenhuma revisão ativa.</p>
+                  return (
+                    <div
+                      key={session.id}
+                      className={`rounded-xl border p-4 transition ${
+                        isActive
+                          ? "border-blue-400 bg-blue-50 ring-1 ring-blue-300"
+                          : "border-blue-200 bg-blue-50/80 hover:border-blue-300"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-4">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+                            <PlayCircle className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-blue-900">{title}</p>
+                            <p className="text-xs text-blue-700">
+                              {reviewed} de {total} revisados
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-1 items-center gap-3 lg:min-w-[200px]">
+                          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-blue-200">
+                            <div
+                              className="h-full bg-blue-600 transition-all duration-300"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="w-11 shrink-0 text-right text-sm font-medium text-blue-900">
+                            {Math.round(pct)}%
+                          </span>
+                        </div>
+
+                        <div className="flex shrink-0 flex-wrap justify-end gap-2 lg:flex-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => continueReview(session)}
+                            disabled={reviewLoading}
+                            className="flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+                          >
+                            <PlayCircle className="h-4 w-4" />
+                            Continuar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => cancelSessionById(session.id)}
+                            disabled={reviewLoading}
+                            className="flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <XCircle className="h-4 w-4" />
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="py-8 text-center text-sm text-slate-500">Nenhuma revisão ativa.</p>
               )}
             </div>
 
-            <div className="mt-4 flex flex-col gap-2">
+            <div className="mt-5 border-t border-slate-200 pt-4">
               <button
                 type="button"
                 onClick={openNewReviewFromSelector}
@@ -1714,24 +1771,6 @@ function ResumoPeriodoContent() {
                 <RotateCcw className="h-4 w-4 shrink-0" />
                 Nova revisão
               </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={continueReview}
-                  disabled={!reviewSession}
-                  className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
-                >
-                  Continuar
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelReview}
-                  disabled={!reviewSession || reviewLoading}
-                  className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                >
-                  Cancelar selecionada
-                </button>
-              </div>
             </div>
           </div>
         </div>
