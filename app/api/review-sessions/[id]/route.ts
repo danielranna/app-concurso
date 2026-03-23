@@ -50,7 +50,10 @@ export async function PUT(
         // Atualiza sessão
         const { error: updateError } = await supabaseServer
           .from("review_sessions")
-          .update({ reviewed_card_ids: reviewedCardIds })
+          .update({
+            reviewed_card_ids: reviewedCardIds,
+            last_accessed_at: new Date().toISOString()
+          })
           .eq("id", id)
 
         if (updateError) {
@@ -70,6 +73,19 @@ export async function PUT(
       if (session.user_id) {
         const { revalidateTag } = await import("next/cache")
         revalidateTag(`errors-${session.user_id}`, "max")
+      }
+
+      return NextResponse.json({ success: true })
+    }
+
+    if (action === "resume") {
+      const { error: updateError } = await supabaseServer
+        .from("review_sessions")
+        .update({ last_accessed_at: new Date().toISOString() })
+        .eq("id", id)
+
+      if (updateError) {
+        throw new Error(updateError.message)
       }
 
       return NextResponse.json({ success: true })

@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase"
 import { ArrowLeft, ChevronDown, ChevronUp, CalendarRange, X, PlayCircle, Pause, XCircle, Flag, AlertTriangle } from "lucide-react"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
-import ReviewSessionModal from "@/components/ReviewSessionModal"
 
 type Error = {
   id: string
@@ -29,6 +28,8 @@ type Error = {
   }
 }
 
+type Period = "this_week" | "last_week" | "accumulated" | "custom"
+
 type ReviewSession = {
   id: string
   user_id: string
@@ -38,6 +39,15 @@ type ReviewSession = {
   status: string
   created_at: string
   updated_at: string
+}
+
+type ReviewFilters = {
+  reviewName: string
+  subjectIds: string[]
+  errorTypes: string[]
+  period: Period
+  customFrom?: string
+  customTo?: string
 }
 
 function formatDateForInput(d: Date): string {
@@ -65,7 +75,6 @@ function ResumoPeriodoContent() {
     return params.get("type") || "total"
   })
 
-  type Period = "this_week" | "last_week" | "accumulated" | "custom"
   const getWeekStart = (date: Date): Date => {
     const dayOfWeek = date.getDay()
     const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
@@ -122,11 +131,19 @@ function ResumoPeriodoContent() {
   const [attentionCardIds, setAttentionCardIds] = useState<Set<string>>(new Set())
 
   // Estados de revisão
+  const [reviewSessions, setReviewSessions] = useState<ReviewSession[]>([])
   const [reviewSession, setReviewSession] = useState<ReviewSession | null>(null)
-  const [showReviewModal, setShowReviewModal] = useState(false)
+  const [showReviewSelectorModal, setShowReviewSelectorModal] = useState(false)
+  const [showReviewConfigModal, setShowReviewConfigModal] = useState(false)
   const [reviewMode, setReviewMode] = useState(false)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [removingCardId, setRemovingCardId] = useState<string | null>(null)
+  const [reviewName, setReviewName] = useState("")
+  const [reviewSubjectIds, setReviewSubjectIds] = useState<string[]>([])
+  const [reviewErrorTypes, setReviewErrorTypes] = useState<string[]>([])
+  const [reviewPeriod, setReviewPeriod] = useState<Period>("last_week")
+  const [reviewCustomFrom, setReviewCustomFrom] = useState(getDefaultCustomRange().from)
+  const [reviewCustomTo, setReviewCustomTo] = useState(getDefaultCustomRange().to)
 
   async function loadAnalysisZones(user_id: string) {
     try {
@@ -203,10 +220,21 @@ function ResumoPeriodoContent() {
     try {
       const res = await fetch(`/api/review-sessions?user_id=${user_id}`)
       const data = await res.json()
-      if (data && data.id) {
-        setReviewSession(data)
-        setShowReviewModal(true)
+      if (Array.isArray(data)) {
+        setReviewSessions(data)
+        if (data.length === 0) {
+          setReviewSession(null)
+          return
+        }
+
+        const savedSessionId = typeof window !== "undefined"
+          ? window.localStorage.getItem("active_review_session_id")
+          : null
+
+        const selected = data.find((s: ReviewSession) => s.id === savedSessionId) || data[0]
+        setReviewSession(selected)
       } else {
+        setReviewSessions([])
         setReviewSession(null)
       }
     } catch (error) {
@@ -216,10 +244,23 @@ function ResumoPeriodoContent() {
 
   // startNewReview é definida após filteredErrors (veja abaixo)
 
-  const continueReview = useCallback(() => {
+  const continueReview = useCallback(async () => {
+    if (!reviewSession?.id) return
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("active_review_session_id", reviewSession.id)
+    }
+    try {
+      await fetch(`/api/review-sessions/${reviewSession.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resume" })
+      })
+    } catch (error) {
+      console.error("Erro ao retomar revisão:", error)
+    }
     setReviewMode(true)
-    setShowReviewModal(false)
-  }, [])
+    setShowReviewSelectorModal(false)
+  }, [reviewSession])
 
   const cancelReview = useCallback(async () => {
     if (!reviewSession?.id) return
@@ -231,15 +272,20 @@ function ResumoPeriodoContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "cancel" })
       })
-      setReviewSession(null)
+      const remainingSessions = reviewSessions.filter(s => s.id !== reviewSession.id)
+      setReviewSessions(remainingSessions)
+      setReviewSession(remainingSessions[0] || null)
       setReviewMode(false)
-      setShowReviewModal(false)
+      setShowReviewSelectorModal(false)
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("active_review_session_id")
+      }
     } catch (error) {
       console.error("Erro ao cancelar revisão:", error)
     } finally {
       setReviewLoading(false)
     }
-  }, [reviewSession])
+  }, [reviewSession, reviewSessions])
 
   const pauseReview = useCallback(() => {
     setReviewMode(false)
@@ -275,6 +321,18 @@ function ResumoPeriodoContent() {
               reviewed_card_ids: newReviewedIds
             }
           })
+          setReviewSessions(prev =>
+            prev.map(session =>
+              session.id === reviewSession.id
+                ? {
+                    ...session,
+                    reviewed_card_ids: (session.reviewed_card_ids || []).includes(cardId)
+                      ? (session.reviewed_card_ids || [])
+                      : [...(session.reviewed_card_ids || []), cardId]
+                  }
+                : session
+            )
+          )
           setRemovingCardId(null)
         }, 300) // Tempo da animação
       }
@@ -494,44 +552,127 @@ function ResumoPeriodoContent() {
     return result
   }, [periodErrors, filterType, showCriticalZone, showAttentionZone, criticalCardIds, attentionCardIds])
 
-  // Função para iniciar nova revisão (declarada após filteredErrors)
-  async function startNewReview() {
-    if (!userId || filteredErrors.length === 0) return
+  const subjectOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    errors.forEach(error => {
+      if (error.topics?.subjects?.id && error.topics?.subjects?.name) {
+        map.set(error.topics.subjects.id, error.topics.subjects.name)
+      }
+    })
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+  }, [errors])
+
+  const errorTypeOptions = useMemo(() => {
+    const uniqueTypes = new Set<string>()
+    errors.forEach(error => {
+      if (error.error_type?.trim()) uniqueTypes.add(error.error_type.trim())
+    })
+    return Array.from(uniqueTypes).sort((a, b) => a.localeCompare(b))
+  }, [errors])
+
+  function filterErrorsByReviewPeriod(source: Error[], selectedPeriod: Period, from?: string, to?: string) {
+    if (selectedPeriod === "accumulated") return source
+
+    const now = new Date()
+    const thisWeekStart = getWeekStart(now)
+    let rangeStart: Date
+    let rangeEnd: Date
+
+    if (selectedPeriod === "this_week") {
+      rangeStart = new Date(thisWeekStart)
+      rangeEnd = new Date(rangeStart)
+      rangeEnd.setDate(rangeStart.getDate() + 6)
+      rangeEnd.setHours(23, 59, 59, 999)
+    } else if (selectedPeriod === "last_week") {
+      rangeStart = new Date(thisWeekStart)
+      rangeStart.setDate(thisWeekStart.getDate() - 7)
+      rangeEnd = new Date(rangeStart)
+      rangeEnd.setDate(rangeStart.getDate() + 6)
+      rangeEnd.setHours(23, 59, 59, 999)
+    } else {
+      if (!from || !to) return []
+      const start = new Date(from)
+      const end = new Date(to)
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return []
+      rangeStart = start
+      rangeStart.setHours(0, 0, 0, 0)
+      rangeEnd = end
+      rangeEnd.setHours(23, 59, 59, 999)
+    }
+
+    return source.filter(error => {
+      const errorDate = new Date(error.created_at)
+      return errorDate >= rangeStart && errorDate <= rangeEnd
+    })
+  }
+
+  const startNewReview = useCallback(async () => {
+    if (!userId) return
     setReviewLoading(true)
 
     try {
-      // Cancela sessão anterior se existir
-      if (reviewSession?.id) {
-        await fetch(`/api/review-sessions/${reviewSession.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "cancel" })
-        })
+      let reviewCandidates = filterErrorsByReviewPeriod(
+        errors,
+        reviewPeriod,
+        reviewCustomFrom,
+        reviewCustomTo
+      )
+
+      if (reviewSubjectIds.length > 0) {
+        const selectedSubjects = new Set(reviewSubjectIds)
+        reviewCandidates = reviewCandidates.filter(error =>
+          selectedSubjects.has(error.topics?.subjects?.id || "")
+        )
       }
 
-      // Cria nova sessão
+      if (reviewErrorTypes.length > 0) {
+        const selectedTypes = new Set(reviewErrorTypes)
+        reviewCandidates = reviewCandidates.filter(error =>
+          selectedTypes.has((error.error_type || "").trim())
+        )
+      }
+
+      if (reviewCandidates.length === 0) {
+        setReviewLoading(false)
+        return
+      }
+
+      const filters: ReviewFilters = {
+        reviewName: reviewName.trim(),
+        subjectIds: reviewSubjectIds,
+        errorTypes: reviewErrorTypes,
+        period: reviewPeriod,
+        customFrom: reviewPeriod === "custom" ? reviewCustomFrom : undefined,
+        customTo: reviewPeriod === "custom" ? reviewCustomTo : undefined
+      }
+
       const res = await fetch("/api/review-sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
-          filters: { period, filterType, customFrom, customTo },
-          card_ids: filteredErrors.map(e => e.id)
+          filters,
+          card_ids: reviewCandidates.map(e => e.id)
         })
       })
 
       const newSession = await res.json()
       if (newSession && newSession.id) {
+        const newSessions = [newSession, ...reviewSessions]
+        setReviewSessions(newSessions)
         setReviewSession(newSession)
         setReviewMode(true)
-        setShowReviewModal(false)
+        setShowReviewConfigModal(false)
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("active_review_session_id", newSession.id)
+        }
       }
     } catch (error) {
       console.error("Erro ao iniciar revisão:", error)
     } finally {
       setReviewLoading(false)
     }
-  }
+  }, [userId, errors, reviewPeriod, reviewCustomFrom, reviewCustomTo, reviewSubjectIds, reviewErrorTypes, reviewName, reviewSessions])
 
   // Cards para exibição durante a revisão (exclui os já revisados)
   const reviewErrors = useMemo(() => {
@@ -540,11 +681,11 @@ function ResumoPeriodoContent() {
     const reviewedIds = new Set(reviewSession.reviewed_card_ids || [])
     const sessionCardIds = new Set(reviewSession.card_ids || [])
 
-    // Mostra apenas cards da sessão que ainda não foram revisados
-    return filteredErrors.filter(e => 
+    // Mostra cards da sessão, independente dos filtros atuais da tela
+    return errors.filter(e =>
       sessionCardIds.has(e.id) && !reviewedIds.has(e.id)
     )
-  }, [filteredErrors, reviewMode, reviewSession])
+  }, [errors, filteredErrors, reviewMode, reviewSession])
 
   // Cards a serem exibidos (normal ou modo revisão)
   const displayErrors = reviewMode ? reviewErrors : filteredErrors
@@ -657,6 +798,23 @@ function ResumoPeriodoContent() {
   const handleApplyDates = () => {
     setShowDatePicker(false)
     applyCustomRange()
+  }
+
+  const openReviewConfigModal = () => {
+    setReviewName("")
+    setReviewSubjectIds([])
+    setReviewErrorTypes([])
+    setReviewPeriod(period)
+    setReviewCustomFrom(customFrom)
+    setReviewCustomTo(customTo)
+    setShowReviewConfigModal(true)
+  }
+
+  const setCurrentReviewSession = (session: ReviewSession) => {
+    setReviewSession(session)
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("active_review_session_id", session.id)
+    }
   }
 
   if (!userId) return null
@@ -869,10 +1027,20 @@ function ResumoPeriodoContent() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Botão Iniciar Revisão (só aparece quando não está em modo revisão) */}
-        {!reviewMode && filteredErrors.length > 0 && (
+        {!reviewMode && reviewSessions.length > 0 && (
           <button
-            onClick={startNewReview}
+            onClick={() => setShowReviewSelectorModal(true)}
+            className="flex shrink-0 items-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 transition hover:bg-blue-100"
+          >
+            <PlayCircle className="h-4 w-4" />
+            <span>Continuar Revisão</span>
+          </button>
+        )}
+
+        {/* Botão Iniciar Revisão (só aparece quando não está em modo revisão) */}
+        {!reviewMode && errors.length > 0 && (
+          <button
+            onClick={openReviewConfigModal}
             disabled={reviewLoading}
             className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
           >
@@ -910,7 +1078,11 @@ function ResumoPeriodoContent() {
                 <PlayCircle className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-blue-900">Revisão em Andamento</p>
+                <p className="text-sm font-semibold text-blue-900">
+                  {(reviewSession?.filters as ReviewFilters | undefined)?.reviewName?.trim()
+                    ? `Revisão: ${(reviewSession.filters as ReviewFilters).reviewName}`
+                    : "Revisão em Andamento"}
+                </p>
                 <p className="text-xs text-blue-700">
                   {reviewProgress.reviewed} de {reviewProgress.total} revisados
                 </p>
@@ -1133,16 +1305,198 @@ function ResumoPeriodoContent() {
         />
       )}
 
-      {/* Modal de revisão em andamento */}
-      <ReviewSessionModal
-        isOpen={showReviewModal}
-        session={reviewSession}
-        totalCurrentCards={filteredErrors.length}
-        onContinue={continueReview}
-        onCancel={cancelReview}
-        onNewReview={startNewReview}
-        onClose={() => setShowReviewModal(false)}
-      />
+      {/* Modal de configuração de nova revisão */}
+      {showReviewConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-800">Configurar revisão</h3>
+              <button
+                onClick={() => setShowReviewConfigModal(false)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-600">Nome da revisão</label>
+                <input
+                  type="text"
+                  value={reviewName}
+                  onChange={e => setReviewName(e.target.value)}
+                  placeholder="Ex: Revisão para prova de Constitucional"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Matérias</label>
+                <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                  {subjectOptions.length > 0 ? subjectOptions.map(subject => (
+                    <label key={subject.id} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={reviewSubjectIds.includes(subject.id)}
+                        onChange={() => {
+                          setReviewSubjectIds(prev =>
+                            prev.includes(subject.id)
+                              ? prev.filter(id => id !== subject.id)
+                              : [...prev, subject.id]
+                          )
+                        }}
+                      />
+                      <span>{subject.name}</span>
+                    </label>
+                  )) : (
+                    <p className="text-sm text-slate-500">Nenhuma matéria encontrada.</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Tipos de erro</label>
+                <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                  {errorTypeOptions.length > 0 ? errorTypeOptions.map(errorType => (
+                    <label key={errorType} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={reviewErrorTypes.includes(errorType)}
+                        onChange={() => {
+                          setReviewErrorTypes(prev =>
+                            prev.includes(errorType)
+                              ? prev.filter(type => type !== errorType)
+                              : [...prev, errorType]
+                          )
+                        }}
+                      />
+                      <span>{errorType}</span>
+                    </label>
+                  )) : (
+                    <p className="text-sm text-slate-500">Nenhum tipo de erro encontrado.</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">Período</label>
+                <select
+                  value={reviewPeriod}
+                  onChange={e => setReviewPeriod(e.target.value as Period)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                >
+                  <option value="this_week">Esta semana</option>
+                  <option value="last_week">Última semana</option>
+                  <option value="accumulated">Acumulado</option>
+                  <option value="custom">Entre datas</option>
+                </select>
+              </div>
+
+              {reviewPeriod === "custom" && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-600">Data início</label>
+                    <input
+                      type="date"
+                      value={reviewCustomFrom}
+                      onChange={e => setReviewCustomFrom(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-600">Data fim</label>
+                    <input
+                      type="date"
+                      value={reviewCustomTo}
+                      onChange={e => setReviewCustomTo(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowReviewConfigModal(false)}
+                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={startNewReview}
+                  disabled={reviewLoading}
+                  className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Iniciar revisão
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para selecionar revisão em andamento */}
+      {showReviewSelectorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-800">Revisões em andamento</h3>
+              <button
+                onClick={() => setShowReviewSelectorModal(false)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-80 space-y-2 overflow-y-auto">
+              {reviewSessions.length > 0 ? reviewSessions.map(session => {
+                const reviewed = session.reviewed_card_ids?.length || 0
+                const total = session.card_ids?.length || 0
+                const sessionFilters = (session.filters || {}) as ReviewFilters
+                const isSelected = reviewSession?.id === session.id
+
+                return (
+                  <button
+                    key={session.id}
+                    onClick={() => setCurrentReviewSession(session)}
+                    className={`w-full rounded-lg border p-3 text-left transition ${
+                      isSelected ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-slate-800">
+                      {sessionFilters.reviewName?.trim() || "Revisão sem nome"}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {reviewed} / {total} revisados
+                    </p>
+                  </button>
+                )
+              }) : (
+                <p className="py-4 text-center text-sm text-slate-500">Nenhuma revisão ativa.</p>
+              )}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={continueReview}
+                disabled={!reviewSession}
+                className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                Continuar
+              </button>
+              <button
+                onClick={cancelReview}
+                disabled={!reviewSession || reviewLoading}
+                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+              >
+                Cancelar selecionada
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
