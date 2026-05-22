@@ -103,6 +103,34 @@ e) op E
 Gabarito 1) C
 `
 
+const AUDITORIA_NUM_SNIPPET = `
+www.tecconcursos.com.br/questoes/2423184
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/Apoio Técnico Especializado/Gestão Pública/2023
+Auditoria Privada - Estrutura Conceitual para Trabalhos de Asseguração
+4) Acerca de estrutura conceitual e objetivos da auditoria independente, julgue o item subsequente.
+A estrutura conceitual para trabalhos de asseguração é considerada uma norma.
+Certo Errado
+Gabarito 1) Certo
+`
+
+const CARACTERISTICAS_NUM_SNIPPET = `
+www.tecconcursos.com.br/questoes/1125528
+CEBRASPE (CESPE) - AFRDF (SEFAZ DF)/SEFAZ DF/2020
+Auditoria - Características Inerentes ao Auditor (Julgamento e Ceticismo)
+11) 12) 13) 14) Considerando a proposição P: teste
+Certo Errado
+Gabarito 1) Certo
+`
+
+const CIENCIA_SEM_NUM_SNIPPET = `
+www.tecconcursos.com.br/questoes/8880001
+CEBRASPE (CESPE) - ANL/Org/Area/2024
+Ciência de Dados e Inteligência Artificial - Dado, Informação e Conhecimento
+Elemento com significado atribuído é dado.
+Certo Errado
+Gabarito 1) Certo
+`
+
 const CIENCIA_CE_SNIPPET = `
 www.tecconcursos.com.br/questoes/9990001
 CEBRASPE (CESPE) - ANL (Org X)/Org X/Area/2024
@@ -181,6 +209,34 @@ function runTests() {
   const rlRq = rlReal.questions[0]
   assert(rlRq.tec_topic === "Tabela Verdade das Proposições Compostas", `rl real topic: ${rlRq.tec_topic}`)
   assert(rlRq.statement.startsWith("A seguir"), `rl real stmt: ${rlRq.statement.slice(0, 40)}`)
+
+  const aud = parseTecPdfText(AUDITORIA_NUM_SNIPPET)
+  assert(
+    aud.questions[0].tec_topic === "Estrutura Conceitual para Trabalhos de Asseguração",
+    `aud topic: ${aud.questions[0].tec_topic}`
+  )
+  assert(
+    aud.questions[0].statement.startsWith("Acerca de estrutura"),
+    `aud stmt: ${aud.questions[0].statement.slice(0, 40)}`
+  )
+  assert(!aud.questions[0].tec_topic.includes("Acerca"), "aud topic clean")
+
+  const car = parseTecPdfText(CARACTERISTICAS_NUM_SNIPPET)
+  assert(
+    car.questions[0].tec_topic === "Características Inerentes ao Auditor (Julgamento e Ceticismo)",
+    `car topic: ${car.questions[0].tec_topic}`
+  )
+  assert(!car.questions[0].tec_topic.includes("11)"), "car topic no numbers")
+
+  const ciSem = parseTecPdfText(CIENCIA_SEM_NUM_SNIPPET)
+  assert(
+    ciSem.questions[0].tec_topic === "Dado, Informação e Conhecimento",
+    `ci sem topic: ${ciSem.questions[0].tec_topic}`
+  )
+  assert(
+    ciSem.questions[0].statement.startsWith("Elemento com"),
+    `ci sem stmt: ${ciSem.questions[0].statement.slice(0, 30)}`
+  )
 
   const ci = parseTecPdfText(CIENCIA_CE_SNIPPET)
   const ciq = ci.questions[0]

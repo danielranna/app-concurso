@@ -152,7 +152,7 @@ const STATEMENT_START_RE =
   /\s(?:(?:Texto\s+[A-Z0-9][\w.-]*)\s*|(?:\d+\)\s*)+(?=Considerando|No\s|A\s)|(?:\d+\)\s+)?(?:[\u201c\u201d"]\s*)?P:\s*|Proposição\s+P:\s*|(?:A seguir|Considerando(?:-se)?|No que se refere|No argumento seguinte|A respeito de|Acerca de|Julgue o|Assinale a opção|Em relação|Com relação|Com base nas|Com base no|Com base|Tendo em vista|À luz de|Diante do|Segundo o|De acordo com|Sabendo que|Suponha que|Considere que|Observe que)\b)/i
 
 const MCQ_STMT_FALLBACK_RE =
-  /\s(A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s|As\s|Os\s)/i
+  /\s(Elemento\s|Fluxos\s|A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|diretor|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s|As\s|Os\s)/i
 
 function cleanMetaLine(line: string): string {
   return line
@@ -184,12 +184,35 @@ function splitTopicFromStatement(tail: string): { topic: string; statementPart: 
   }
 }
 
-/** Matéria - Assunto (sem /) e separação do enunciado. */
+/** Número do item no enunciado (ex.: "4) Acerca de..."). */
+const QUESTION_ITEM_NUMBER_RE = /\s(\d+\)\s)/
+
+/**
+ * Matéria - Assunto: o assunto é o texto após o último " - " antes do número da questão.
+ * Sem número (ex.: "A seguir,"), usa marcadores de início do enunciado.
+ */
 export function splitTaxonomyAndStatement(afterMeta: string): {
   taxonomyLine: string
   rest: string
 } {
   const trimmed = afterMeta.trim()
+  if (!trimmed) return { taxonomyLine: "", rest: "" }
+
+  const qNum = trimmed.match(QUESTION_ITEM_NUMBER_RE)
+  if (qNum && qNum.index != null) {
+    const beforeNum = trimmed.slice(0, qNum.index).trim()
+    const rest = trimmed.slice(qNum.index).trim()
+    const lastDash = beforeNum.lastIndexOf(" - ")
+    if (lastDash >= 0) {
+      const subject = beforeNum.slice(0, lastDash).trim()
+      const topic = beforeNum.slice(lastDash + 3).trim()
+      return {
+        taxonomyLine: topic ? `${subject} - ${topic}` : subject,
+        rest,
+      }
+    }
+  }
+
   const dash = trimmed.search(/\s+-\s+/)
   if (dash < 0) return { taxonomyLine: trimmed, rest: "" }
   const subject = trimmed.slice(0, dash).trim()
