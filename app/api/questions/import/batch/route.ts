@@ -12,11 +12,8 @@ export async function POST(req: Request) {
     const subject_id = form.get("subject_id") as string | null
     const folder_id = (form.get("folder_id") as string) || null
 
-    if (!user_id || !subject_id) {
-      return NextResponse.json(
-        { error: "user_id e subject_id são obrigatórios" },
-        { status: 400 }
-      )
+    if (!user_id) {
+      return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
     }
 
     const files = form.getAll("files").filter((f): f is File => f instanceof File)
@@ -30,7 +27,7 @@ export async function POST(req: Request) {
       const parsed = await parseTecPdf(buffer)
       const name = (form.get(`name_${file.name}`) as string) || parsed.name
       const result = await importNotebookFromParsed(user_id, parsed, {
-        subject_id,
+        subject_id: subject_id || null,
         folder_id,
         name,
       })

@@ -99,8 +99,15 @@ export default function MateriaQuestoesPage() {
         <Link
           href={`/questoes/importar?subject_id=${subjectId}`}
           className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
+          title="Opcional: já salvar nesta matéria"
         >
-          <Plus className="h-4 w-4" /> Importar PDF
+          <Plus className="h-4 w-4" /> Importar PDF aqui
+        </Link>
+        <Link
+          href="/questoes/importar"
+          className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm"
+        >
+          Importar (sem matéria)
         </Link>
       </div>
 

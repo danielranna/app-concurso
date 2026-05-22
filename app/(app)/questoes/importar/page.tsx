@@ -28,11 +28,13 @@ function ImportarContent() {
         return
       }
       setUserId(user.id)
-      fetch(`/api/subjects?user_id=${user.id}`)
-        .then((r) => r.json())
-        .then(setSubjects)
+      if (presetSubject) {
+        fetch(`/api/subjects?user_id=${user.id}`)
+          .then((r) => r.json())
+          .then(setSubjects)
+      }
     })
-  }, [router])
+  }, [router, presetSubject])
 
   async function handlePreview() {
     if (!file) return
@@ -47,12 +49,12 @@ function ImportarContent() {
   }
 
   async function handleImport() {
-    if (!file || !userId || !subjectId) return
+    if (!file || !userId) return
     setLoading(true)
     const fd = new FormData()
     fd.append("file", file)
     fd.append("user_id", userId)
-    fd.append("subject_id", subjectId)
+    if (subjectId) fd.append("subject_id", subjectId)
     if (name) fd.append("name", name)
     const res = await fetch("/api/questions/import/pdf", { method: "POST", body: fd })
     const data = await res.json()
@@ -61,11 +63,19 @@ function ImportarContent() {
   }
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="max-w-2xl p-6">
       <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
       <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
+      <p className="mt-2 text-sm text-slate-600">
+        O PDF já traz matéria e assunto do TEC. Basta importar; depois você vincula às suas
+        matérias em{" "}
+        <Link href="/questoes/mapeamento" className="text-blue-600 underline">
+          Associar matérias
+        </Link>
+        .
+      </p>
       <div className="mt-6 space-y-4">
         <div>
           <label className="text-sm font-medium">Arquivo PDF</label>
@@ -81,21 +91,6 @@ function ImportarContent() {
           />
         </div>
         <div>
-          <label className="text-sm font-medium">Matéria destino</label>
-          <select
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-sm"
-          >
-            <option value="">Selecione</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
           <label className="text-sm font-medium">Nome do caderno</label>
           <input
             value={name}
@@ -104,6 +99,25 @@ function ImportarContent() {
             placeholder="Opcional — usa nome do PDF"
           />
         </div>
+        {presetSubject && subjects.length > 0 && (
+          <div>
+            <label className="text-sm font-medium text-slate-500">
+              Organizar já nesta matéria (opcional)
+            </label>
+            <select
+              value={subjectId}
+              onChange={(e) => setSubjectId(e.target.value)}
+              className="mt-1 w-full rounded border px-3 py-2 text-sm"
+            >
+              <option value="">Deixar em Importados</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
@@ -116,7 +130,7 @@ function ImportarContent() {
           <button
             type="button"
             onClick={handleImport}
-            disabled={!file || !subjectId || loading}
+            disabled={!file || loading}
             className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
             <Upload className="h-4 w-4" /> Importar
@@ -131,11 +145,14 @@ function ImportarContent() {
               </p>
             ))}
             <ul className="mt-2 list-disc pl-4">
-              {(preview.preview as { tec_id: number; tec_subject: string }[])?.map((q) => (
-                <li key={q.tec_id}>
-                  #{q.tec_id} — {q.tec_subject}
-                </li>
-              ))}
+              {(preview.preview as { tec_id: number; tec_subject: string; tec_topic?: string }[])?.map(
+                (q) => (
+                  <li key={q.tec_id}>
+                    #{q.tec_id} — {q.tec_subject}
+                    {q.tec_topic ? ` · ${q.tec_topic}` : ""}
+                  </li>
+                )
+              )}
             </ul>
           </div>
         )}
@@ -144,12 +161,17 @@ function ImportarContent() {
             <p>Caderno criado!</p>
             <p>Novas questões: {String(result.created_questions)}</p>
             <p>Reutilizadas: {String(result.reused_questions)}</p>
-            <Link
-              href={`/questoes/cadernos/${result.notebook_id}`}
-              className="mt-2 inline-block text-blue-600 underline"
-            >
-              Abrir caderno
-            </Link>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <Link
+                href={`/questoes/cadernos/${result.notebook_id}`}
+                className="text-blue-600 underline"
+              >
+                Abrir caderno
+              </Link>
+              <Link href="/questoes/importados" className="text-blue-600 underline">
+                Ver em Importados
+              </Link>
+            </div>
           </div>
         )}
       </div>

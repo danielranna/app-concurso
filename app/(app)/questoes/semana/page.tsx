@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Play, Upload } from "lucide-react"
 
-type Subject = { id: string; name: string }
 type Notebook = {
   id: string
   name: string
@@ -18,12 +17,10 @@ type Notebook = {
 export default function SemanaPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
-  const [subjects, setSubjects] = useState<Subject[]>([])
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sessionName, setSessionName] = useState("Estudo da semana")
   const [shuffle, setShuffle] = useState(true)
-  const [subjectId, setSubjectId] = useState("")
   const [files, setFiles] = useState<FileList | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
 
@@ -39,9 +36,6 @@ export default function SemanaPage() {
       }
       setUserId(user.id)
       reload(user.id)
-      fetch(`/api/subjects?user_id=${user.id}`)
-        .then((r) => r.json())
-        .then(setSubjects)
     })
   }, [router])
 
@@ -55,11 +49,10 @@ export default function SemanaPage() {
   }
 
   async function batchImport() {
-    if (!userId || !subjectId || !files?.length) return
+    if (!userId || !files?.length) return
     setBatchLoading(true)
     const fd = new FormData()
     fd.append("user_id", userId)
-    fd.append("subject_id", subjectId)
     for (let i = 0; i < files.length; i++) {
       fd.append("files", files[i])
     }
@@ -93,19 +86,14 @@ export default function SemanaPage() {
 
       <section className="mt-8 rounded-xl border bg-white p-4">
         <h2 className="font-semibold">Importar vários PDFs</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Sem escolher matéria — os cadernos vão para{" "}
+          <Link href="/questoes/importados" className="text-blue-600 underline">
+            Importados
+          </Link>
+          .
+        </p>
         <div className="mt-3 flex flex-wrap gap-3">
-          <select
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-            className="rounded border px-3 py-2 text-sm"
-          >
-            <option value="">Matéria</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
           <input
             type="file"
             accept=".pdf"
@@ -115,7 +103,7 @@ export default function SemanaPage() {
           <button
             type="button"
             onClick={batchImport}
-            disabled={batchLoading || !files?.length || !subjectId}
+            disabled={batchLoading || !files?.length}
             className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
             <Upload className="h-4 w-4" />

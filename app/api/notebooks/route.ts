@@ -18,7 +18,8 @@ export async function GET(req: Request) {
     .order("last_accessed_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
 
-  if (subject_id) query = query.eq("subject_id", subject_id)
+  if (searchParams.get("unassigned") === "1") query = query.is("subject_id", null)
+  else if (subject_id) query = query.eq("subject_id", subject_id)
   if (folder_id) query = query.eq("folder_id", folder_id)
   if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
   if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { FolderOpen, Filter, Calendar, Link2 } from "lucide-react"
+import { FolderOpen, Filter, Calendar, Link2, Inbox } from "lucide-react"
 
 type SubjectRow = {
   id: string
@@ -15,11 +15,17 @@ type SubjectRow = {
   wrong: number
 }
 
+type Unassigned = {
+  notebook_count: number
+  notebooks: { id: string; name: string; question_count: number }[]
+}
+
 export default function QuestoesHomePage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<SubjectRow[]>([])
   const [bankTotal, setBankTotal] = useState(0)
+  const [unassigned, setUnassigned] = useState<Unassigned | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -33,6 +39,7 @@ export default function QuestoesHomePage() {
         .then((d) => {
           setSubjects(d.subjects ?? [])
           setBankTotal(d.bank_total ?? 0)
+          setUnassigned(d.unassigned ?? null)
         })
     })
   }, [router])
@@ -73,6 +80,20 @@ export default function QuestoesHomePage() {
           </Link>
         </div>
       </div>
+      {(unassigned?.notebook_count ?? 0) > 0 && (
+        <Link
+          href="/questoes/importados"
+          className="mb-6 flex items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 transition hover:border-amber-300"
+        >
+          <Inbox className="h-8 w-8 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-amber-900">Importados (sem matéria sua)</p>
+            <p className="text-sm text-amber-800">
+              {unassigned!.notebook_count} caderno(s) — vincule quando quiser
+            </p>
+          </div>
+        </Link>
+      )}
       <div className="space-y-3">
         {subjects.map((s) => {
           const total = s.correct + s.wrong

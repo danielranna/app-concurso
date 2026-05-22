@@ -84,7 +84,7 @@ export async function importNotebookFromParsed(
   userId: string,
   parsed: ParsedTecNotebook,
   opts: {
-    subject_id: string
+    subject_id?: string | null
     folder_id?: string | null
     name?: string
   }
@@ -113,7 +113,7 @@ export async function importNotebookFromParsed(
     .from("notebooks")
     .insert({
       user_id: userId,
-      subject_id: opts.subject_id,
+      subject_id: opts.subject_id ?? null,
       folder_id: opts.folder_id ?? null,
       name: opts.name ?? parsed.name,
       share_url: parsed.share_url,
@@ -124,7 +124,6 @@ export async function importNotebookFromParsed(
 
   if (nbErr) throw new Error(nbErr.message)
 
-  const existingInNb = new Set<string>()
   for (const item of questionIds) {
     const { error } = await supabaseServer.from("notebook_questions").insert({
       notebook_id: notebook.id,

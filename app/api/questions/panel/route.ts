@@ -80,8 +80,19 @@ export async function GET(req: Request) {
     .from("questions")
     .select("id", { count: "exact", head: true })
 
+  const { data: unassignedNotebooks } = await supabaseServer
+    .from("notebooks")
+    .select("id, name, question_count, answered_count, completed_at, created_at")
+    .eq("user_id", user_id)
+    .is("subject_id", null)
+    .order("created_at", { ascending: false })
+
   return NextResponse.json({
     subjects: result,
     bank_total: bankTotal ?? 0,
+    unassigned: {
+      notebook_count: unassignedNotebooks?.length ?? 0,
+      notebooks: unassignedNotebooks ?? [],
+    },
   })
 }
