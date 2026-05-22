@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:parser": "npx tsx lib/tec-pdf-parser.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
     "lucide-react": "^0.562.0",
+    "pdfjs-dist": "^4.4.168",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
