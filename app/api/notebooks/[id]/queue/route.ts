@@ -1,16 +1,32 @@
 import { NextResponse } from "next/server"
-import { buildNotebookQueue } from "@/lib/question-study"
+import {
+  buildNotebookFullQueue,
+  buildNotebookQueue,
+  getNotebookAttemptStats,
+  loadQuestionForStudy,
+} from "@/lib/question-study"
+import {
+  defaultPendingTarget,
+  pickNavigationTarget,
+  type NavMode,
+} from "@/lib/study-navigation"
 import { supabaseServer } from "@/lib/supabase-server"
+
+const NAV_MODES = new Set(["next", "prev", "random", "unsolved"])
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const user_id = new URL(req.url).searchParams.get("user_id")
+  const url = new URL(req.url)
+  const user_id = url.searchParams.get("user_id")
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
+
+  const navParam = url.searchParams.get("nav")
+  const questionIdParam = url.searchParams.get("question_id")
 
   await supabaseServer
     .from("notebooks")
@@ -18,52 +34,75 @@ export async function GET(
     .eq("id", id)
 
   try {
-    const queue = await buildNotebookQueue(id, user_id)
-    const { data: attempts } = await supabaseServer
-      .from("question_attempts")
-      .select("question_id, is_correct")
-      .eq("user_id", user_id)
-      .eq("notebook_id", id)
-
-    const resolvedIds = new Set((attempts ?? []).map((a) => a.question_id))
-    const correct = (attempts ?? []).filter((a) => a.is_correct).length
-    const wrong = (attempts ?? []).length - correct
+    const fullQueue = await buildNotebookFullQueue(id)
+    const pendingQueue = await buildNotebookQueue(id, user_id)
+    const attemptStats = await getNotebookAttemptStats(id, user_id)
 
     const { data: nb } = await supabaseServer
       .from("notebooks")
-      .select("question_count, name")
+      .select("question_count, name, study_elapsed_ms, active_question_id")
       .eq("id", id)
       .single()
 
-    const first = queue[0] ?? null
-    let question = null
-    let options: unknown[] = []
-    if (first) {
-      const { data: q } = await supabaseServer
-        .from("questions")
-        .select("*")
-        .eq("id", first.question_id)
-        .single()
-      question = q
-      const { data: opts } = await supabaseServer
-        .from("question_options")
-        .select("*")
-        .eq("question_id", first.question_id)
-        .order("sort_order")
-      options = opts ?? []
+    let currentId =
+      questionIdParam ?? nb?.active_question_id ?? null
+
+    if (navParam && NAV_MODES.has(navParam)) {
+      const target = pickNavigationTarget(
+        fullQueue,
+        pendingQueue,
+        currentId,
+        navParam as NavMode
+      )
+      currentId = target?.question_id ?? null
+    } else if (!currentId) {
+      const target = defaultPendingTarget(
+        pendingQueue,
+        nb?.active_question_id ?? null,
+        fullQueue
+      )
+      currentId = target?.question_id ?? null
+    } else if (!fullQueue.some((q) => q.question_id === currentId)) {
+      currentId = defaultPendingTarget(pendingQueue, null, fullQueue)?.question_id ?? null
+    } else if (!currentId && fullQueue.length > 0) {
+      currentId = nb?.active_question_id ?? fullQueue[0].question_id
     }
 
+    if (currentId) {
+      await supabaseServer
+        .from("notebooks")
+        .update({ active_question_id: currentId })
+        .eq("id", id)
+    }
+
+    const current =
+      fullQueue.find((q) => q.question_id === currentId) ??
+      pendingQueue[0] ??
+      null
+
+    const { question, options } = current
+      ? await loadQuestionForStudy(current.question_id)
+      : { question: null, options: [] }
+
+    const position =
+      current != null
+        ? fullQueue.findIndex((q) => q.question_id === current.question_id) + 1
+        : 0
+
     return NextResponse.json({
-      queue,
-      current: first,
+      queue: pendingQueue,
+      full_queue_length: fullQueue.length,
+      current,
       question,
       options,
+      position,
+      study_elapsed_ms: nb?.study_elapsed_ms ?? 0,
       stats: {
-        total: nb?.question_count ?? 0,
-        resolved: resolvedIds.size,
-        correct,
-        wrong,
-        pending: queue.length,
+        total: nb?.question_count ?? fullQueue.length,
+        resolved: attemptStats.resolved,
+        correct: attemptStats.correct,
+        wrong: attemptStats.wrong,
+        pending: pendingQueue.length,
       },
       notebook: nb,
     })

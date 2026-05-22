@@ -1,9 +1,28 @@
 import { supabaseServer } from "./supabase-server"
 import type { StudyQueueItem } from "./question-types"
 
-export async function buildNotebookQueue(
-  notebookId: string,
-  userId: string
+function mapNotebookRows(
+  rows: {
+    position: number
+    question_id: string
+    questions: { tec_id: number } | { tec_id: number }[] | null
+  }[],
+  notebookId: string
+): StudyQueueItem[] {
+  return (rows ?? []).map((r) => {
+    const q = r.questions as { tec_id: number } | { tec_id: number }[] | null
+    const tecId = Array.isArray(q) ? q[0]?.tec_id : q?.tec_id
+    return {
+      question_id: r.question_id,
+      tec_id: tecId ?? 0,
+      notebook_id: notebookId,
+      position: r.position,
+    }
+  })
+}
+
+export async function buildNotebookFullQueue(
+  notebookId: string
 ): Promise<StudyQueueItem[]> {
   const { data: rows, error } = await supabaseServer
     .from("notebook_questions")
@@ -18,7 +37,14 @@ export async function buildNotebookQueue(
     .order("position", { ascending: true })
 
   if (error) throw new Error(error.message)
+  return mapNotebookRows(rows ?? [], notebookId)
+}
 
+export async function buildNotebookQueue(
+  notebookId: string,
+  userId: string
+): Promise<StudyQueueItem[]> {
+  const full = await buildNotebookFullQueue(notebookId)
   const { data: attempts } = await supabaseServer
     .from("question_attempts")
     .select("question_id")
@@ -26,19 +52,31 @@ export async function buildNotebookQueue(
     .eq("notebook_id", notebookId)
 
   const answered = new Set((attempts ?? []).map((a) => a.question_id))
+  return full.filter((item) => !answered.has(item.question_id))
+}
 
-  return (rows ?? [])
-    .filter((r) => !answered.has(r.question_id))
-    .map((r) => {
-      const q = r.questions as { tec_id: number } | { tec_id: number }[] | null
-      const tecId = Array.isArray(q) ? q[0]?.tec_id : q?.tec_id
-      return {
-        question_id: r.question_id,
-        tec_id: tecId ?? 0,
-        notebook_id: notebookId,
-        position: r.position,
-      }
-    })
+export async function getNotebookAttemptStats(notebookId: string, userId: string) {
+  const { data: attempts } = await supabaseServer
+    .from("question_attempts")
+    .select("question_id, is_correct")
+    .eq("user_id", userId)
+    .eq("notebook_id", notebookId)
+
+  const byQuestion = new Map<string, boolean>()
+  for (const a of attempts ?? []) {
+    byQuestion.set(a.question_id, a.is_correct)
+  }
+  let correct = 0
+  let wrong = 0
+  for (const ok of byQuestion.values()) {
+    if (ok) correct++
+    else wrong++
+  }
+  return {
+    resolved: byQuestion.size,
+    correct,
+    wrong,
+  }
 }
 
 export async function buildCombinedQueue(
@@ -123,6 +161,23 @@ export async function recordAttempt(params: {
     duration_ms: params.duration_ms,
   })
   if (error) throw new Error(error.message)
+}
+
+export async function loadQuestionForStudy(questionId: string) {
+  const { data: question, error } = await supabaseServer
+    .from("questions")
+    .select("*")
+    .eq("id", questionId)
+    .single()
+  if (error || !question) return { question: null, options: [] as { label: string; text: string; sort_order: number }[] }
+
+  const { data: options } = await supabaseServer
+    .from("question_options")
+    .select("*")
+    .eq("question_id", questionId)
+    .order("sort_order")
+
+  return { question, options: options ?? [] }
 }
 
 export async function refreshNotebookProgress(notebookId: string, userId: string) {
