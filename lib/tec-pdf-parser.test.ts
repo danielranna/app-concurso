@@ -131,6 +131,48 @@ Certo Errado
 Gabarito 1) Certo
 `
 
+const AUDITORIA_3494445_LINES = `
+www.tecconcursos.com.br/questoes/3494445
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/2023
+Auditoria Privada - Estrutura Conceitual para Trabalhos de Asseguração
+No que diz respeito aos relatórios, às formas e aos tipos de auditoria, julgue o item.
+Certo Errado
+Gabarito 1) Certo
+`
+
+const AUDITORIA_3494445_GLUE = `
+www.tecconcursos.com.br/questoes/3494445
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/2023
+Auditoria Privada - Estrutura Conceitual para Trabalhos de Asseguração No que diz respeito aos relatórios, julgue o item.
+Certo Errado
+Gabarito 1) Certo
+`
+
+const AUDITORIA_325825_LINES = `
+www.tecconcursos.com.br/questoes/325825
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/2023
+Auditoria Privada - Estrutura Conceitual para Trabalhos de Asseguração
+As normas brasileiras de auditoria definem elementos dos trabalhos de asseguração. A respeito desse assunto, assinale a opção correta.
+a) opção A texto longo aqui
+b) opção B
+c) opção C
+d) opção D
+e) opção E
+Gabarito 1) A
+`
+
+const AUDITORIA_325825_GLUE = `
+www.tecconcursos.com.br/questoes/325825
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/2023
+Auditoria Privada - Estrutura Conceitual para Trabalhos de Asseguração As normas brasileiras de auditoria definem elementos. A respeito desse assunto, assinale a opção correta.
+a) opção A
+b) opção B
+c) opção C
+d) opção D
+e) opção E
+Gabarito 1) A
+`
+
 const CIENCIA_CE_SNIPPET = `
 www.tecconcursos.com.br/questoes/9990001
 CEBRASPE (CESPE) - ANL (Org X)/Org X/Area/2024
@@ -237,6 +279,30 @@ function runTests() {
     ciSem.questions[0].statement.startsWith("Elemento com"),
     `ci sem stmt: ${ciSem.questions[0].statement.slice(0, 30)}`
   )
+
+  const expectedTopic = "Estrutura Conceitual para Trabalhos de Asseguração"
+
+  for (const [label, snippet] of [
+    ["3494445 lines", AUDITORIA_3494445_LINES],
+    ["3494445 glue", AUDITORIA_3494445_GLUE],
+    ["325825 lines", AUDITORIA_325825_LINES],
+    ["325825 glue", AUDITORIA_325825_GLUE],
+  ] as const) {
+    const p = parseTecPdfText(snippet)
+    const q = p.questions[0]
+    assert(q.tec_topic === expectedTopic, `${label} topic: ${q.tec_topic}`)
+    assert((q.tec_topic?.length ?? 0) < 80, `${label} topic too long`)
+    assert(
+      !/\b(assinale|julgue|No que diz|As normas)\b/i.test(q.tec_topic ?? ""),
+      `${label} topic leaked: ${q.tec_topic}`
+    )
+  }
+
+  const q349 = parseTecPdfText(AUDITORIA_3494445_LINES).questions[0]
+  assert(q349.statement.startsWith("No que diz respeito"), `349 stmt: ${q349.statement.slice(0, 40)}`)
+
+  const q325 = parseTecPdfText(AUDITORIA_325825_LINES).questions[0]
+  assert(q325.statement.startsWith("As normas brasileiras"), `325 stmt: ${q325.statement.slice(0, 40)}`)
 
   const ci = parseTecPdfText(CIENCIA_CE_SNIPPET)
   const ciq = ci.questions[0]

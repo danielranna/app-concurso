@@ -75,19 +75,32 @@ export function extractNotebookHeader(normalized: string): {
   return { name, share_url, ordering }
 }
 
+/** Preserva quebras de linha; compacta só espaços horizontais dentro de cada linha. */
+export function compactPdfText(rawText: string): string {
+  return rawText
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+    .join("\n")
+}
+
+function flattenText(text: string): string {
+  return text.replace(/\n+/g, " ").replace(/\s+/g, " ").trim()
+}
+
 export function parseTecPdfText(rawText: string): ParsedTecNotebook {
   const warnings: string[] = []
-  const normalized = rawText.replace(/\r\n/g, "\n").replace(/\s+/g, " ")
+  const compact = compactPdfText(rawText)
+  const flat = flattenText(compact)
 
-  const { name, share_url, ordering } = extractNotebookHeader(normalized)
+  const { name, share_url, ordering } = extractNotebookHeader(flat)
 
-  const gabaritoStart = normalized.search(/\bGabarito\b/i)
-  const body =
-    gabaritoStart >= 0 ? normalized.slice(0, gabaritoStart) : normalized
+  const gabaritoStart = compact.search(/\bGabarito\b/i)
+  const body = gabaritoStart >= 0 ? compact.slice(0, gabaritoStart) : compact
   const gabaritoBlock =
-    gabaritoStart >= 0 ? normalized.slice(gabaritoStart) : ""
+    gabaritoStart >= 0 ? compact.slice(gabaritoStart) : ""
 
-  const answers = parseGabarito(gabaritoBlock)
+  const answers = parseGabarito(flattenText(gabaritoBlock))
   const blocks = splitQuestionBlocks(body)
 
   const questions: ParsedTecQuestion[] = []
@@ -147,12 +160,44 @@ function splitQuestionBlocks(body: string): string[] {
   return blocks
 }
 
-/** Início do enunciado após matéria/assunto (linha extra do TEC ou texto da questão). */
-const STATEMENT_START_RE =
-  /\s(?:(?:Texto\s+[A-Z0-9][\w.-]*)\s*|(?:\d+\)\s*)+(?=Considerando|No\s|A\s)|(?:\d+\)\s+)?(?:[\u201c\u201d"]\s*)?P:\s*|Proposição\s+P:\s*|(?:A seguir|Considerando(?:-se)?|No que se refere|No argumento seguinte|A respeito de|Acerca de|Julgue o|Assinale a opção|Em relação|Com relação|Com base nas|Com base no|Com base|Tendo em vista|À luz de|Diante do|Segundo o|De acordo com|Sabendo que|Suponha que|Considere que|Observe que)\b)/i
+const ENUNCIADO_PHRASES =
+  "A seguir|Considerando(?:-se)?|No que se refere|No que diz respeito|No argumento seguinte|" +
+  "A respeito(?: de)?|Acerca (?:de |das |do )?|À luz (?:de |das |do )?|Julgue o|Assinale a(?: opção)?|" +
+  "Em relação(?: a)?|Com relação|Com respeito a|Com base(?: nas| no)?|Tendo em vista|Diante do|Segundo o|" +
+  "De acordo com|Sabendo que|Suponha que|Considere que|Observe que|As normas|Dadas as|Elemento|Fluxos|" +
+  "No tocante|Relativamente|Nos termos(?: do| da)?|Analise|Qual a|Qual o|Para responder|Conforme (?:a|o) |" +
+  "Quando utiliza|Quando o|Em um|Em nova|Um Auditor|Uma empresa|A empresa|A secretaria|O objetivo|" +
+  "O auditor|O Estado|O ato|O lançamento|A função|A Sociedade|A Constituição|A fiscalização|A atitude|" +
+  "O sistema|Ocorrerá|Independentemente|Isenção|São modalidades|Decretada|Determin|Informe se|Talvez uma|" +
+  "O sistema organizacional|A propósito|O ato administrativo|A avaliação|A publicidade|A atuação|A deficiência|" +
+  "A frase|Tenho-me|Certo dia|A obtenção|A Sociedade Empresária|Nessa situação|Isenção do|Com o objetivo|" +
+  "O diretor|Ao examinar|Ao lidar|O item que|No Brasil|É modalidade|Quanto ao|O Princípio|um município|Um município|" +
+  "Um Auditor(?: Fiscal)?|Considere a|um município está|Um município está|O processo|" +
+  "[A-ZÁÉÍÓÚÃÕÇ][a-záéíóúãõçÁÉÍÓÚÃÕÇ-]* ficou"
+
+const ENUNCIADO_LINE_START_RE = new RegExp(
+  `^(?:\\d+\\)\\s|(?:Texto\\s+[A-Z0-9][\\w.-]*)\\s*|(?:[\u201c\u201d"]\\s*)?P:\\s*|Proposição\\s+P:\\s*|(?:${ENUNCIADO_PHRASES}))`,
+  "i"
+)
+
+/** Início do enunciado (texto colado na mesma linha do assunto). */
+const STATEMENT_START_RE = new RegExp(
+  `\\s(?:(?:Texto\\s+[A-Z0-9][\\w.-]*)\\s*|(?:\\d+\\)\\s*)+(?=Considerando|No\\s|A\\s)|(?:\\d+\\)\\s+)?(?:[\u201c\u201d"]\\s*)?P:\\s*|Proposição\\s+P:\\s*|(?:${ENUNCIADO_PHRASES}))`,
+  "i"
+)
+
+/** Busca N) só no início do trecho (evita números no meio do enunciado). */
+const TAIL_ITEM_NUMBER_RE = /\s(\d+\)\s)/
+const TAIL_NUMBER_LOOKAHEAD = 220
 
 const MCQ_STMT_FALLBACK_RE =
-  /\s(Elemento\s|Fluxos\s|A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|diretor|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s|As\s|Os\s)/i
+  /\s(Elemento\s|Fluxos\s|As normas\b|A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|diretor|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s)/i
+
+function isEnunciadoLine(line: string): boolean {
+  const t = line.trim()
+  if (!t) return false
+  return ENUNCIADO_LINE_START_RE.test(t)
+}
 
 function cleanMetaLine(line: string): string {
   return line
@@ -168,7 +213,8 @@ function splitTopicFromStatement(tail: string): { topic: string; statementPart: 
     const optIdx = tail.search(/\s[a-e]\)\s/i)
     if (optIdx > 0) {
       const beforeOpts = tail.slice(0, optIdx)
-      const idx2 = beforeOpts.search(MCQ_STMT_FALLBACK_RE)
+      let idx2 = beforeOpts.search(STATEMENT_START_RE)
+      if (idx2 < 0) idx2 = beforeOpts.search(MCQ_STMT_FALLBACK_RE)
       if (idx2 > 0) {
         return {
           topic: beforeOpts.slice(0, idx2).trim(),
@@ -184,12 +230,57 @@ function splitTopicFromStatement(tail: string): { topic: string; statementPart: 
   }
 }
 
-/** Número do item no enunciado (ex.: "4) Acerca de..."). */
-const QUESTION_ITEM_NUMBER_RE = /\s(\d+\)\s)/
+function splitTaxonomyByLines(afterMeta: string): {
+  taxonomyLine: string
+  rest: string
+} | null {
+  if (!afterMeta.includes("\n")) return null
+
+  const lines = afterMeta.split("\n").map((l) => l.trim()).filter(Boolean)
+  if (lines.length < 2) return null
+
+  const firstStmt = lines.findIndex((l) => isEnunciadoLine(l))
+  if (firstStmt <= 0) return null
+
+  const taxLines = lines.slice(0, firstStmt).filter((l) => l.includes(" - "))
+  if (taxLines.length === 0) return null
+
+  return {
+    taxonomyLine: taxLines.join(" "),
+    rest: lines.slice(firstStmt).join("\n"),
+  }
+}
+
+function splitTaxonomySingleLine(afterMeta: string): {
+  taxonomyLine: string
+  rest: string
+} {
+  const trimmed = flattenText(afterMeta)
+  if (!trimmed) return { taxonomyLine: "", rest: "" }
+
+  const dash = trimmed.search(/\s+-\s+/)
+  if (dash < 0) return { taxonomyLine: trimmed, rest: "" }
+  const subject = trimmed.slice(0, dash).trim()
+  const tail = trimmed.slice(dash + 3).trim()
+
+  const tailHead = tail.slice(0, TAIL_NUMBER_LOOKAHEAD)
+  const qNum = tailHead.match(TAIL_ITEM_NUMBER_RE)
+  if (qNum && qNum.index != null) {
+    const topic = tail.slice(0, qNum.index).trim()
+    const rest = tail.slice(qNum.index).trim()
+    return {
+      taxonomyLine: topic ? `${subject} - ${topic}` : subject,
+      rest,
+    }
+  }
+
+  const { topic, statementPart } = splitTopicFromStatement(tail)
+  const taxonomyLine = topic ? `${subject} - ${topic}` : subject
+  return { taxonomyLine, rest: statementPart }
+}
 
 /**
- * Matéria - Assunto: o assunto é o texto após o último " - " antes do número da questão.
- * Sem número (ex.: "A seguir,"), usa marcadores de início do enunciado.
+ * Matéria - Assunto: linha(s) após meta; enunciado na linha seguinte ou após N).
  */
 export function splitTaxonomyAndStatement(afterMeta: string): {
   taxonomyLine: string
@@ -198,28 +289,10 @@ export function splitTaxonomyAndStatement(afterMeta: string): {
   const trimmed = afterMeta.trim()
   if (!trimmed) return { taxonomyLine: "", rest: "" }
 
-  const qNum = trimmed.match(QUESTION_ITEM_NUMBER_RE)
-  if (qNum && qNum.index != null) {
-    const beforeNum = trimmed.slice(0, qNum.index).trim()
-    const rest = trimmed.slice(qNum.index).trim()
-    const lastDash = beforeNum.lastIndexOf(" - ")
-    if (lastDash >= 0) {
-      const subject = beforeNum.slice(0, lastDash).trim()
-      const topic = beforeNum.slice(lastDash + 3).trim()
-      return {
-        taxonomyLine: topic ? `${subject} - ${topic}` : subject,
-        rest,
-      }
-    }
-  }
+  const byLines = splitTaxonomyByLines(trimmed)
+  if (byLines) return byLines
 
-  const dash = trimmed.search(/\s+-\s+/)
-  if (dash < 0) return { taxonomyLine: trimmed, rest: "" }
-  const subject = trimmed.slice(0, dash).trim()
-  const tail = trimmed.slice(dash + 3).trim()
-  const { topic, statementPart } = splitTopicFromStatement(tail)
-  const taxonomyLine = topic ? `${subject} - ${topic}` : subject
-  return { taxonomyLine, rest: statementPart }
+  return splitTaxonomySingleLine(trimmed)
 }
 
 function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
@@ -232,15 +305,20 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
 
   const afterUrl = block.slice(block.indexOf(urlMatch[0]) + urlMatch[0].length).trim()
 
-  const metaMatch = afterUrl.match(/^(.+?\/\d{4})\s*([\s\S]*)$/)
+  const metaMatch = afterUrl.match(/^(.+?\/\d{4})\s*([\s\S]*)$/m)
   if (!metaMatch) throw new Error("metadados (banca/cargo/ano) não encontrados")
 
-  const metaLine = cleanMetaLine(metaMatch[1])
-  const { taxonomyLine, rest: afterTaxonomy } = splitTaxonomyAndStatement(metaMatch[2])
+  const metaLine = cleanMetaLine(flattenText(metaMatch[1]))
+  const { taxonomyLine, rest: afterTaxonomy } = splitTaxonomyAndStatement(
+    metaMatch[2].trim()
+  )
+  let rest = flattenText(afterTaxonomy)
 
   const { banca, cargo, orgao, ano } = parseMetaLine(metaLine)
-  const { tec_subject, tec_topic } = parseTaxonomyLine(taxonomyLine)
-  let rest = afterTaxonomy
+  let { tec_subject, tec_topic } = parseTaxonomyLine(taxonomyLine)
+  const capped = capTopicLeak(tec_topic, rest)
+  tec_topic = capped.topic
+  rest = capped.rest
 
   const isCertoErrado = /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
   const type: QuestionType = isCertoErrado ? "certo_errado" : "multiple_choice"
@@ -318,15 +396,35 @@ function parseMetaLine(line: string): {
   }
 }
 
+/** Assunto colado após ")" final do título (ex.: "...Acessória) Um Auditor..."). */
+function capTopicLeak(topic: string, rest: string): { topic: string; rest: string } {
+  let splitAt = -1
+  for (const m of topic.matchAll(/\)\s+/g)) {
+    const after = topic.slice(m.index! + m[0].length)
+    if (/^(?:um |Um |A |O |An |No |Um Auditor)/i.test(after)) {
+      splitAt = m.index! + 1
+    }
+  }
+  if (splitAt > 0) {
+    return {
+      topic: topic.slice(0, splitAt).trim(),
+      rest: (topic.slice(splitAt).trim() + (rest ? " " + rest : "")).trim(),
+    }
+  }
+  return { topic, rest }
+}
+
 function parseTaxonomyLine(line: string): {
   tec_subject: string
   tec_topic: string
 } {
   const idx = line.indexOf(" - ")
   if (idx < 0) return { tec_subject: line.trim(), tec_topic: "" }
+  const rawTopic = line.slice(idx + 3).trim()
+  const { topic } = capTopicLeak(rawTopic, "")
   return {
     tec_subject: line.slice(0, idx).trim(),
-    tec_topic: line.slice(idx + 3).trim(),
+    tec_topic: topic,
   }
 }
 
