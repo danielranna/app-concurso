@@ -72,6 +72,37 @@ export default function FlashcardsSettingsPage() {
   }, [])
 
   useEffect(() => {
+    if (!userId || !bot.whatsapp_jid || bot.whatsapp_authorized) return
+    const t = setInterval(() => loadBotSettings(userId), 15000)
+    return () => clearInterval(t)
+  }, [userId, bot.whatsapp_jid, bot.whatsapp_authorized, loadBotSettings])
+
+  async function confirmAuthorizedManually() {
+    if (!userId) return
+    setLinkLoading(true)
+    setLinkError(null)
+    try {
+      const res = await fetch("/api/flashcards/bot/whatsapp-authorized/web", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setLinkError(data.error ?? "Falha ao confirmar")
+        return
+      }
+      setBot((b) => ({ ...b, whatsapp_authorized: true }))
+      setLinkMessage("WhatsApp marcado como autorizado neste app.")
+      await loadBotSettings(userId)
+    } catch {
+      setLinkError("Erro ao confirmar autorização.")
+    } finally {
+      setLinkLoading(false)
+    }
+  }
+
+  useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) {
         router.push("/login")
@@ -335,8 +366,33 @@ export default function FlashcardsSettingsPage() {
 
         {pendingAuth && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Aguardando SIM no privado do bot para{" "}
-            <strong>{bot.whatsapp_display_label}</strong>.
+            <p>
+              Aguardando confirmação no app para{" "}
+              <strong>{bot.whatsapp_display_label}</strong>.
+            </p>
+            <p className="mt-2 text-xs text-amber-800">
+              Se você já respondeu <strong>SIM</strong> e o bot disse &quot;Vínculo
+              autorizado&quot;, o WhatsApp está OK no bot — só falta o Papa Vagas avisar
+              este app (ou clique abaixo).
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={confirmAuthorizedManually}
+                disabled={linkLoading}
+                className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+              >
+                Já respondi SIM no WhatsApp
+              </button>
+              <button
+                type="button"
+                onClick={() => userId && loadBotSettings(userId)}
+                disabled={linkLoading}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs hover:bg-amber-100"
+              >
+                Atualizar status
+              </button>
+            </div>
           </div>
         )}
 

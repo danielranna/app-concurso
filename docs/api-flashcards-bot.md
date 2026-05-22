@@ -42,14 +42,18 @@ Após escolher o contato e salvar `whatsapp_jid`, o app chama:
 }
 ```
 
-O bot envia SIM/NÃO no privado em até ~90s. Quando o usuário responde **SIM**, o Papa Vagas deve chamar:
+O bot envia SIM/NÃO no privado em até ~90s. Quando o usuário responde **SIM**, o Papa Vagas/bot **deve** chamar:
 
-`POST /api/flashcards/bot/whatsapp-authorized`  
-`Authorization: Bearer <QUIZ_BOT_USERS_SECRET>`
+`POST https://SEU-APP-FLASHCARDS.vercel.app/api/flashcards/bot/whatsapp-authorized`  
+`Authorization: Bearer <QUIZ_BOT_USERS_SECRET>` (= `FLASHCARDS_BOT_INBOUND_SECRET`)
 
 ```json
-{ "userJid": "...", "apiKey": "fc_..." }
+{ "userJid": "176518911234135@lid", "apiKey": "fc_..." }
 ```
+
+**Sem esse POST**, o app fica em &quot;Aguardando SIM&quot; mesmo com vínculo OK no bot.
+
+Atalho no app: botão **Já respondi SIM no WhatsApp** → `POST /api/flashcards/bot/whatsapp-authorized/web` com `{ user_id }`.
 
 ### Desvincular
 
