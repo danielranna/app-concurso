@@ -2,12 +2,13 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, HelpCircle, Layers } from "lucide-react"
+import { BookOpen, HelpCircle, Layers, Sparkles } from "lucide-react"
 
 const links = [
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/questoes", label: "Questões", icon: HelpCircle },
+  { href: "/coach", label: "Coach IA", icon: Sparkles },
 ]
 
 export default function Sidebar() {

@@ -207,7 +207,16 @@ export async function loadQuestionForStudy(questionId: string) {
   return { question, options: options ?? [] }
 }
 
-export async function refreshNotebookProgress(notebookId: string, userId: string) {
+export async function refreshNotebookProgress(
+  notebookId: string,
+  userId: string
+): Promise<{ justCompleted: boolean }> {
+  const { data: before } = await supabaseServer
+    .from("notebooks")
+    .select("completed_at")
+    .eq("id", notebookId)
+    .single()
+
   const { count: total } = await supabaseServer
     .from("notebook_questions")
     .select("id", { count: "exact", head: true })
@@ -228,9 +237,13 @@ export async function refreshNotebookProgress(notebookId: string, userId: string
     last_accessed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
+  const willComplete =
+    totalCount > 0 && answered_count >= totalCount && !before?.completed_at
   if (totalCount > 0 && answered_count >= totalCount) {
-    update.completed_at = new Date().toISOString()
+    update.completed_at = before?.completed_at ?? new Date().toISOString()
+    if (willComplete) update.report_pending = true
   }
 
   await supabaseServer.from("notebooks").update(update).eq("id", notebookId)
+  return { justCompleted: willComplete }
 }

@@ -48,7 +48,15 @@ export async function POST(
     confidence_level: confidence,
   })
 
-  await refreshNotebookProgress(notebook_id, user_id)
+  const { justCompleted } = await refreshNotebookProgress(notebook_id, user_id)
+
+  if (justCompleted) {
+    import("@/lib/ai/notebook-report")
+      .then(({ enqueueNotebookReport }) =>
+        enqueueNotebookReport(notebook_id, user_id)
+      )
+      .catch((err) => console.error("notebook_report:", err))
+  }
 
   return NextResponse.json({
     is_correct,
