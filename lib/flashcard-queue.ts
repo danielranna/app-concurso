@@ -56,7 +56,7 @@ type DueRow = {
 
 export async function fetchDueStates(
   userId: string,
-  options?: { deckId?: string; includeNew?: boolean; before?: Date }
+  options?: { deckId?: string; includeNew?: boolean; before?: Date; dueNowOnly?: boolean }
 ) {
   const before = options?.before ?? endOfDay()
 
@@ -112,19 +112,76 @@ export async function fetchDueStates(
     return new Date(a.due_at).getTime() - new Date(b.due_at).getTime()
   })
 
+  if (options?.dueNowOnly) {
+    const now = new Date()
+    rows = rows.filter((r) => new Date(r.due_at) <= now)
+  }
+
   return rows
+}
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+/** Embaralha dentro de cada faixa de prioridade (learning, relearning, review, new). */
+export function shuffleStudyQueue(rows: DueRow[]): DueRow[] {
+  if (rows.length <= 1) return rows
+
+  const buckets = new Map<number, DueRow[]>()
+  for (const row of rows) {
+    const st = deserializeFsrsCard(row.state_data).state
+    const p = STATE_PRIORITY[st] ?? 9
+    if (!buckets.has(p)) buckets.set(p, [])
+    buckets.get(p)!.push(row)
+  }
+
+  return [...buckets.keys()]
+    .sort((a, b) => a - b)
+    .flatMap((p) => shuffleArray(buckets.get(p)!))
 }
 
 export async function getStudyQueue(
   userId: string,
   deckId?: string
-): Promise<{ rows: DueRow[]; limit: number | null; totalDue: number }> {
+): Promise<{
+  rows: DueRow[]
+  limit: number | null
+  totalDue: number
+  laterCount: number
+  nextDueAt: string | null
+}> {
   const limits = await getScheduleSettings(userId)
   const limit = getTodayLimit(limits)
-  const rows = await fetchDueStates(userId, { deckId, includeNew: true })
-  const totalDue = rows.length
-  const capped = limit === null ? rows : rows.slice(0, limit)
-  return { rows: capped, limit, totalDue }
+  const now = new Date()
+
+  const allToday = await fetchDueStates(userId, {
+    deckId,
+    includeNew: true,
+    before: endOfDay(),
+  })
+  const dueNow = allToday.filter((r) => new Date(r.due_at) <= now)
+  const shuffled = shuffleStudyQueue(dueNow)
+  const totalDue = allToday.length
+  const capped = limit === null ? shuffled : shuffled.slice(0, limit)
+
+  const laterToday = allToday.filter((r) => new Date(r.due_at) > now)
+  const nextDueMs = laterToday.length
+    ? Math.min(...laterToday.map((r) => new Date(r.due_at).getTime()))
+    : null
+
+  return {
+    rows: capped,
+    limit,
+    totalDue,
+    laterCount: laterToday.length,
+    nextDueAt: nextDueMs ? new Date(nextDueMs).toISOString() : null,
+  }
 }
 
 export async function getPendingForBot(userId: string) {

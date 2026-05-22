@@ -18,7 +18,10 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { rows, limit, totalDue } = await getStudyQueue(user_id, deck_id ?? undefined)
+    const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(
+      user_id,
+      deck_id ?? undefined
+    )
 
     if (rows.length === 0) {
       return NextResponse.json({
@@ -26,6 +29,8 @@ export async function GET(req: Request) {
         remaining: 0,
         total_due: totalDue,
         daily_limit: limit,
+        later_count: laterCount,
+        next_due_at: nextDueAt,
       })
     }
 
@@ -50,6 +55,8 @@ export async function GET(req: Request) {
       remaining: rows.length - 1,
       total_due: totalDue,
       daily_limit: limit,
+      later_count: laterCount,
+      next_due_at: nextDueAt,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
