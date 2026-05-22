@@ -62,7 +62,7 @@ export default function ImportadosPage() {
       <p className="mt-1 text-sm text-slate-600">
         Cadernos ainda sem vínculo com sua matéria. As questões já têm matéria/assunto do TEC — use{" "}
         <Link href="/questoes/mapeamento" className="text-blue-600 underline">
-          Associar matérias
+          Associar matérias e assuntos
         </Link>{" "}
         para ligar ao mapa de erros e filtros.
       </p>

@@ -54,14 +54,16 @@ export default function EstudoCombinadoPage() {
       ]
     }
     if (data.question && userId) {
-      const mRes = await fetch(`/api/questions/mappings?user_id=${userId}`)
-      const mappings = await mRes.json()
-      const m = (mappings ?? []).find(
-        (x: { tec_subject: string; tec_topic: string | null }) =>
-          x.tec_subject === data.question.tec_subject &&
-          (x.tec_topic ?? "") === (data.question.tec_topic ?? "")
-      )
-      if (m) setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+      const params = new URLSearchParams({
+        user_id: userId,
+        resolve: "1",
+        tec_subject: data.question.tec_subject ?? "",
+      })
+      if (data.question.tec_topic) params.set("tec_topic", data.question.tec_topic)
+      const m = await fetch(`/api/questions/mappings?${params}`).then((r) => r.json())
+      if (m?.subject_id) {
+        setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+      }
     }
     return {
       current: data.current,

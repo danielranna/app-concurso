@@ -1,24 +1,59 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft } from "lucide-react"
 
-type Unmapped = { tec_subject: string; tec_topic: string; count: number }
+type TecSubjectGroup = {
+  tec_subject: string
+  count: number
+  sample_statement: string
+  topics_preview: string[]
+}
+
+type TecTopicGroup = {
+  tec_subject: string
+  tec_topic: string
+  count: number
+  sample_statement: string
+  mapped_subject_id: string | null
+  mapped_subject_name: string | null
+}
+
 type Subject = { id: string; name: string }
 type Topic = { id: string; name: string }
+
+type Tab = "subjects" | "topics"
 
 export default function MapeamentoPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
-  const [unmapped, setUnmapped] = useState<Unmapped[]>([])
+  const [tab, setTab] = useState<Tab>("subjects")
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [unmappedSubjects, setUnmappedSubjects] = useState<TecSubjectGroup[]>([])
+  const [unmappedTopics, setUnmappedTopics] = useState<TecTopicGroup[]>([])
+  const [selectedSubject, setSelectedSubject] = useState<TecSubjectGroup | null>(null)
+  const [selectedTopic, setSelectedTopic] = useState<TecTopicGroup | null>(null)
+  const [yourSubjectId, setYourSubjectId] = useState("")
+  const [yourTopicId, setYourTopicId] = useState("")
   const [topics, setTopics] = useState<Topic[]>([])
-  const [selected, setSelected] = useState<Unmapped | null>(null)
-  const [subjectId, setSubjectId] = useState("")
-  const [topicId, setTopicId] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const reload = useCallback(async (uid: string) => {
+    const [s, t] = await Promise.all([
+      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=subjects`).then((r) =>
+        r.json()
+      ),
+      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics`).then((r) =>
+        r.json()
+      ),
+    ])
+    setUnmappedSubjects(Array.isArray(s) ? s : [])
+    setUnmappedTopics(Array.isArray(t) ? t : [])
+  }, [])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -27,48 +62,95 @@ export default function MapeamentoPage() {
         return
       }
       setUserId(user.id)
-      fetch(`/api/questions/mappings?user_id=${user.id}&unmapped=1`)
-        .then((r) => r.json())
-        .then(setUnmapped)
+      reload(user.id)
       fetch(`/api/subjects?user_id=${user.id}`)
         .then((r) => r.json())
         .then(setSubjects)
     })
-  }, [router])
+  }, [router, reload])
 
   useEffect(() => {
-    if (!userId || !subjectId) {
+    if (!userId || !yourSubjectId) {
       setTopics([])
       return
     }
-    fetch(`/api/topics?user_id=${userId}&subject_id=${subjectId}`)
+    fetch(`/api/topics?user_id=${userId}&subject_id=${yourSubjectId}`)
       .then((r) => r.json())
       .then(setTopics)
-  }, [userId, subjectId])
+  }, [userId, yourSubjectId])
 
-  async function saveMapping() {
-    if (!userId || !selected || !subjectId) return
-    await fetch("/api/questions/mappings", {
+  useEffect(() => {
+    if (selectedTopic?.mapped_subject_id) {
+      setYourSubjectId(selectedTopic.mapped_subject_id)
+    }
+  }, [selectedTopic])
+
+  async function saveSubjectLink() {
+    if (!userId || !selectedSubject || !yourSubjectId) return
+    setSaving(true)
+    setMessage(null)
+    const res = await fetch("/api/questions/mappings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        type: "subject",
         user_id: userId,
-        tec_subject: selected.tec_subject,
-        tec_topic: selected.tec_topic || "",
-        subject_id: subjectId,
-        topic_id: topicId || null,
+        tec_subject: selectedSubject.tec_subject,
+        subject_id: yourSubjectId,
       }),
     })
-    setUnmapped((u) =>
-      u.filter(
-        (x) =>
-          x.tec_subject !== selected.tec_subject || x.tec_topic !== selected.tec_topic
-      )
+    const data = await res.json()
+    if (!res.ok) {
+      setMessage(data.error ?? "Erro ao salvar")
+      setSaving(false)
+      return
+    }
+    setMessage(
+      `“${selectedSubject.tec_subject}” vinculada — ${selectedSubject.count} questões passam a usar essa matéria.`
     )
-    setSelected(null)
-    setSubjectId("")
-    setTopicId("")
+    setSelectedSubject(null)
+    setYourSubjectId("")
+    await reload(userId)
+    setSaving(false)
   }
+
+  async function saveTopicLink(createNew: boolean) {
+    if (!userId || !selectedTopic) return
+    setSaving(true)
+    setMessage(null)
+    const body = createNew
+      ? {
+          type: "topic_create",
+          user_id: userId,
+          tec_subject: selectedTopic.tec_subject,
+          tec_topic: selectedTopic.tec_topic,
+        }
+      : {
+          type: "topic",
+          user_id: userId,
+          tec_subject: selectedTopic.tec_subject,
+          tec_topic: selectedTopic.tec_topic,
+          topic_id: yourTopicId,
+        }
+    const res = await fetch("/api/questions/mappings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setMessage(data.error ?? "Erro ao salvar")
+      setSaving(false)
+      return
+    }
+    setMessage(`Assunto “${selectedTopic.tec_topic}” associado.`)
+    setSelectedTopic(null)
+    setYourTopicId("")
+    await reload(userId)
+    setSaving(false)
+  }
+
+  const panelItem = tab === "subjects" ? selectedSubject : selectedTopic
 
   return (
     <div className="p-6">
@@ -78,71 +160,217 @@ export default function MapeamentoPage() {
       >
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
-      <h1 className="text-2xl font-bold">Associar matérias TEC</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Vincule rótulos do TEC às suas matérias e temas do mapa de erros.
+      <h1 className="text-2xl font-bold">Associar matérias e assuntos</h1>
+      <p className="mt-1 max-w-2xl text-sm text-slate-600">
+        <strong>Matéria TEC</strong> (ex.: Raciocínio Lógico): escolha a sua matéria uma vez —
+        todas as questões dessa matéria no TEC entram nela. Depois, em{" "}
+        <strong>Assuntos</strong>, vincule cada assunto do PDF ao seu tema (crie um novo ou
+        escolha um existente se for igual).
       </p>
+
+      <div className="mt-4 flex gap-2 border-b">
+        <button
+          type="button"
+          onClick={() => {
+            setTab("subjects")
+            setSelectedTopic(null)
+          }}
+          className={`border-b-2 px-4 py-2 text-sm font-medium ${
+            tab === "subjects"
+              ? "border-slate-900 text-slate-900"
+              : "border-transparent text-slate-500"
+          }`}
+        >
+          Matérias TEC ({unmappedSubjects.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTab("topics")
+            setSelectedSubject(null)
+          }}
+          className={`border-b-2 px-4 py-2 text-sm font-medium ${
+            tab === "topics"
+              ? "border-slate-900 text-slate-900"
+              : "border-transparent text-slate-500"
+          }`}
+        >
+          Assuntos TEC ({unmappedTopics.length})
+        </button>
+      </div>
+
+      {message && (
+        <p className="mt-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
+          {message}
+        </p>
+      )}
+
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <ul className="space-y-2">
-          {unmapped.map((u) => (
-            <li key={`${u.tec_subject}|||${u.tec_topic}`}>
-              <button
-                type="button"
-                onClick={() => setSelected(u)}
-                className={`w-full rounded-lg border px-4 py-3 text-left text-sm ${
-                  selected === u ? "border-blue-500 bg-blue-50" : "bg-white"
-                }`}
-              >
-                <p className="font-medium">{u.tec_subject}</p>
-                {u.tec_topic && <p className="text-slate-500">{u.tec_topic}</p>}
-                <p className="text-xs text-slate-400">{u.count} questões</p>
-              </button>
-            </li>
-          ))}
-          {unmapped.length === 0 && (
-            <p className="text-green-700">Tudo mapeado ou banco vazio.</p>
+        <ul className="max-h-[70vh] space-y-2 overflow-y-auto">
+          {tab === "subjects" &&
+            unmappedSubjects.map((u) => (
+              <li key={u.tec_subject}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSubject(u)
+                    setYourSubjectId("")
+                  }}
+                  className={`w-full rounded-lg border px-4 py-3 text-left text-sm ${
+                    selectedSubject?.tec_subject === u.tec_subject
+                      ? "border-blue-500 bg-blue-50"
+                      : "bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <p className="font-semibold text-blue-800">{u.tec_subject}</p>
+                  {u.sample_statement && (
+                    <p className="mt-1 line-clamp-2 text-slate-600">{u.sample_statement}</p>
+                  )}
+                  <p className="mt-2 text-xs text-slate-400">
+                    {u.count} questões
+                    {u.topics_preview.length > 0 &&
+                      ` · ${u.topics_preview.length}+ assuntos`}
+                  </p>
+                </button>
+              </li>
+            ))}
+          {tab === "subjects" && unmappedSubjects.length === 0 && (
+            <p className="text-sm text-green-700">Todas as matérias TEC já foram vinculadas.</p>
+          )}
+
+          {tab === "topics" &&
+            unmappedTopics.map((u) => (
+              <li key={`${u.tec_subject}|||${u.tec_topic}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTopic(u)
+                    setYourTopicId("")
+                  }}
+                  className={`w-full rounded-lg border px-4 py-3 text-left text-sm ${
+                    selectedTopic?.tec_topic === u.tec_topic &&
+                    selectedTopic?.tec_subject === u.tec_subject
+                      ? "border-blue-500 bg-blue-50"
+                      : "bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <p className="text-xs font-medium text-slate-500">{u.tec_subject}</p>
+                  <p className="font-semibold text-slate-900">{u.tec_topic}</p>
+                  {u.sample_statement && (
+                    <p className="mt-1 line-clamp-2 text-slate-600">{u.sample_statement}</p>
+                  )}
+                  <p className="mt-2 text-xs text-slate-400">
+                    {u.count} questões
+                    {u.mapped_subject_name
+                      ? ` · matéria: ${u.mapped_subject_name}`
+                      : " · vincule a matéria TEC antes"}
+                  </p>
+                </button>
+              </li>
+            ))}
+          {tab === "topics" && unmappedTopics.length === 0 && (
+            <p className="text-sm text-green-700">Todos os assuntos TEC já foram vinculados.</p>
           )}
         </ul>
-        {selected && (
-          <div className="rounded-xl border bg-white p-4">
-            <p className="font-medium">{selected.tec_subject}</p>
-            <p className="text-sm text-slate-600">{selected.tec_topic || "(matéria inteira)"}</p>
-            <label className="mt-4 block text-sm">Sua matéria</label>
-            <select
-              value={subjectId}
-              onChange={(e) => setSubjectId(e.target.value)}
-              className="mt-1 w-full rounded border px-3 py-2 text-sm"
-            >
-              <option value="">Selecione</option>
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <label className="mt-3 block text-sm">Seu tema (opcional)</label>
-            <select
-              value={topicId}
-              onChange={(e) => setTopicId(e.target.value)}
-              className="mt-1 w-full rounded border px-3 py-2 text-sm"
-            >
-              <option value="">—</option>
-              {topics.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={saveMapping}
-              disabled={!subjectId}
-              className="mt-4 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-            >
-              Salvar associação
-            </button>
-          </div>
-        )}
+
+        <div className="rounded-xl border bg-white p-4 lg:sticky lg:top-4 lg:self-start">
+          {tab === "subjects" && selectedSubject && (
+            <>
+              <p className="text-lg font-semibold text-blue-800">
+                {selectedSubject.tec_subject}
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Todas as {selectedSubject.count} questões com esta matéria no TEC irão para a
+                matéria que você escolher abaixo.
+              </p>
+              <label className="mt-4 block text-sm font-medium">Sua matéria</label>
+              <select
+                value={yourSubjectId}
+                onChange={(e) => setYourSubjectId(e.target.value)}
+                className="mt-1 w-full rounded border px-3 py-2 text-sm"
+              >
+                <option value="">Selecione</option>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={saveSubjectLink}
+                disabled={!yourSubjectId || saving}
+                className="mt-4 w-full rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Salvar vínculo da matéria
+              </button>
+            </>
+          )}
+
+          {tab === "topics" && selectedTopic && (
+            <>
+              <p className="text-xs text-slate-500">{selectedTopic.tec_subject}</p>
+              <p className="text-lg font-semibold">{selectedTopic.tec_topic}</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedTopic.count} questões com este assunto.
+              </p>
+              {!selectedTopic.mapped_subject_id ? (
+                <p className="mt-4 text-sm text-amber-800">
+                  Primeiro vincule a matéria TEC “{selectedTopic.tec_subject}” na aba
+                  Matérias.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Matéria sua: <strong>{selectedTopic.mapped_subject_name}</strong>
+                  </p>
+                  <label className="mt-4 block text-sm font-medium">
+                    Associar a um tema existente
+                  </label>
+                  <select
+                    value={yourTopicId}
+                    onChange={(e) => setYourTopicId(e.target.value)}
+                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  >
+                    <option value="">Selecione (se já tiver um tema igual)</option>
+                    {topics.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => saveTopicLink(false)}
+                    disabled={!yourTopicId || saving}
+                    className="mt-2 w-full rounded border border-slate-300 px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    Usar tema selecionado
+                  </button>
+                  <div className="my-4 border-t" />
+                  <p className="text-sm text-slate-600">
+                    Ou crie um tema novo com o nome do TEC (a maioria dos assuntos será
+                    assim):
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => saveTopicLink(true)}
+                    disabled={saving}
+                    className="mt-2 w-full rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+                  >
+                    Criar tema “{selectedTopic.tec_topic}”
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {!panelItem && (
+            <p className="text-sm text-slate-500">
+              Selecione um item à esquerda para associar.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   )

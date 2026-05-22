@@ -92,7 +92,7 @@ function ImportarContent() {
         O PDF já traz matéria e assunto do TEC. Basta importar; depois você vincula às suas
         matérias em{" "}
         <Link href="/questoes/mapeamento" className="text-blue-600 underline">
-          Associar matérias
+          Associar matérias e assuntos
         </Link>
         .
       </p>

@@ -99,22 +99,60 @@ export async function applyMappingFilter(
 
   if (!mappings?.length) return { ...filters, tec_subject: ["__none__"] }
 
-  let matched = mappings
+  const isSubjectLevel = (t: string | null) => !t || t.trim() === ""
+
   if (filters.subject_id) {
-    matched = matched.filter((m) => m.subject_id === filters.subject_id)
+    const subjectTec = [
+      ...new Set(
+        mappings
+          .filter(
+            (m) =>
+              isSubjectLevel(m.tec_topic) && m.subject_id === filters.subject_id
+          )
+          .map((m) => m.tec_subject)
+          .filter(Boolean)
+      ),
+    ] as string[]
+
+    const out: BankFilters = {
+      ...filters,
+      tec_subject: subjectTec.length ? subjectTec : ["__none__"],
+    }
+
+    if (filters.topic_id) {
+      const topicTec = [
+        ...new Set(
+          mappings
+            .filter(
+              (m) =>
+                !isSubjectLevel(m.tec_topic) &&
+                m.topic_id === filters.topic_id &&
+                subjectTec.includes(m.tec_subject)
+            )
+            .map((m) => m.tec_topic)
+            .filter(Boolean)
+        ),
+      ] as string[]
+      out.tec_topic = topicTec.length ? topicTec : ["__none__"]
+    }
+
+    return out
   }
+
   if (filters.topic_id) {
-    matched = matched.filter((m) => m.topic_id === filters.topic_id)
+    const topicTec = [
+      ...new Set(
+        mappings
+          .filter((m) => !isSubjectLevel(m.tec_topic) && m.topic_id === filters.topic_id)
+          .map((m) => m.tec_topic)
+          .filter(Boolean)
+      ),
+    ] as string[]
+    return {
+      ...filters,
+      tec_topic: topicTec.length ? topicTec : ["__none__"],
+    }
   }
 
-  const subjects = [...new Set(matched.map((m) => m.tec_subject))]
-  const topics = matched
-    .filter((m) => m.tec_topic)
-    .map((m) => m.tec_topic as string)
-
-  return {
-    ...filters,
-    tec_subject: subjects.length ? subjects : ["__none__"],
-    tec_topic: filters.topic_id && topics.length ? topics : filters.tec_topic,
-  }
+  return filters
 }

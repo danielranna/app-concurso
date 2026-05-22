@@ -76,7 +76,7 @@ export default function QuestoesHomePage() {
             href="/questoes/mapeamento"
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
           >
-            <Link2 className="h-4 w-4" /> Associar matérias
+            <Link2 className="h-4 w-4" /> Associar matérias e assuntos
           </Link>
         </div>
       </div>
