@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { DEFAULT_WEEKDAY_LIMITS, type WeekdayLimits } from "@/lib/flashcard-types"
+import { MessageCircle, RefreshCw } from "lucide-react"
 
 const DAYS = [
   { key: "0", label: "Domingo" },
@@ -16,6 +17,12 @@ const DAYS = [
   { key: "6", label: "Sábado" },
 ]
 
+type WhatsAppUser = {
+  userJid: string
+  displayLabel: string
+  engaged?: boolean
+}
+
 export default function FlashcardsSettingsPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
@@ -23,10 +30,17 @@ export default function FlashcardsSettingsPage() {
   const [bot, setBot] = useState({
     enabled: false,
     phone_e164: "",
+    whatsapp_jid: "" as string | null,
+    whatsapp_display_label: "" as string | null,
     start_hour: 7,
     end_hour: 19,
     timezone: "America/Sao_Paulo",
   })
+  const [waUsers, setWaUsers] = useState<WhatsAppUser[]>([])
+  const [waLoading, setWaLoading] = useState(false)
+  const [waError, setWaError] = useState<string | null>(null)
+  const [waHint, setWaHint] = useState<string | null>(null)
+  const [waWarning, setWaWarning] = useState<string | null>(null)
   const [newApiKey, setNewApiKey] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -47,6 +61,8 @@ export default function FlashcardsSettingsPage() {
       setBot({
         enabled: botData.enabled ?? false,
         phone_e164: botData.phone_e164 ?? "",
+        whatsapp_jid: botData.whatsapp_jid ?? null,
+        whatsapp_display_label: botData.whatsapp_display_label ?? null,
         start_hour: botData.start_hour ?? 7,
         end_hour: botData.end_hour ?? 19,
         timezone: botData.timezone ?? "America/Sao_Paulo",
@@ -54,8 +70,47 @@ export default function FlashcardsSettingsPage() {
     })
   }, [router])
 
+  async function fetchWhatsAppUsers() {
+    if (!userId) return
+    setWaLoading(true)
+    setWaError(null)
+    setWaWarning(null)
+    try {
+      const res = await fetch(`/api/flashcards/whatsapp-users?user_id=${userId}`)
+      const data = await res.json()
+      if (data.error && !data.users?.length) {
+        setWaError(data.error)
+        setWaHint(data.hint ?? null)
+        setWaUsers([])
+      } else {
+        setWaUsers(data.users ?? [])
+        setWaWarning(data.warning ?? null)
+        setWaHint(data.hint ?? null)
+        if (data.hint && !data.users?.length) {
+          setWaError(null)
+        }
+      }
+    } catch {
+      setWaError("Falha ao buscar contas. Tente novamente.")
+    } finally {
+      setWaLoading(false)
+    }
+  }
+
+  function selectWhatsAppUser(u: WhatsAppUser) {
+    setBot((b) => ({
+      ...b,
+      whatsapp_jid: u.userJid,
+      whatsapp_display_label: u.displayLabel,
+    }))
+  }
+
   async function saveAll() {
     if (!userId) return
+    if (bot.enabled && !bot.whatsapp_jid) {
+      alert("Ative o bot só depois de vincular uma conta WhatsApp (Buscar contas → escolher seu nome).")
+      return
+    }
     await Promise.all([
       fetch("/api/flashcards/schedule-settings", {
         method: "PUT",
@@ -65,7 +120,16 @@ export default function FlashcardsSettingsPage() {
       fetch("/api/flashcards/bot/settings/web", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, ...bot }),
+        body: JSON.stringify({
+          user_id: userId,
+          enabled: bot.enabled,
+          phone_e164: bot.phone_e164 || null,
+          whatsapp_jid: bot.whatsapp_jid,
+          whatsapp_display_label: bot.whatsapp_display_label,
+          start_hour: bot.start_hour,
+          end_hour: bot.end_hour,
+          timezone: bot.timezone,
+        }),
       }),
     ])
     setSaved(true)
@@ -119,7 +183,66 @@ export default function FlashcardsSettingsPage() {
       </section>
 
       <section className="mt-8 border-t pt-8">
-        <h2 className="font-medium text-slate-800">Bot WhatsApp (VPS)</h2>
+        <h2 className="flex items-center gap-2 font-medium text-slate-800">
+          <MessageCircle className="h-5 w-5" />
+          Bot WhatsApp (VPS)
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Vincule seu nome do grupo (após <code className="text-xs">/sync-membros</code> no WhatsApp).
+          O bot envia lembretes e cards no privado para esse JID.
+        </p>
+
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <button
+            type="button"
+            onClick={fetchWhatsAppUsers}
+            disabled={waLoading}
+            className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${waLoading ? "animate-spin" : ""}`} />
+            {waLoading ? "Buscando..." : "Buscar contas do WhatsApp"}
+          </button>
+
+          {waError && (
+            <p className="mt-3 text-sm text-red-600">{waError}</p>
+          )}
+          {waHint && !waUsers.length && (
+            <p className="mt-2 text-sm text-amber-700">{waHint}</p>
+          )}
+          {waWarning && (
+            <p className="mt-2 text-sm text-amber-700">{waWarning}</p>
+          )}
+
+          {waUsers.length > 0 && (
+            <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto">
+              {waUsers.map((u) => (
+                <li key={u.userJid}>
+                  <button
+                    type="button"
+                    onClick={() => selectWhatsAppUser(u)}
+                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                      bot.whatsapp_jid === u.userJid
+                        ? "bg-emerald-600 text-white"
+                        : "bg-white hover:bg-slate-100"
+                    }`}
+                  >
+                    {u.displayLabel}
+                    {u.engaged && (
+                      <span className="ml-2 text-xs opacity-80">(engajado)</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {bot.whatsapp_jid && (
+            <p className="mt-3 text-sm text-emerald-800">
+              Vinculado: <strong>{bot.whatsapp_display_label ?? bot.whatsapp_jid}</strong>
+            </p>
+          )}
+        </div>
+
         <label className="mt-4 flex items-center gap-2">
           <input
             type="checkbox"
@@ -128,12 +251,19 @@ export default function FlashcardsSettingsPage() {
           />
           <span className="text-sm">Ativar lembretes pelo bot</span>
         </label>
-        <input
-          className="mt-2 w-full rounded border px-3 py-2 text-sm"
-          placeholder="Telefone E.164 (+5511999999999)"
-          value={bot.phone_e164}
-          onChange={(e) => setBot((b) => ({ ...b, phone_e164: e.target.value }))}
-        />
+
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-slate-500">
+            Telefone manual (opcional, legado)
+          </summary>
+          <input
+            className="mt-2 w-full rounded border px-3 py-2 text-sm"
+            placeholder="+5511999999999"
+            value={bot.phone_e164}
+            onChange={(e) => setBot((b) => ({ ...b, phone_e164: e.target.value }))}
+          />
+        </details>
+
         <div className="mt-2 flex gap-4">
           <div>
             <label className="text-xs text-slate-500">Início (h)</label>
@@ -158,15 +288,17 @@ export default function FlashcardsSettingsPage() {
             />
           </div>
         </div>
+
         <button
           onClick={generateKey}
           className="mt-4 rounded-lg border border-slate-300 px-4 py-2 text-sm"
         >
-          Gerar API key para o bot
+          Gerar API key para o bot (VPS)
         </button>
         {newApiKey && (
           <p className="mt-2 break-all rounded bg-amber-50 p-3 text-xs text-amber-900">
-            Copie agora: <strong>{newApiKey}</strong>
+            Copie agora e coloque na VPS como <code>FLASHCARDS_API_KEY</code>:{" "}
+            <strong>{newApiKey}</strong>
           </p>
         )}
       </section>

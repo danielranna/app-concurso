@@ -10,6 +10,23 @@ Authorization: Bearer fc_xxxxxxxx
 
 Gere a chave em **Flashcards → Configurações → Gerar API key**.
 
+### Vincular usuário WhatsApp (JID)
+
+O bot envia mensagens no **privado** usando `whatsapp_jid` salvo nas settings (não use só telefone manual).
+
+1. No grupo do quiz: `/sync-membros`
+2. No app: **Configurações → Buscar contas do WhatsApp** → escolha seu nome → Salvar
+3. Na VPS, `GET /api/flashcards/bot/settings` deve retornar `whatsapp_jid` preenchido
+
+**Env no Vercel (projeto Flashcards):**
+
+| Variável | Valor |
+|----------|--------|
+| `QUIZ_BOT_USERS_URL` | `https://SEU-QUIZ.vercel.app/api/flashcards-whatsapp-users` |
+| `QUIZ_BOT_USERS_SECRET` | Igual a `FLASHCARDS_BOT_INBOUND_SECRET` no projeto Quiz |
+
+**Rota interna do app:** `GET /api/flashcards/whatsapp-users?user_id=...` (proxy; o front não expõe o secret).
+
 ---
 
 ## Fluxo na VPS
@@ -118,7 +135,8 @@ await fetch(`${BASE}/api/flashcards/bot/dispatch/${dispatchId}/answer`, {
 | GET | `/api/flashcards/bot/dispatch/due` | Cards prontos para enviar agora |
 | POST | `/api/flashcards/bot/dispatch/:id/sent` | Marca como enviado |
 | POST | `/api/flashcards/bot/dispatch/:id/answer` | Registra rating FSRS |
-| GET/PUT | `/api/flashcards/bot/settings` | Config do bot (Bearer) |
+| GET/PUT | `/api/flashcards/bot/settings` | Config do bot (Bearer); inclui `whatsapp_jid`, `whatsapp_display_label` |
+| GET | `/api/flashcards/whatsapp-users` | Lista nomes do grupo (app → quiz; requer env) |
 
 ---
 
