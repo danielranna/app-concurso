@@ -1,3 +1,6 @@
+"use client"
+
+import CoachHeader from "@/components/coach/CoachHeader"
 import CoachSubNav from "@/components/coach/CoachSubNav"
 
 export default function CoachLayout({
@@ -7,12 +10,7 @@ export default function CoachLayout({
 }) {
   return (
     <div className="p-6">
-      <div className="mb-2">
-        <h1 className="text-2xl font-bold text-slate-900">Coach IA</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Relatórios, prioridades e ações sugeridas pela IA
-        </p>
-      </div>
+      <CoachHeader />
       <CoachSubNav />
       {children}
     </div>

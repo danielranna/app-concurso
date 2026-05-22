@@ -1,3 +1,5 @@
+import type { UserAiCredentials } from "./user-credentials"
+
 export type AiMessage = { role: "system" | "user"; content: string }
 
 export type AiCompleteOptions = {
@@ -22,15 +24,15 @@ function estimateCost(tokensIn: number, tokensOut: number) {
   return ((tokensIn + tokensOut) / 1000) * MINI_COST_PER_1K
 }
 
-async function completeOpenAI(opts: AiCompleteOptions): Promise<AiCompleteResult> {
-  const key = process.env.OPENAI_API_KEY
-  if (!key) throw new Error("OPENAI_API_KEY não configurada")
-
+async function completeOpenAI(
+  opts: AiCompleteOptions,
+  apiKey: string
+): Promise<AiCompleteResult> {
   const model = opts.model ?? "gpt-4o-mini"
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -61,10 +63,10 @@ async function completeOpenAI(opts: AiCompleteOptions): Promise<AiCompleteResult
   }
 }
 
-async function completeAnthropic(opts: AiCompleteOptions): Promise<AiCompleteResult> {
-  const key = process.env.ANTHROPIC_API_KEY
-  if (!key) throw new Error("ANTHROPIC_API_KEY não configurada")
-
+async function completeAnthropic(
+  opts: AiCompleteOptions,
+  apiKey: string
+): Promise<AiCompleteResult> {
   const model = opts.model ?? "claude-3-5-haiku-latest"
   const system = opts.messages.find((m) => m.role === "system")?.content ?? ""
   const userMsgs = opts.messages.filter((m) => m.role === "user")
@@ -72,7 +74,7 @@ async function completeAnthropic(opts: AiCompleteOptions): Promise<AiCompleteRes
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": key,
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
@@ -105,9 +107,17 @@ async function completeAnthropic(opts: AiCompleteOptions): Promise<AiCompleteRes
   }
 }
 
-export async function aiComplete(opts: AiCompleteOptions): Promise<AiCompleteResult> {
-  if (process.env.OPENAI_API_KEY) return completeOpenAI(opts)
-  if (process.env.ANTHROPIC_API_KEY) return completeAnthropic(opts)
+/** Completa com a chave do usuário (BYOK). Sem credenciais → mock vazio. */
+export async function aiComplete(
+  opts: AiCompleteOptions,
+  credentials?: UserAiCredentials | null
+): Promise<AiCompleteResult> {
+  if (credentials?.provider === "openai") {
+    return completeOpenAI(opts, credentials.apiKey)
+  }
+  if (credentials?.provider === "anthropic") {
+    return completeAnthropic(opts, credentials.apiKey)
+  }
   return {
     text: "",
     model: "mock",
@@ -116,8 +126,4 @@ export async function aiComplete(opts: AiCompleteOptions): Promise<AiCompleteRes
     costUsdEstimate: 0,
     provider: "mock",
   }
-}
-
-export function hasAiProvider() {
-  return !!(process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY)
 }

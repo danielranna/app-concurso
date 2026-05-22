@@ -1,6 +1,7 @@
 import { supabaseServer } from "../supabase-server"
 import type { NotebookReportStructured } from "../coach-types"
-import { aiComplete, hasAiProvider } from "./client"
+import { aiComplete } from "./client"
+import { getUserAiCredentials } from "./user-credentials"
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
@@ -14,7 +15,10 @@ Priorize: (1) tópicos fracos, (2) padrões metacognitivos (6 categorias), (3) t
 (4) reincidência de erros, (5) consolidação. Cite tec_topic exatamente como no JSON.
 Use APENAS os dados do JSON; não invente estatísticas. Responda em português (BR).`
 
-function buildRuleBasedReport(snapshot: Record<string, unknown>): NotebookReportStructured {
+function buildRuleBasedReport(
+  snapshot: Record<string, unknown>,
+  useLlm: boolean
+): NotebookReportStructured {
   const byTopic = (snapshot.by_topic as { topic: string; wrong: number; correct: number }[]) ?? []
   const weak = [...byTopic].sort((a, b) => b.wrong - a.wrong).slice(0, 5)
   const strong = [...byTopic].filter((t) => t.wrong === 0 && t.correct > 0).slice(0, 3)
@@ -74,7 +78,7 @@ function buildRuleBasedReport(snapshot: Record<string, unknown>): NotebookReport
           },
         ]
       : [],
-    confidence_in_analysis: hasAiProvider() ? "media" : "alta",
+    confidence_in_analysis: useLlm ? "media" : "alta",
   }
 }
 
@@ -211,8 +215,9 @@ export async function generateNotebookReport(
   costUsd: number
 }> {
   const snapshot = await buildNotebookReportSnapshot(notebookId, userId)
+  const credentials = await getUserAiCredentials(userId)
 
-  let structured = buildRuleBasedReport(snapshot)
+  let structured = buildRuleBasedReport(snapshot, !!credentials)
 
   let summaryMd = `## ${snapshot.notebook_name}\n\n${structured.headline}\n\n`
   let modelUsed = "rule-based"
@@ -220,19 +225,22 @@ export async function generateNotebookReport(
   let tokensOut = 0
   let costUsd = 0
 
-  if (hasAiProvider()) {
+  if (credentials) {
     try {
-      const jsonResult = await aiComplete({
-        jsonMode: true,
-        maxTokens: 2500,
-        messages: [
-          { role: "system", content: NOTEBOOK_REPORT_SYSTEM },
-          {
-            role: "user",
-            content: `Gere análise JSON do caderno:\n${JSON.stringify(snapshot)}`,
-          },
-        ],
-      })
+      const jsonResult = await aiComplete(
+        {
+          jsonMode: true,
+          maxTokens: 2500,
+          messages: [
+            { role: "system", content: NOTEBOOK_REPORT_SYSTEM },
+            {
+              role: "user",
+              content: `Gere análise JSON do caderno:\n${JSON.stringify(snapshot)}`,
+            },
+          ],
+        },
+        credentials
+      )
       const parsed = JSON.parse(jsonResult.text) as NotebookReportStructured
       if (parsed.headline) structured = parsed
       modelUsed = jsonResult.model
@@ -240,20 +248,23 @@ export async function generateNotebookReport(
       tokensOut = jsonResult.tokensOut
       costUsd = jsonResult.costUsdEstimate
 
-      const mdResult = await aiComplete({
-        maxTokens: 1500,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Escreva relatório em markdown (600-900 palavras) em português BR com seções: Resumo, Pontos fortes, Pontos fracos, Tempo, Plano 7 dias.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify(structured),
-          },
-        ],
-      })
+      const mdResult = await aiComplete(
+        {
+          maxTokens: 1500,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Escreva relatório em markdown (600-900 palavras) em português BR com seções: Resumo, Pontos fortes, Pontos fracos, Tempo, Plano 7 dias.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify(structured),
+            },
+          ],
+        },
+        credentials
+      )
       if (mdResult.text) summaryMd = mdResult.text
       tokensIn += mdResult.tokensIn
       tokensOut += mdResult.tokensOut

@@ -15,6 +15,7 @@ import {
 type HubData = {
   pending_drafts: number
   pending_reports: number
+  report_mode?: "rules" | "llm"
   active_exam: { id: string; name: string } | null
   recent_reports: {
     id: string
@@ -48,6 +49,15 @@ export default function CoachHubPage() {
     })
   }, [router])
 
+  useEffect(() => {
+    const refresh = () => {
+      if (userId) load(userId)
+    }
+    window.addEventListener("coach-ai-credentials-updated", refresh)
+    return () =>
+      window.removeEventListener("coach-ai-credentials-updated", refresh)
+  }, [userId])
+
   async function processPendingReports() {
     if (!userId) return
     setProcessing(true)
@@ -70,6 +80,19 @@ export default function CoachHubPage() {
 
   return (
     <div className="space-y-6">
+      {hub?.report_mode === "rules" && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Relatórios por regras (seus erros e tópicos). Para texto com IA, use{" "}
+          <strong>Chave de IA</strong> no canto superior — você paga na sua
+          conta OpenAI/Anthropic.
+        </p>
+      )}
+      {hub?.report_mode === "llm" && (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Relatórios com IA ativos usando a sua chave cadastrada.
+        </p>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href="/coach/inbox"

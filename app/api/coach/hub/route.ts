@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { userHasAiCredentials } from "@/lib/ai/user-credentials"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function GET(req: Request) {
@@ -39,10 +40,14 @@ export async function GET(req: Request) {
       .limit(5),
   ])
 
+  const aiConfigured = await userHasAiCredentials(user_id)
+
   return NextResponse.json({
     pending_drafts: pendingDrafts ?? 0,
     pending_reports: pendingReports ?? 0,
     active_exam: activeExam,
     recent_reports: recentReports ?? [],
+    report_mode: aiConfigured ? "llm" : "rules",
+    ai_configured: aiConfigured,
   })
 }
