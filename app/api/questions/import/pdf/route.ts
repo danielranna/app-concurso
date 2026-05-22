@@ -39,9 +39,8 @@ export async function POST(req: Request) {
       parsed_name: parsed.name,
     })
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Erro ao importar PDF" },
-      { status: 500 }
-    )
+    const message = e instanceof Error ? e.message : "Erro ao importar PDF"
+    console.error("[import/pdf]", message, e)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

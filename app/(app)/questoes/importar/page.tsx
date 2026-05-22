@@ -20,6 +20,7 @@ function ImportarContent() {
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -39,10 +40,17 @@ function ImportarContent() {
   async function handlePreview() {
     if (!file) return
     setLoading(true)
+    setError(null)
+    setPreview(null)
     const fd = new FormData()
     fd.append("file", file)
     const res = await fetch("/api/questions/import/preview", { method: "POST", body: fd })
     const data = await res.json()
+    if (!res.ok) {
+      setError(data.error ?? "Falha na pré-visualização")
+      setLoading(false)
+      return
+    }
     setPreview(data)
     if (data.name && !name) setName(data.name as string)
     setLoading(false)
@@ -51,6 +59,8 @@ function ImportarContent() {
   async function handleImport() {
     if (!file || !userId) return
     setLoading(true)
+    setError(null)
+    setResult(null)
     const fd = new FormData()
     fd.append("file", file)
     fd.append("user_id", userId)
@@ -58,6 +68,16 @@ function ImportarContent() {
     if (name) fd.append("name", name)
     const res = await fetch("/api/questions/import/pdf", { method: "POST", body: fd })
     const data = await res.json()
+    if (!res.ok) {
+      setError(data.error ?? "Falha ao importar")
+      setLoading(false)
+      return
+    }
+    if (!data.notebook_id) {
+      setError("Importação incompleta: caderno não foi criado")
+      setLoading(false)
+      return
+    }
     setResult(data)
     setLoading(false)
   }
@@ -86,6 +106,7 @@ function ImportarContent() {
               setFile(e.target.files?.[0] ?? null)
               setPreview(null)
               setResult(null)
+              setError(null)
             }}
             className="mt-1 block w-full text-sm"
           />
@@ -136,9 +157,14 @@ function ImportarContent() {
             <Upload className="h-4 w-4" /> Importar
           </button>
         </div>
-        {preview && (
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+        {preview && !error && (
           <div className="rounded-lg border bg-slate-50 p-4 text-sm">
-            <p>Questões detectadas: {String(preview.question_count)}</p>
+            <p>Questões detectadas: {String(preview.question_count ?? 0)}</p>
             {(preview.warnings as string[])?.map((w, i) => (
               <p key={i} className="text-amber-700">
                 {w}
@@ -156,14 +182,14 @@ function ImportarContent() {
             </ul>
           </div>
         )}
-        {result && (
+        {typeof result?.notebook_id === "string" && (
           <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
             <p>Caderno criado!</p>
-            <p>Novas questões: {String(result.created_questions)}</p>
-            <p>Reutilizadas: {String(result.reused_questions)}</p>
+            <p>Novas questões: {String(result.created_questions ?? 0)}</p>
+            <p>Reutilizadas: {String(result.reused_questions ?? 0)}</p>
             <div className="mt-2 flex flex-wrap gap-3">
               <Link
-                href={`/questoes/cadernos/${result.notebook_id}`}
+                href={`/questoes/cadernos/${result.notebook_id as string}`}
                 className="text-blue-600 underline"
               >
                 Abrir caderno

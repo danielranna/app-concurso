@@ -1,4 +1,5 @@
 import type { ParsedTecNotebook, ParsedTecQuestion, QuestionType } from "./question-types"
+import { extractPdfText } from "./pdf-extract"
 
 const TEC_URL_RE =
   /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/gi
@@ -7,19 +8,6 @@ const GABARITO_LINE_RE =
   /(\d+)\)\s*(Anulada|Certo|Errado|[A-E])/gi
 
 const OPTION_LINE_RE = /^\s*([a-e])\)\s+(.+)$/gim
-
-export async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
-  const data = new Uint8Array(buffer)
-  const doc = await pdfjs.getDocument({ data, useSystemFonts: true }).promise
-  let text = ""
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i)
-    const content = await page.getTextContent()
-    text += content.items.map((item) => ("str" in item ? item.str : "")).join(" ") + "\n"
-  }
-  return text
-}
 
 export function parseTecPdfText(rawText: string): ParsedTecNotebook {
   const warnings: string[] = []
