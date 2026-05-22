@@ -76,23 +76,31 @@ export function applyReview(
   return { card: result.card, log: result, preview }
 }
 
-export function formatIntervalPreview(card: Card, days: number): string {
+/** Dias até a próxima revisão (usa `due`; passos curtos têm scheduled_days = 0). */
+export function intervalDaysUntilDue(card: Card, now: Date): number {
+  const ms = card.due.getTime() - now.getTime()
+  return Math.max(0, ms / (1000 * 60 * 60 * 24))
+}
+
+export function formatIntervalDays(days: number): string {
+  if (days < 1 / 1440) return "< 1 min"
   if (days < 1 / 24) {
-    const mins = Math.round(days * 24 * 60)
+    const mins = Math.max(1, Math.round(days * 24 * 60))
     return `${mins} min`
   }
   if (days < 1) {
-    const hours = Math.round(days * 24)
+    const hours = Math.max(1, Math.round(days * 24))
     return `${hours} h`
   }
-  return `${Math.round(days)} dias`
+  const d = Math.round(days)
+  return d === 1 ? "1 dia" : `${d} dias`
 }
 
-export function previewLabels(preview: IPreview) {
+export function previewLabels(preview: IPreview, now = new Date()) {
   return {
-    again: formatIntervalPreview(preview[Rating.Again].card, preview[Rating.Again].log.scheduled_days),
-    hard: formatIntervalPreview(preview[Rating.Hard].card, preview[Rating.Hard].log.scheduled_days),
-    good: formatIntervalPreview(preview[Rating.Good].card, preview[Rating.Good].log.scheduled_days),
-    easy: formatIntervalPreview(preview[Rating.Easy].card, preview[Rating.Easy].log.scheduled_days),
+    again: formatIntervalDays(intervalDaysUntilDue(preview[Rating.Again].card, now)),
+    hard: formatIntervalDays(intervalDaysUntilDue(preview[Rating.Hard].card, now)),
+    good: formatIntervalDays(intervalDaysUntilDue(preview[Rating.Good].card, now)),
+    easy: formatIntervalDays(intervalDaysUntilDue(preview[Rating.Easy].card, now)),
   }
 }
