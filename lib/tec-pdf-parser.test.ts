@@ -74,6 +74,35 @@ Certo Errado
 Gabarito 1) Certo
 `
 
+const OPERADORES_SNIPPET = `
+www.tecconcursos.com.br/questoes/1414224
+CEBRASPE (CESPE) - Psicop (B Coqueiros)/Pref B dos Coqueiros/2020
+Raciocínio Lógico - Operadores Lógicos (Representação Simbólica; Diferença entre Proposição Simples e Composta).
+Considerando-se os conectivos lógicos usuais
+a) op A
+b) op B
+c) op C
+d) op D
+e) op E
+Gabarito 1) A
+`
+
+const RL_REAL_SNIPPET = `
+1) 2) 3) 4) LS - RACIOCÍNIO LÓGICO - EXPERIENTE - CADERNO 1 - CEBRASPE https://www.tecconcursos.com.br/s/Q65yuG Ordenação: Por Matéria e Assunto
+www.tecconcursos.com.br/questoes/2773845
+CEBRASPE (CESPE) - ASoc (Pref Camaçari)/Pref Camaçari/2024
+Raciocínio Lógico - Tabela Verdade das Proposições Compostas
+A seguir, são apresentadas as duas primeiras colunas de uma tabela-verdade, em que P e Q representam proposições lógicas simples.
+A última coluna dessa tabela-verdade é a seguinte.
+Com base nas informações precedentes, assinale a opção correta.
+a) op A
+b) op B
+c) op C
+d) op D
+e) op E
+Gabarito 1) C
+`
+
 const CIENCIA_CE_SNIPPET = `
 www.tecconcursos.com.br/questoes/9990001
 CEBRASPE (CESPE) - ANL (Org X)/Org X/Area/2024
@@ -133,6 +162,25 @@ function runTests() {
   assert(rlCeq.tec_topic === "Tabela Verdade das Proposições Compostas", `rlce topic: ${rlCeq.tec_topic}`)
   assert(rlCeq.statement.startsWith("P:"), `rlce stmt: ${rlCeq.statement.slice(0, 20)}`)
   assert(!rlCeq.tec_topic.includes("P:"), "topic must not include P:")
+
+  const op = parseTecPdfText(OPERADORES_SNIPPET)
+  assert(
+    op.questions[0].tec_topic?.includes("Proposição Simples e Composta"),
+    `op topic: ${op.questions[0].tec_topic}`
+  )
+  assert(
+    op.questions[0].statement.startsWith("Considerando"),
+    `op stmt: ${op.questions[0].statement.slice(0, 30)}`
+  )
+
+  const rlReal = parseTecPdfText(RL_REAL_SNIPPET)
+  assert(
+    rlReal.name.includes("LS - RACIOCÍNIO LÓGICO") && !rlReal.name.startsWith("1)"),
+    `rl real name: ${rlReal.name}`
+  )
+  const rlRq = rlReal.questions[0]
+  assert(rlRq.tec_topic === "Tabela Verdade das Proposições Compostas", `rl real topic: ${rlRq.tec_topic}`)
+  assert(rlRq.statement.startsWith("A seguir"), `rl real stmt: ${rlRq.statement.slice(0, 40)}`)
 
   const ci = parseTecPdfText(CIENCIA_CE_SNIPPET)
   const ciq = ci.questions[0]

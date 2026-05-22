@@ -1,0 +1,67 @@
+﻿LEN 8317
+---HEAD 2000---
+
+
+1) 
+2) 
+3) 
+4) 
+LS - RACIOC├ìNIO L├ôGICO - EXPERIENTE - CADERNO 1 - CEBRASPE
+https://www.tecconcursos.com.br/s/Q65yuG
+Ordena├º├úo: Por Mat├®ria e Assunto
+www.tecconcursos.com.br/questoes/2981504
+CEBRASPE (CESPE) - ASist (Pref Cach Itapemirim)/Pref Cach Itapemirim/2024
+Racioc├¡nio L├│gico - Proposi├º├Áes: Defini├º├úo, Reconhecimento, Princ├¡pios L├│gicos
+No que se refere a l├│gica proposicional, julgue o pr├│ximo item.
+ 
+A frase ÔÇ£Como Cachoeiro do Itapemirim ├® uma linda cidade, ela possui v├írios pontos tur├¡sticos.ÔÇØ ├® uma proposi├º├úo simples.
+Certo
+Errado
+www.tecconcursos.com.br/questoes/1414224
+CEBRASPE (CESPE) - Psicop (B Coqueiros)/Pref B dos Coqueiros/2020
+Racioc├¡nio L├│gico - Operadores L├│gicos (Representa├º├úo Simb├│lica; Diferen├ºa entre Proposi├º├úo Simples e Composta).
+Considerando-se os conectivos l├│gicos usuais () e que as proposi├º├Áes l├│gicas simples sejam representadas por meio de letras mai├║sculas, a senten├ºa ÔÇ£Um
+bom estado de sa├║de ├® consequ├¬ncia de boa alimenta├º├úo e da pr├ítica regular de atividade f├¡sicaÔÇØ
+a) pode ser corretamente representada pela express├úo P.
+b) pode ser corretamente representada pela express├úo .
+c) pode ser corretamente representada pela express├úo .
+d) pode ser corretamente representada pela express├úo .
+e) n├úo ├® uma proposi├º├úo l├│gica.
+www.tecconcursos.com.br/questoes/2773845
+CEBRASPE (CESPE) - ASoc (Pref Cama├ºari)/Pref Cama├ºari/2024
+Racioc├¡nio L├│gico - Tabela Verdade das Proposi├º├Áes Compostas
+A seguir, s├úo apresentadas as duas primeiras colunas de uma tabela-verdade, em que P e Q representam proposi├º├Áes l├│gicas simples.
+ 
+A ├║ltima coluna dessa tabela-verdade ├® a seguinte.
+ 
+Com base nas informa├º├Áes precedentes, e considerando os conectivos l├│gicos usuais de conjun├º├úo (), disjun├º├úo (), nega├º├úo () e condicional (), assinale a
+op├º├úo que apresenta corretamente a proposi├º├úo l├│gica que corresponde ├á ├║ltima coluna da tabela-verdade.
+a)  
+b)  
+c)  
+d)  
+e)  
+www.tecconcursos.com.br/questoes/2981502
+CEBRASPE (CESPE) - ASist (Pref Cach Itapemirim)/Pref Cach Itapemi
+---Q 2773845 ---
+la express├úo .
+e) n├úo ├® uma proposi├º├úo l├│gica.
+www.tecconcursos.com.br/questoes/2773845
+CEBRASPE (CESPE) - ASoc (Pref Cama├ºari)/Pref Cama├ºari/2024
+Racioc├¡nio L├│gico - Tabela Verdade das Proposi├º├Áes Compostas
+A seguir, s├úo apresentadas as duas primeiras colunas de uma tabela-verdade, em que P e Q representam proposi├º├Áes l├│gicas simples.
+ 
+A ├║ltima coluna dessa tabela-verdade ├® a seguinte.
+ 
+Com base nas informa├º├Áes precedentes, e considerando os conectivos l├│gicos usuais de conjun├º├úo (), disjun├º├úo (), nega├º├úo () e condicional (), assinale a
+op├º├úo que apresenta corretamente a proposi├º├úo l├│gica que corresponde ├á ├║ltima coluna da tabela-verdade.
+a)  
+b)  
+c)  
+d)  
+e)  
+www.tecconcursos.com.br/questoes/2981502
+CEBRASPE (CESPE) - ASist (Pref Cach Itapemirim)/Pref Cach Itapemirim/2024
+Racioc├¡nio L├│gico - Tabela Verdade das Proposi├º├Áes Compostas
+No que se refere a l├│gica proposicional, julgue o pr├│ximo item.
+O valor l├│gico da proposi├º├úo composta p ╦à ~q ÔåÆ r ╦ä ~s ser├í verdad

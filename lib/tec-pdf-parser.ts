@@ -21,35 +21,53 @@ function normalizeShareUrl(raw: string): string {
   return u
 }
 
+const FIRST_QUESTION_URL_RE =
+  /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/\d+/i
+
+function stripLeadingGabaritoNumbers(s: string): string {
+  return s.replace(/^(?:\d+\)\s*)+/g, "").trim()
+}
+
 /** Nome do caderno e metadados do cabeçalho TEC (antes das questões). */
 export function extractNotebookHeader(normalized: string): {
   name: string
   share_url: string | null
   ordering: string | null
 } {
-  const shareMatch = normalized.match(SHARE_URL_RE)
+  const firstQ = normalized.search(FIRST_QUESTION_URL_RE)
+  const headerRegion =
+    firstQ > 0 ? normalized.slice(0, firstQ) : normalized.slice(0, 6000)
+
+  const shareMatch = headerRegion.match(SHARE_URL_RE)
   const share_url = shareMatch ? normalizeShareUrl(shareMatch[0]) : null
 
   let name = "Caderno importado"
   if (shareMatch && shareMatch.index != null) {
-    const before = normalized.slice(0, shareMatch.index).trim()
+    const before = stripLeadingGabaritoNumbers(
+      headerRegion.slice(0, shareMatch.index).trim()
+    )
     const oldTitle = before.match(/Caderno de Estudo\s+(\S+)\s*$/i)
     if (oldTitle?.[1]) {
       name = oldTitle[1].trim()
     } else {
-      const title = before
+      let title = before
         .replace(/tecconcursos/gi, " ")
         .replace(/\bCaderno de Estudo\b/gi, " ")
         .replace(/\s+/g, " ")
         .trim()
-      if (title.length >= 3) name = title
+      title = stripLeadingGabaritoNumbers(title)
+      const labeled = title.match(
+        /\b([A-Z]{2,}\s+-\s+.+?(?:CADERNO\s+\d+|CEBRASPE|FCC|FGV|VUNESP)[\s\S]*?)\s*$/i
+      )
+      if (labeled?.[1]) name = labeled[1].trim()
+      else if (title.length >= 3) name = title
     }
   } else {
-    const legacy = normalized.match(/Caderno de Estudo\s+(\S+)/i)
+    const legacy = headerRegion.match(/Caderno de Estudo\s+(\S+)/i)
     if (legacy?.[1]) name = legacy[1].trim()
   }
 
-  const orderingMatch = normalized.match(
+  const orderingMatch = headerRegion.match(
     /Ordenação:\s*([^]+?)(?=www\.tecconcursos|\bGabarito\b|$)/i
   )
   const ordering = orderingMatch?.[1]?.trim().slice(0, 120) ?? null
@@ -131,7 +149,7 @@ function splitQuestionBlocks(body: string): string[] {
 
 /** Início do enunciado após matéria/assunto (linha extra do TEC ou texto da questão). */
 const STATEMENT_START_RE =
-  /\s(?:(?:Texto\s+[A-Z0-9][\w.-]*)\s*|(?:\d+\)\s+)?(?:P:\s*[\u201c\u201d"]?|Proposição\s)|(?:Considerando|No que se refere|A respeito de|Acerca de|Julgue o|Assinale a opção|Em relação|Com relação|Com base|Tendo em vista|À luz de|Diante do|Segundo o|De acordo com)\b)/i
+  /\s(?:(?:Texto\s+[A-Z0-9][\w.-]*)\s*|(?:\d+\)\s*)+(?=Considerando|No\s|A\s)|(?:\d+\)\s+)?(?:[\u201c\u201d"]\s*)?P:\s*|Proposição\s+P:\s*|(?:A seguir|Considerando(?:-se)?|No que se refere|No argumento seguinte|A respeito de|Acerca de|Julgue o|Assinale a opção|Em relação|Com relação|Com base nas|Com base no|Com base|Tendo em vista|À luz de|Diante do|Segundo o|De acordo com|Sabendo que|Suponha que|Considere que|Observe que)\b)/i
 
 const MCQ_STMT_FALLBACK_RE =
   /\s(A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s|As\s|Os\s)/i
@@ -209,7 +227,11 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
 
   if (type === "certo_errado") {
     const certoIdx = rest.search(/\bCerto\b/)
-    statement = rest.slice(0, certoIdx).trim()
+    statement = rest
+      .slice(0, certoIdx)
+      .trim()
+      .replace(/^(?:\d+\)\s*)+/, "")
+      .trim()
     options = [
       { label: "Certo", text: "Certo" },
       { label: "Errado", text: "Errado" },

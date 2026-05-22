@@ -1,38 +1,41 @@
--- Reset completo do módulo de questões (banco global TEC + cadernos + histórico)
--- Rode no Supabase SQL Editor. NÃO apaga subjects, topics, erros nem flashcards.
+-- =============================================================================
+-- RESET TOTAL — módulo de questões (começar do zero após parser corrigido)
+-- =============================================================================
+-- Apaga TUDO abaixo: banco global, alternativas, cadernos, pastas, vínculos TEC,
+-- tentativas, notas rápidas e sessões de estudo combinado.
 --
--- Depois: reimporte os PDFs e refaça os vínculos em Associar matérias/assuntos.
+-- NÃO apaga: subjects, topics, erros (mapa), flashcards, usuários.
+--
+-- Rode no Supabase → SQL Editor (como postgres / service role).
+-- Depois: deploy atual → /questoes/importar → Associar matérias e assuntos.
+-- =============================================================================
 
 BEGIN;
 
--- Sessões de estudo combinado
-TRUNCATE TABLE study_session_notebooks CASCADE;
-TRUNCATE TABLE study_sessions CASCADE;
-
--- Histórico e notas por questão
-TRUNCATE TABLE question_attempts CASCADE;
-TRUNCATE TABLE question_notes CASCADE;
-
--- Cadernos do usuário (links com questões)
-TRUNCATE TABLE notebook_questions CASCADE;
-TRUNCATE TABLE notebooks CASCADE;
-TRUNCATE TABLE notebook_folders CASCADE;
-
--- Mapeamentos TEC → suas matérias/temas
-TRUNCATE TABLE tec_taxonomy_mappings CASCADE;
-
--- Banco global (questões + alternativas; CASCADE remove question_options)
-TRUNCATE TABLE question_options CASCADE;
-TRUNCATE TABLE questions CASCADE;
+TRUNCATE TABLE
+  study_session_notebooks,
+  study_sessions,
+  question_attempts,
+  question_notes,
+  notebook_questions,
+  notebook_folders,
+  notebooks,
+  tec_taxonomy_mappings,
+  question_options,
+  questions
+RESTART IDENTITY CASCADE;
 
 COMMIT;
 
--- Conferência (deve retornar 0 em todas)
-SELECT 'questions' AS tabela, COUNT(*) AS total FROM questions
-UNION ALL SELECT 'question_options', COUNT(*) FROM question_options
-UNION ALL SELECT 'notebooks', COUNT(*) FROM notebooks
-UNION ALL SELECT 'notebook_questions', COUNT(*) FROM notebook_questions
-UNION ALL SELECT 'tec_taxonomy_mappings', COUNT(*) FROM tec_taxonomy_mappings
-UNION ALL SELECT 'question_attempts', COUNT(*) FROM question_attempts
-UNION ALL SELECT 'question_notes', COUNT(*) FROM question_notes
-UNION ALL SELECT 'study_sessions', COUNT(*) FROM study_sessions;
+-- Tudo deve retornar 0
+SELECT 'questions' AS tabela, COUNT(*)::int AS restante FROM questions
+UNION ALL SELECT 'question_options', COUNT(*)::int FROM question_options
+UNION ALL SELECT 'notebooks', COUNT(*)::int FROM notebooks
+UNION ALL SELECT 'notebook_folders', COUNT(*)::int FROM notebook_folders
+UNION ALL SELECT 'notebook_questions', COUNT(*)::int FROM notebook_questions
+UNION ALL SELECT 'tec_taxonomy_mappings', COUNT(*)::int FROM tec_taxonomy_mappings
+UNION ALL SELECT 'question_attempts', COUNT(*)::int FROM question_attempts
+UNION ALL SELECT 'question_notes', COUNT(*)::int FROM question_notes
+UNION ALL SELECT 'study_sessions', COUNT(*)::int FROM study_sessions
+UNION ALL SELECT 'study_session_notebooks', COUNT(*)::int FROM study_session_notebooks
+ORDER BY tabela;
