@@ -2,10 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { BarChart2, ExternalLink, Flag } from "lucide-react"
+import {
+  ArrowLeft,
+  ArrowRight,
+  BarChart2,
+  ExternalLink,
+  Flag,
+  RefreshCw,
+  Shuffle,
+} from "lucide-react"
 import AddErrorModal from "@/components/AddErrorModal"
 import QuickNote from "@/components/questions/QuickNote"
 import PerformanceModal from "@/components/questions/PerformanceModal"
+import StudyTimer from "@/components/questions/StudyTimer"
+import type { NavMode } from "@/lib/study-navigation"
 
 type Question = {
   id: string
@@ -24,16 +34,20 @@ type Question = {
 
 type Option = { label: string; text: string }
 
+type NavOpts = { nav?: NavMode }
+
 type Props = {
   userId: string
   mode: "notebook" | "study"
   notebookId?: string
   studySessionId?: string
-  fetchQueue: () => Promise<{
+  fetchQueue: (opts?: NavOpts) => Promise<{
     current: { question_id: string; tec_id: number; notebook_id: string } | null
     question: Question | null
     options: Option[]
     stats: { total: number; resolved: number; correct: number; wrong: number; pending: number }
+    position?: number
+    study_elapsed_ms?: number
     child_progress?: { notebook_id: string; total: number; answered: number; notebooks?: { name: string } }[]
   }>
   submitAnswer: (payload: {
@@ -43,7 +57,14 @@ type Props = {
     tec_id: number
     notebook_id?: string
   }) => Promise<{ is_correct: boolean; correct_answer: string; tec_url: string }>
+  persistElapsed: (ms: number) => Promise<void>
   mapping?: { subject_id: string; topic_id: string } | null
+}
+
+function isTypingTarget(el: EventTarget | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) return false
+  const tag = el.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable
 }
 
 export default function QuestionSolver({
@@ -53,11 +74,14 @@ export default function QuestionSolver({
   studySessionId,
   fetchQueue,
   submitAnswer,
+  persistElapsed,
   mapping,
 }: Props) {
   const [question, setQuestion] = useState<Question | null>(null)
   const [options, setOptions] = useState<Option[]>([])
   const [stats, setStats] = useState({ total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 })
+  const [position, setPosition] = useState(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
   const [current, setCurrent] = useState<{
     question_id: string
     tec_id: number
@@ -73,33 +97,69 @@ export default function QuestionSolver({
   const [showPerf, setShowPerf] = useState(false)
   const [showError, setShowError] = useState(false)
   const startRef = useRef<number>(Date.now())
+  const navigateRef = useRef<(nav: NavMode) => void>(() => {})
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setSelected(null)
-    setResult(null)
-    startRef.current = Date.now()
-    const data = await fetchQueue()
-    setCurrent(data.current)
-    setQuestion(data.question)
-    let opts = (data.options ?? []).map((o: { label: string; text: string }) => ({
-      label: o.label,
-      text: o.text,
-    }))
-    if (data.question?.type === "certo_errado" && opts.length === 0) {
-      opts = [
-        { label: "Certo", text: "Certo" },
-        { label: "Errado", text: "Errado" },
-      ]
-    }
-    setOptions(opts)
-    setStats(data.stats)
-    setLoading(false)
-  }, [fetchQueue])
+  const load = useCallback(
+    async (opts?: NavOpts) => {
+      setLoading(true)
+      setSelected(null)
+      setResult(null)
+      startRef.current = Date.now()
+      const data = await fetchQueue(opts)
+      setCurrent(data.current)
+      setQuestion(data.question)
+      let optsList = (data.options ?? []).map((o: { label: string; text: string }) => ({
+        label: o.label,
+        text: o.text,
+      }))
+      if (data.question?.type === "certo_errado" && optsList.length === 0) {
+        optsList = [
+          { label: "Certo", text: "Certo" },
+          { label: "Errado", text: "Errado" },
+        ]
+      }
+      setOptions(optsList)
+      setStats(data.stats)
+      setPosition(data.position ?? (data.stats.resolved > 0 ? data.stats.resolved + 1 : 1))
+      if (data.study_elapsed_ms != null) setElapsedMs(data.study_elapsed_ms)
+      setLoading(false)
+    },
+    [fetchQueue]
+  )
+
+  const navigate = useCallback(
+    (nav: NavMode) => {
+      load({ nav })
+    },
+    [load]
+  )
+
+  navigateRef.current = navigate
 
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (isTypingTarget(e.target)) return
+      if (e.key === "ArrowRight") {
+        e.preventDefault()
+        navigateRef.current("next")
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault()
+        navigateRef.current("prev")
+      } else if (e.key === "l" || e.key === "L") {
+        e.preventDefault()
+        navigateRef.current("random")
+      } else if (e.key === "n" || e.key === "N") {
+        e.preventDefault()
+        navigateRef.current("unsolved")
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   async function handleSelect(answer: string) {
     if (!question || !current || result) return
@@ -122,9 +182,13 @@ export default function QuestionSolver({
     }))
   }
 
-  function next() {
-    load()
-  }
+  const saveElapsed = useCallback(
+    async (ms: number) => {
+      setElapsedMs(ms)
+      await persistElapsed(ms)
+    },
+    [persistElapsed]
+  )
 
   if (loading) {
     return <p className="p-8 text-slate-500">Carregando questão...</p>
@@ -135,7 +199,12 @@ export default function QuestionSolver({
       <div className="rounded-lg border border-green-200 bg-green-50 p-8 text-center">
         <p className="text-lg font-medium text-green-800">Caderno / sessão concluído!</p>
         {mode === "notebook" && notebookId && (
-          <Link href={`/questoes/materia`} className="mt-4 inline-block text-blue-600">
+          <Link href="/questoes/importados" className="mt-4 inline-block text-blue-600">
+            Voltar aos cadernos
+          </Link>
+        )}
+        {mode === "study" && studySessionId && (
+          <Link href="/questoes/semana" className="mt-4 inline-block text-blue-600">
             Voltar
           </Link>
         )}
@@ -143,7 +212,7 @@ export default function QuestionSolver({
     )
   }
 
-  const idx = stats.resolved + 1
+  const displayIdx = position > 0 ? position : stats.resolved + 1
   const meta = [question.banca, question.cargo, question.orgao, question.ano]
     .filter(Boolean)
     .join(" - ")
@@ -151,11 +220,53 @@ export default function QuestionSolver({
   return (
     <div className="flex flex-col gap-4 lg:flex-row">
       <div className="min-w-0 flex-1">
-        <p className="text-sm text-slate-600">
-          Questão {idx} de {stats.total} ({stats.resolved} resolvidas, {stats.correct} acertos e{" "}
-          {stats.wrong} erros)
-        </p>
-        <p className="mt-1 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm text-slate-600">
+            Questão {displayIdx} de {stats.total} ({stats.resolved} resolvidas, {stats.correct}{" "}
+            acertos e {stats.wrong} erros)
+          </p>
+          <StudyTimer initialMs={elapsedMs} onPersist={saveElapsed} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1 rounded-lg border bg-slate-50 p-1">
+          <button
+            type="button"
+            title="Anterior (←)"
+            onClick={() => navigate("prev")}
+            className="rounded p-2 text-slate-600 hover:bg-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Próxima (→)"
+            onClick={() => navigate("next")}
+            className="rounded p-2 text-slate-600 hover:bg-white"
+          >
+            <ArrowRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Aleatória (L)"
+            onClick={() => navigate("random")}
+            className="rounded p-2 text-slate-600 hover:bg-white"
+          >
+            <Shuffle className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Próxima não resolvida (N)"
+            onClick={() => navigate("unsolved")}
+            className="rounded p-2 text-slate-600 hover:bg-white"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <span className="ml-2 text-xs text-slate-400">
+            ← → · L aleatória · N não resolvida
+          </span>
+        </div>
+
+        <p className="mt-3 text-sm">
           <span className="text-slate-500">Matéria:</span> {question.tec_subject}
           {" · "}
           <span className="text-slate-500">Assunto:</span> {question.tec_topic}
@@ -229,13 +340,22 @@ export default function QuestionSolver({
             >
               Ver no TEC <ExternalLink className="h-3 w-3" />
             </a>
-            <button
-              type="button"
-              onClick={next}
-              className="mt-3 block rounded bg-slate-900 px-4 py-2 text-sm text-white"
-            >
-              Próxima questão
-            </button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => navigate("unsolved")}
+                className="rounded bg-slate-900 px-4 py-2 text-sm text-white"
+              >
+                Próxima não resolvida (N)
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("next")}
+                className="rounded border border-slate-300 px-4 py-2 text-sm"
+              >
+                Próxima (→)
+              </button>
+            </div>
           </div>
         )}
       </div>

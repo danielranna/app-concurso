@@ -31,7 +31,8 @@ export default function EstudoCombinadoPage() {
     })
   }, [router])
 
-  const fetchQueue = useCallback(async () => {
+  const fetchQueue = useCallback(
+    async (opts?: { nav?: string }) => {
     if (!userId) {
       return {
         current: null,
@@ -40,9 +41,9 @@ export default function EstudoCombinadoPage() {
         stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
       }
     }
-    const res = await fetch(
-      `/api/study-sessions/${sessionId}/queue?user_id=${userId}`
-    )
+    const params = new URLSearchParams({ user_id: userId })
+    if (opts?.nav) params.set("nav", opts.nav)
+    const res = await fetch(`/api/study-sessions/${sessionId}/queue?${params}`)
     const data = await res.json()
     setSessionName(data.session?.name ?? "")
     setChildProgress(data.child_progress ?? [])
@@ -70,9 +71,25 @@ export default function EstudoCombinadoPage() {
       question: data.question,
       options,
       stats: data.stats,
+      position: data.position,
+      study_elapsed_ms: data.study_elapsed_ms,
       child_progress: data.child_progress,
     }
-  }, [sessionId, userId])
+  },
+    [sessionId, userId]
+  )
+
+  const persistElapsed = useCallback(
+    async (ms: number) => {
+      if (!userId) return
+      await fetch(`/api/study-sessions/${sessionId}/timer`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, study_elapsed_ms: ms }),
+      })
+    },
+    [sessionId, userId]
+  )
 
   const submitAnswer = useCallback(
     async (payload: {
@@ -125,6 +142,7 @@ export default function EstudoCombinadoPage() {
           studySessionId={sessionId}
           fetchQueue={fetchQueue}
           submitAnswer={submitAnswer}
+          persistElapsed={persistElapsed}
           mapping={mapping}
         />
       </div>

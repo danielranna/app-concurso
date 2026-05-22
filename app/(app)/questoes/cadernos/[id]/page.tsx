@@ -31,7 +31,8 @@ export default function ResolverCadernoPage() {
     })
   }, [notebookId, router])
 
-  const fetchQueueSimple = useCallback(async () => {
+  const fetchQueueSimple = useCallback(
+    async (opts?: { nav?: string }) => {
     if (!userId) {
       return {
         current: null,
@@ -40,9 +41,9 @@ export default function ResolverCadernoPage() {
         stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
       }
     }
-    const res = await fetch(
-      `/api/notebooks/${notebookId}/queue?user_id=${userId}`
-    )
+    const params = new URLSearchParams({ user_id: userId })
+    if (opts?.nav) params.set("nav", opts.nav)
+    const res = await fetch(`/api/notebooks/${notebookId}/queue?${params}`)
     const data = await res.json()
     let options: { label: string; text: string }[] = (data.options ?? []).map(
       (o: { label: string; text: string }) => ({ label: o.label, text: o.text })
@@ -71,8 +72,24 @@ export default function ResolverCadernoPage() {
       question,
       options,
       stats: data.stats,
+      position: data.position,
+      study_elapsed_ms: data.study_elapsed_ms,
     }
-  }, [notebookId, userId])
+  },
+    [notebookId, userId]
+  )
+
+  const persistElapsed = useCallback(
+    async (ms: number) => {
+      if (!userId) return
+      await fetch(`/api/notebooks/${notebookId}/timer`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, study_elapsed_ms: ms }),
+      })
+    },
+    [notebookId, userId]
+  )
 
   const submitAnswer = useCallback(
     async (payload: {
@@ -126,6 +143,7 @@ export default function ResolverCadernoPage() {
           notebookId={notebookId}
           fetchQueue={fetchQueueSimple}
           submitAnswer={submitAnswer}
+          persistElapsed={persistElapsed}
           mapping={mapping}
         />
       </div>

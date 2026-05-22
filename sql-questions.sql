@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS notebooks (
   question_count INTEGER NOT NULL DEFAULT 0,
   answered_count INTEGER NOT NULL DEFAULT 0,
   last_accessed_at TIMESTAMPTZ,
+  study_elapsed_ms BIGINT NOT NULL DEFAULT 0,
+  active_question_id UUID REFERENCES questions(id) ON DELETE SET NULL,
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -98,6 +100,8 @@ CREATE TABLE IF NOT EXISTS study_sessions (
   current_index INTEGER NOT NULL DEFAULT 0,
   queue JSONB NOT NULL DEFAULT '[]'::jsonb,
   answered_tec_ids BIGINT[] NOT NULL DEFAULT '{}',
+  study_elapsed_ms BIGINT NOT NULL DEFAULT 0,
+  active_question_id UUID REFERENCES questions(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
