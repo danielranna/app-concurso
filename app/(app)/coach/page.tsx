@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import ReportSourceBadge from "@/components/coach/ReportSourceBadge"
 import {
   BookOpen,
   FileText,
@@ -22,6 +23,7 @@ type HubData = {
     notebook_id: string
     summary_md: string | null
     created_at: string
+    model_used: string | null
     structured: { headline?: string }
   }[]
 }
@@ -156,18 +158,24 @@ export default function CoachHubPage() {
         ) : (
           <ul className="space-y-2">
             {hub.recent_reports.map((r) => (
-              <li
-                key={r.id}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-3"
-              >
-                <p className="font-medium text-slate-900">
-                  {r.structured?.headline ??
-                    r.summary_md?.slice(0, 80) ??
-                    "Relatório de caderno"}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {new Date(r.created_at).toLocaleString("pt-BR")}
-                </p>
+              <li key={r.id}>
+                <Link
+                  href={`/coach/relatorios/${r.id}`}
+                  className="block rounded-lg border border-slate-200 bg-white px-4 py-3 transition hover:border-violet-300 hover:bg-violet-50/30"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium text-slate-900">
+                      {r.structured?.headline ??
+                        r.summary_md?.slice(0, 80) ??
+                        "Relatório de caderno"}
+                    </p>
+                    <ReportSourceBadge modelUsed={r.model_used} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {new Date(r.created_at).toLocaleString("pt-BR")} · Ver
+                    relatório completo →
+                  </p>
+                </Link>
               </li>
             ))}
           </ul>

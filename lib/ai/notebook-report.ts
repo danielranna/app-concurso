@@ -355,6 +355,7 @@ export async function enqueueNotebookReport(notebookId: string, userId: string) 
         ...action.params,
         subject_id: nb.subject_id,
         suggested_name: action.params.suggested_name ?? action.label,
+        report_model_used: report.modelUsed,
       },
       source_agent: "notebook_report",
       status: "pending",

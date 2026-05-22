@@ -3,8 +3,30 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import ReportSourceBadge from "@/components/coach/ReportSourceBadge"
 import { Check, Loader2, X } from "lucide-react"
 import type { AiActionDraft } from "@/lib/coach-types"
+
+function draftReportModel(payload: Record<string, unknown> | null) {
+  const v = payload?.report_model_used
+  return typeof v === "string" ? v : null
+}
+
+function formatDraftPayload(d: AiActionDraft) {
+  if (d.type !== "notebook_create" || !d.payload) return null
+  const p = d.payload as Record<string, unknown>
+  const topics = Array.isArray(p.tec_topics)
+    ? (p.tec_topics as string[]).join(", ")
+    : ""
+  const name = String(p.suggested_name ?? d.label)
+  const minWrong = p.min_wrong_attempts
+  return {
+    name,
+    topics,
+    minWrong:
+      typeof minWrong === "number" ? minWrong : undefined,
+  }
+}
 
 export default function CoachInboxPage() {
   const router = useRouter()
@@ -53,8 +75,9 @@ export default function CoachInboxPage() {
   return (
     <div>
       <p className="mb-4 text-sm text-slate-600">
-        A IA só altera flashcards, erros ou cadernos depois que você aprovar cada
-        item.
+        Sugestões vindas do relatório do caderno. Aprovar só cria o caderno de
+        reforço — não gasta API de novo. O selo indica se o relatório foi por{" "}
+        <strong>regras</strong> ou <strong>IA</strong>.
       </p>
 
       {!drafts.length ? (
@@ -63,24 +86,54 @@ export default function CoachInboxPage() {
         </p>
       ) : (
         <ul className="space-y-3">
-          {drafts.map((d) => (
+          {drafts.map((d) => {
+            const formatted = formatDraftPayload(d)
+            const reportModel = draftReportModel(
+              d.payload as Record<string, unknown> | null
+            )
+            return (
             <li
               key={d.id}
               className="rounded-xl border border-slate-200 bg-white p-4"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    {d.type}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      {d.type === "notebook_create"
+                        ? "Caderno de reforço"
+                        : d.type}
+                    </span>
+                    {d.source_agent === "notebook_report" && (
+                      <ReportSourceBadge modelUsed={reportModel} />
+                    )}
+                  </div>
                   <p className="mt-2 font-medium text-slate-900">{d.label}</p>
                   <p className="mt-1 text-xs text-slate-500">
-                    {d.source_agent ?? "manual"} ·{" "}
+                    Relatório de caderno ·{" "}
                     {new Date(d.created_at).toLocaleString("pt-BR")}
                   </p>
-                  <pre className="mt-2 max-h-32 overflow-auto rounded bg-slate-50 p-2 text-xs text-slate-700">
-                    {JSON.stringify(d.payload, null, 2)}
-                  </pre>
+                  {formatted ? (
+                    <ul className="mt-2 list-inside list-disc text-sm text-slate-700">
+                      <li>Nome: {formatted.name}</li>
+                      {formatted.topics && (
+                        <li>Tópico: {formatted.topics}</li>
+                      )}
+                      {formatted.minWrong != null && (
+                        <li>Mín. de erros no caderno: {formatted.minWrong}</li>
+                      )}
+                    </ul>
+                  ) : (
+                    <pre className="mt-2 max-h-32 overflow-auto rounded bg-slate-50 p-2 text-xs text-slate-700">
+                      {JSON.stringify(d.payload, null, 2)}
+                    </pre>
+                  )}
+                  {d.source_agent === "notebook_report" && !reportModel && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Ação criada antes da etiqueta de origem — confira o
+                      relatório em Visão geral (selo Regras ou IA).
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -108,7 +161,7 @@ export default function CoachInboxPage() {
                 </div>
               </div>
             </li>
-          ))}
+          )})}
         </ul>
       )}
     </div>

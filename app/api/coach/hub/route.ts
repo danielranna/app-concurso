@@ -34,7 +34,7 @@ export async function GET(req: Request) {
       .maybeSingle(),
     supabaseServer
       .from("subject_notebook_reports")
-      .select("id, notebook_id, summary_md, created_at, structured")
+      .select("id, notebook_id, summary_md, created_at, structured, model_used")
       .eq("user_id", user_id)
       .order("created_at", { ascending: false })
       .limit(5),

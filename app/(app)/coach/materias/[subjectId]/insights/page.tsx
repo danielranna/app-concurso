@@ -204,10 +204,13 @@ export default function CoachInsightsPage() {
                   key={r.id}
                   className="rounded-xl border border-slate-200 bg-white p-4"
                 >
-                  <p className="font-medium text-slate-900">
+                  <Link
+                    href={`/coach/relatorios/${r.id}`}
+                    className="font-medium text-violet-800 hover:underline"
+                  >
                     {nbName ?? "Caderno"} —{" "}
-                    {r.structured?.headline ?? "Relatório"}
-                  </p>
+                    {r.structured?.headline ?? "Relatório"} →
+                  </Link>
                   {r.summary_md && (
                     <p className="mt-2 line-clamp-4 text-sm text-slate-600 whitespace-pre-wrap">
                       {r.summary_md.slice(0, 400)}
