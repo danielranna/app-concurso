@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "/api/questions/import/pdf": ["./node_modules/pdf-parse/**/*"],
     "/api/questions/import/preview": ["./node_modules/pdf-parse/**/*"],
     "/api/questions/import/batch": ["./node_modules/pdf-parse/**/*"],
+    "/api/coach/documents/upload": ["./node_modules/pdf-parse/**/*"],
   },
   async redirects() {
     return [

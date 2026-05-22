@@ -2,6 +2,7 @@ import { supabaseServer } from "../supabase-server"
 import type { NotebookReportStructured } from "../coach-types"
 import { aiComplete } from "./client"
 import { getUserAiCredentials } from "./user-credentials"
+import { generateRemediationDrafts } from "./remediation-drafts"
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
@@ -343,6 +344,16 @@ export async function enqueueNotebookReport(notebookId: string, userId: string) 
     status: "ok",
     metadata: { notebook_id: notebookId, report_id: row?.id },
   })
+
+  if (nb.subject_id) {
+    await generateRemediationDrafts({
+      userId,
+      subjectId: nb.subject_id,
+      notebookId,
+      structured: report.structured,
+      snapshot: report.snapshot,
+    })
+  }
 
   for (const action of report.structured.executable_actions ?? []) {
     if (action.type !== "create_remediation_notebook") continue

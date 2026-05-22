@@ -146,6 +146,14 @@ export default function CoachHubPage() {
         </Link>
       </div>
 
+      <p className="text-sm text-slate-600">
+        Ao concluir um caderno, a IA também sugere flashcards e erros em{" "}
+        <Link href="/coach/inbox" className="font-medium text-violet-700 hover:underline">
+          Ações pendentes
+        </Link>
+        .
+      </p>
+
       <section>
         <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-slate-900">
           <FileText className="h-5 w-5" />
