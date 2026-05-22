@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Play } from "lucide-react"
+import { ArrowLeft, Play, Trash2 } from "lucide-react"
 
 type Notebook = {
   id: string
@@ -40,6 +40,12 @@ export default function ImportadosPage() {
         .then(setSubjects)
     })
   }, [router])
+
+  async function deleteNotebook(id: string) {
+    if (!userId || !confirm("Excluir este caderno? As questões permanecem no banco global.")) return
+    await fetch(`/api/notebooks/${id}`, { method: "DELETE" })
+    reload(userId)
+  }
 
   async function assignSubject(notebookId: string, subjectId: string) {
     if (!subjectId) return
@@ -101,6 +107,14 @@ export default function ImportadosPage() {
               >
                 <Play className="h-4 w-4" /> Resolver
               </Link>
+              <button
+                type="button"
+                onClick={() => deleteNotebook(nb.id)}
+                className="inline-flex items-center gap-1 rounded border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+                title="Excluir caderno"
+              >
+                <Trash2 className="h-4 w-4" /> Excluir
+              </button>
             </div>
           </div>
         ))}

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Trash2 } from "lucide-react"
 import QuestionSolver from "@/components/questions/QuestionSolver"
 
 export default function ResolverCadernoPage() {
@@ -93,6 +93,12 @@ export default function ResolverCadernoPage() {
     [notebookId, userId]
   )
 
+  async function deleteNotebook() {
+    if (!confirm("Excluir este caderno? As questões permanecem no banco global.")) return
+    const res = await fetch(`/api/notebooks/${notebookId}`, { method: "DELETE" })
+    if (res.ok) router.push("/questoes/importados")
+  }
+
   if (!userId) return <p className="p-6">Carregando...</p>
 
   return (
@@ -103,7 +109,16 @@ export default function ResolverCadernoPage() {
       >
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
-      <h1 className="text-xl font-bold">{notebookName}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-bold">{notebookName}</h1>
+        <button
+          type="button"
+          onClick={deleteNotebook}
+          className="inline-flex items-center gap-1 rounded border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+        >
+          <Trash2 className="h-4 w-4" /> Excluir caderno
+        </button>
+      </div>
       <div className="mt-6">
         <QuestionSolver
           userId={userId}

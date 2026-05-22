@@ -49,15 +49,24 @@ export async function fetchFilterFacets(): Promise<{
   const uniq = (arr: (string | number | null)[]) =>
     [...new Set(arr.filter(Boolean) as string[])].sort()
 
+  const cleanFacet = (value: string | null) => {
+    if (!value?.trim()) return false
+    if (/^(?:\d+\)\s*)+\d/.test(value)) return false
+    if (value.length > 220) return false
+    if (/\bConsiderando\b/i.test(value) && value.length > 100) return false
+    if (/\s[a-e]\)\s/i.test(value)) return false
+    return true
+  }
+
   return {
-    bancas: uniq(rows.map((r) => r.banca)),
+    bancas: uniq(rows.map((r) => r.banca).filter(cleanFacet)),
     orgaos: uniq(rows.map((r) => r.orgao)),
     cargos: uniq(rows.map((r) => r.cargo)),
     anos: [...new Set(rows.map((r) => r.ano).filter((a): a is number => a != null))].sort(
       (a, b) => b - a
     ),
-    tec_subjects: uniq(rows.map((r) => r.tec_subject)),
-    tec_topics: uniq(rows.map((r) => r.tec_topic)),
+    tec_subjects: uniq(rows.map((r) => r.tec_subject).filter(cleanFacet)),
+    tec_topics: uniq(rows.map((r) => r.tec_topic).filter(cleanFacet)),
   }
 }
 

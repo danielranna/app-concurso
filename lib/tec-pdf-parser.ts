@@ -9,17 +9,59 @@ const GABARITO_LINE_RE =
 
 const OPTION_LINE_RE = /^\s*([a-e])\)\s+(.+)$/gim
 
+const SHARE_URL_RE =
+  /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/s\/[A-Za-z0-9]+/i
+
+function normalizeShareUrl(raw: string): string {
+  let u = raw.trim()
+  if (!/^https?:\/\//i.test(u)) u = `https://${u.replace(/^\/\//, "")}`
+  if (!/:\/\/www\./i.test(u)) {
+    u = u.replace(/(:\/\/)(tecconcursos\.)/i, "$1www.$2")
+  }
+  return u
+}
+
+/** Nome do caderno e metadados do cabeçalho TEC (antes das questões). */
+export function extractNotebookHeader(normalized: string): {
+  name: string
+  share_url: string | null
+  ordering: string | null
+} {
+  const shareMatch = normalized.match(SHARE_URL_RE)
+  const share_url = shareMatch ? normalizeShareUrl(shareMatch[0]) : null
+
+  let name = "Caderno importado"
+  if (shareMatch && shareMatch.index != null) {
+    const before = normalized.slice(0, shareMatch.index).trim()
+    const oldTitle = before.match(/Caderno de Estudo\s+(\S+)\s*$/i)
+    if (oldTitle?.[1]) {
+      name = oldTitle[1].trim()
+    } else {
+      const title = before
+        .replace(/tecconcursos/gi, " ")
+        .replace(/\bCaderno de Estudo\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+      if (title.length >= 3) name = title
+    }
+  } else {
+    const legacy = normalized.match(/Caderno de Estudo\s+(\S+)/i)
+    if (legacy?.[1]) name = legacy[1].trim()
+  }
+
+  const orderingMatch = normalized.match(
+    /Ordenação:\s*([^]+?)(?=www\.tecconcursos|\bGabarito\b|$)/i
+  )
+  const ordering = orderingMatch?.[1]?.trim().slice(0, 120) ?? null
+
+  return { name, share_url, ordering }
+}
+
 export function parseTecPdfText(rawText: string): ParsedTecNotebook {
   const warnings: string[] = []
   const normalized = rawText.replace(/\r\n/g, "\n").replace(/\s+/g, " ")
 
-  const headerMatch = normalized.match(
-    /Caderno de Estudo\s+(\S+)?\s*(https:\/\/www\.tecconcursos\.com\.br\/s\/\S+)?/i
-  )
-  const name = headerMatch?.[1]?.trim() || "Caderno importado"
-  const share_url = headerMatch?.[2] ?? null
-  const orderingMatch = normalized.match(/Ordenação:\s*([^]+?)(?=www\.tecconcursos|$)/i)
-  const ordering = orderingMatch?.[1]?.trim().slice(0, 120) ?? null
+  const { name, share_url, ordering } = extractNotebookHeader(normalized)
 
   const gabaritoStart = normalized.search(/\bGabarito\b/i)
   const body =
@@ -87,6 +129,58 @@ function splitQuestionBlocks(body: string): string[] {
   return blocks
 }
 
+/** Início do enunciado após matéria/assunto (linha extra do TEC ou texto da questão). */
+const STATEMENT_START_RE =
+  /\s(?:(?:Texto\s+[A-Z0-9][\w.-]*)\s*|(?:\d+\)\s+)?(?:P:\s*[\u201c\u201d"]?|Proposição\s)|(?:Considerando|No que se refere|A respeito de|Acerca de|Julgue o|Assinale a opção|Em relação|Com relação|Com base|Tendo em vista|À luz de|Diante do|Segundo o|De acordo com)\b)/i
+
+const MCQ_STMT_FALLBACK_RE =
+  /\s(A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s|As\s|Os\s)/i
+
+function cleanMetaLine(line: string): string {
+  return line
+    .replace(/^(?:\d+\)\s*)+/g, "")
+    .replace(/\bGabarito\b[\s\S]*$/i, "")
+    .trim()
+}
+
+function splitTopicFromStatement(tail: string): { topic: string; statementPart: string } {
+  let idx = tail.search(STATEMENT_START_RE)
+  if (idx < 0) idx = tail.search(MCQ_STMT_FALLBACK_RE)
+  if (idx < 0) {
+    const optIdx = tail.search(/\s[a-e]\)\s/i)
+    if (optIdx > 0) {
+      const beforeOpts = tail.slice(0, optIdx)
+      const idx2 = beforeOpts.search(MCQ_STMT_FALLBACK_RE)
+      if (idx2 > 0) {
+        return {
+          topic: beforeOpts.slice(0, idx2).trim(),
+          statementPart: tail.slice(idx2).trim(),
+        }
+      }
+    }
+    return { topic: tail, statementPart: "" }
+  }
+  return {
+    topic: tail.slice(0, idx).trim(),
+    statementPart: tail.slice(idx).trim(),
+  }
+}
+
+/** Matéria - Assunto (sem /) e separação do enunciado. */
+export function splitTaxonomyAndStatement(afterMeta: string): {
+  taxonomyLine: string
+  rest: string
+} {
+  const trimmed = afterMeta.trim()
+  const dash = trimmed.search(/\s+-\s+/)
+  if (dash < 0) return { taxonomyLine: trimmed, rest: "" }
+  const subject = trimmed.slice(0, dash).trim()
+  const tail = trimmed.slice(dash + 3).trim()
+  const { topic, statementPart } = splitTopicFromStatement(tail)
+  const taxonomyLine = topic ? `${subject} - ${topic}` : subject
+  return { taxonomyLine, rest: statementPart }
+}
+
 function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
   const urlMatch = block.match(
     /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/i
@@ -97,44 +191,15 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
 
   const afterUrl = block.slice(block.indexOf(urlMatch[0]) + urlMatch[0].length).trim()
 
-  const yearMatch = afterUrl.match(/\/(\d{4})\b/)
-  let metaLine = ""
-  let taxonomyLine = ""
-  let rest = afterUrl
+  const metaMatch = afterUrl.match(/^(.+?\/\d{4})\s*([\s\S]*)$/)
+  if (!metaMatch) throw new Error("metadados (banca/cargo/ano) não encontrados")
 
-  if (yearMatch && yearMatch.index != null) {
-    const metaEnd = yearMatch.index + yearMatch[0].length
-    metaLine = afterUrl.slice(0, metaEnd).trim()
-    const afterMeta = afterUrl.slice(metaEnd).trim()
-    const certoIdx = afterMeta.search(/\bCerto\b/)
-    const firstOptIdx = afterMeta.search(/\s[a-e]\)\s/i)
-    const splitIdx =
-      certoIdx >= 0 && (firstOptIdx < 0 || certoIdx < firstOptIdx)
-        ? certoIdx
-        : firstOptIdx
-
-    if (splitIdx > 0) {
-      const taxPart = afterMeta.slice(0, splitIdx).trim()
-      const taxDash = taxPart.indexOf(" - ")
-      if (taxDash > 0) {
-        taxonomyLine = taxPart
-        rest = afterMeta.slice(splitIdx).trim()
-      } else {
-        taxonomyLine = taxPart
-        rest = afterMeta.slice(splitIdx).trim()
-      }
-    } else {
-      rest = afterMeta
-    }
-  } else {
-    const parts = afterUrl.split(/\s{2,}/)
-    metaLine = parts[0] ?? ""
-    taxonomyLine = parts[1] ?? ""
-    rest = parts.slice(2).join(" ") || afterUrl.slice(metaLine.length + taxonomyLine.length)
-  }
+  const metaLine = cleanMetaLine(metaMatch[1])
+  const { taxonomyLine, rest: afterTaxonomy } = splitTaxonomyAndStatement(metaMatch[2])
 
   const { banca, cargo, orgao, ano } = parseMetaLine(metaLine)
   const { tec_subject, tec_topic } = parseTaxonomyLine(taxonomyLine)
+  let rest = afterTaxonomy
 
   const isCertoErrado = /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
   const type: QuestionType = isCertoErrado ? "certo_errado" : "multiple_choice"
@@ -188,26 +253,22 @@ function parseMetaLine(line: string): {
   orgao: string
   ano: number | null
 } {
-  const yearMatch = line.match(/\/(\d{4})\s*$/)
+  const cleaned = cleanMetaLine(line)
+  const yearMatch = cleaned.match(/\/(\d{4})\s*$/)
   const ano = yearMatch ? parseInt(yearMatch[1], 10) : null
-  const withoutYear = yearMatch ? line.slice(0, -yearMatch[0].length) : line
-  const dashParts = withoutYear.split(/\s*-\s*/)
-  const banca = dashParts[0]?.trim() ?? ""
-  const rest = dashParts.slice(1).join(" - ").trim()
-  const paren = rest.match(/^(.+?)\s*\(([^)]+)\)\s*\/\s*(.+)$/)
-  if (paren) {
-    return {
-      banca,
-      cargo: paren[1].trim(),
-      orgao: paren[2].trim(),
-      ano,
-    }
-  }
-  const slash = rest.split("/").map((s) => s.trim())
+  const withoutYear = yearMatch
+    ? cleaned.slice(0, cleaned.lastIndexOf(`/${yearMatch[1]}`))
+    : cleaned
+
+  const dashIdx = withoutYear.search(/\s+-\s+/)
+  const banca = (dashIdx >= 0 ? withoutYear.slice(0, dashIdx) : withoutYear).trim()
+  const cargoPath = dashIdx >= 0 ? withoutYear.slice(dashIdx + 3).trim() : ""
+  const segments = cargoPath.split("/").map((s) => s.trim()).filter(Boolean)
+
   return {
     banca,
-    cargo: slash[0] ?? rest,
-    orgao: slash[1] ?? "",
+    cargo: segments[0] ?? "",
+    orgao: segments[1] ?? "",
     ano,
   }
 }

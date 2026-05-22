@@ -15,7 +15,6 @@ function ImportarContent() {
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subjectId, setSubjectId] = useState(presetSubject ?? "")
-  const [name, setName] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(false)
@@ -52,7 +51,6 @@ function ImportarContent() {
       return
     }
     setPreview(data)
-    if (data.name && !name) setName(data.name as string)
     setLoading(false)
   }
 
@@ -65,7 +63,6 @@ function ImportarContent() {
     fd.append("file", file)
     fd.append("user_id", userId)
     if (subjectId) fd.append("subject_id", subjectId)
-    if (name) fd.append("name", name)
     const res = await fetch("/api/questions/import/pdf", { method: "POST", body: fd })
     const data = await res.json()
     if (!res.ok) {
@@ -89,8 +86,8 @@ function ImportarContent() {
       </Link>
       <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
       <p className="mt-2 text-sm text-slate-600">
-        O PDF já traz matéria e assunto do TEC. Basta importar; depois você vincula às suas
-        matérias em{" "}
+        O PDF traz o nome do caderno, matéria e assunto do TEC. Basta importar; depois você
+        vincula às suas matérias em{" "}
         <Link href="/questoes/mapeamento" className="text-blue-600 underline">
           Associar matérias e assuntos
         </Link>
@@ -109,15 +106,6 @@ function ImportarContent() {
               setError(null)
             }}
             className="mt-1 block w-full text-sm"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Nome do caderno</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-sm"
-            placeholder="Opcional — usa nome do PDF"
           />
         </div>
         {presetSubject && subjects.length > 0 && (
@@ -164,6 +152,11 @@ function ImportarContent() {
         )}
         {preview && !error && (
           <div className="rounded-lg border bg-slate-50 p-4 text-sm">
+            {typeof preview.name === "string" && preview.name && (
+              <p className="font-medium text-slate-900">
+                Caderno: {preview.name as string}
+              </p>
+            )}
             <p>Questões detectadas: {String(preview.question_count ?? 0)}</p>
             {(preview.warnings as string[])?.map((w, i) => (
               <p key={i} className="text-amber-700">
@@ -184,7 +177,12 @@ function ImportarContent() {
         )}
         {typeof result?.notebook_id === "string" && (
           <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
-            <p>Caderno criado!</p>
+            <p>
+              Caderno criado
+              {typeof result.parsed_name === "string"
+                ? `: ${result.parsed_name as string}`
+                : "!"}
+            </p>
             <p>Novas questões: {String(result.created_questions ?? 0)}</p>
             <p>Reutilizadas: {String(result.reused_questions ?? 0)}</p>
             <div className="mt-2 flex flex-wrap gap-3">
