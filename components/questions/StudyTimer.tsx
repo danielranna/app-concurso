@@ -11,24 +11,39 @@ function formatElapsed(ms: number): string {
 }
 
 type Props = {
+  /** Tempo acumulado já salvo (carregar uma vez no mount do pai). */
   initialMs: number
   onPersist: (ms: number) => void
   persistIntervalMs?: number
 }
 
+/**
+ * Cronômetro do caderno/sessão — não reinicia ao trocar de questão.
+ * Só reancora se initialMs crescer (valor vindo do servidor maior que o local).
+ */
 export default function StudyTimer({
   initialMs,
   onPersist,
   persistIntervalMs = 15000,
 }: Props) {
   const [elapsed, setElapsed] = useState(initialMs)
+  const baseMs = useRef(initialMs)
   const startedAt = useRef(Date.now() - initialMs)
-  const lastPersist = useRef(initialMs)
+  const hydrated = useRef(false)
 
   useEffect(() => {
-    startedAt.current = Date.now() - initialMs
-    setElapsed(initialMs)
-    lastPersist.current = initialMs
+    if (!hydrated.current) {
+      hydrated.current = true
+      baseMs.current = initialMs
+      startedAt.current = Date.now() - initialMs
+      setElapsed(initialMs)
+      return
+    }
+    if (initialMs > baseMs.current) {
+      baseMs.current = initialMs
+      startedAt.current = Date.now() - initialMs
+      setElapsed(initialMs)
+    }
   }, [initialMs])
 
   useEffect(() => {
@@ -41,10 +56,7 @@ export default function StudyTimer({
   useEffect(() => {
     const save = window.setInterval(() => {
       const now = Date.now() - startedAt.current
-      if (now - lastPersist.current >= 5000) {
-        lastPersist.current = now
-        onPersist(now)
-      }
+      onPersist(now)
     }, persistIntervalMs)
     return () => clearInterval(save)
   }, [onPersist, persistIntervalMs])
@@ -58,6 +70,22 @@ export default function StudyTimer({
   return (
     <span className="font-mono text-sm tabular-nums text-slate-500" title="Tempo no caderno">
       · {formatElapsed(elapsed)}
+    </span>
+  )
+}
+
+function formatQuestionMs(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m > 0) return `${m}:${String(rem).padStart(2, "0")}`
+  return `${s}s`
+}
+
+export function QuestionTimerDisplay({ ms }: { ms: number }) {
+  return (
+    <span className="text-xs text-slate-400" title="Tempo nesta questão">
+      questão: {formatQuestionMs(ms)}
     </span>
   )
 }

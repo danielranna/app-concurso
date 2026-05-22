@@ -127,6 +127,17 @@ CREATE TABLE IF NOT EXISTS question_attempts (
   selected_answer TEXT NOT NULL,
   is_correct BOOLEAN NOT NULL,
   duration_ms INTEGER,
+  confidence_level TEXT NOT NULL DEFAULT 'seguro'
+    CHECK (confidence_level IN ('seguro', 'inseguro', 'chute')),
+  outcome_category TEXT NOT NULL DEFAULT 'conhecimento_solido'
+    CHECK (outcome_category IN (
+      'conhecimento_solido',
+      'conhecimento_fragil',
+      'lacuna_critica',
+      'lacuna_consciente',
+      'falso_positivo',
+      'conteudo_desconhecido'
+    )),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

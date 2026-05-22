@@ -1,18 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Play, Upload } from "lucide-react"
+import { ArrowLeft, Play, Trash2, Upload } from "lucide-react"
 
 type Notebook = {
   id: string
   name: string
-  subject_id: string
+  subject_id: string | null
   question_count: number
   answered_count: number
 }
+
+type Subject = { id: string; name: string }
 
 type StudySession = {
   id: string
@@ -23,25 +25,33 @@ type StudySession = {
   answered_tec_ids: number[]
   study_elapsed_ms?: number
   updated_at: string
-  created_at: string
 }
 
 export default function SemanaPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
+  const [subjects, setSubjects] = useState<Subject[]>([])
   const [sessions, setSessions] = useState<StudySession[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sessionName, setSessionName] = useState("Estudo da semana")
   const [shuffle, setShuffle] = useState(true)
+  const [search, setSearch] = useState("")
+  const [showCompleted, setShowCompleted] = useState(false)
   const [files, setFiles] = useState<FileList | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
 
   function reload(uid: string) {
-    fetch(`/api/notebooks?user_id=${uid}`).then((r) => r.json()).then(setNotebooks)
+    const nbUrl = showCompleted
+      ? `/api/notebooks?user_id=${uid}`
+      : `/api/notebooks?user_id=${uid}&incomplete=1`
+    fetch(nbUrl).then((r) => r.json()).then(setNotebooks)
     fetch(`/api/study-sessions?user_id=${uid}`)
       .then((r) => r.json())
       .then((data) => setSessions(Array.isArray(data) ? data : []))
+    fetch(`/api/subjects?user_id=${uid}`)
+      .then((r) => r.json())
+      .then((data) => setSubjects(Array.isArray(data) ? data : []))
   }
 
   useEffect(() => {
@@ -53,7 +63,7 @@ export default function SemanaPage() {
       setUserId(user.id)
       reload(user.id)
     })
-  }, [router])
+  }, [router, showCompleted])
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -96,6 +106,48 @@ export default function SemanaPage() {
     }
   }
 
+  async function deleteSession(id: string, name: string) {
+    if (!userId || !confirm(`Excluir o estudo "${name}"?`)) return
+    await fetch(`/api/study-sessions/${id}?user_id=${userId}`, { method: "DELETE" })
+    reload(userId)
+  }
+
+  const subjectName = useMemo(() => {
+    const m = new Map(subjects.map((s) => [s.id, s.name]))
+    return (id: string | null) => (id ? m.get(id) ?? "Matéria" : "Sem matéria")
+  }, [subjects])
+
+  const filteredNotebooks = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return notebooks
+    return notebooks.filter((nb) => nb.name.toLowerCase().includes(q))
+  }, [notebooks, search])
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, Notebook[]>()
+    for (const nb of filteredNotebooks) {
+      const key = nb.subject_id ?? "__none__"
+      const list = map.get(key) ?? []
+      list.push(nb)
+      map.set(key, list)
+    }
+    return [...map.entries()].sort((a, b) =>
+      subjectName(a[0] === "__none__" ? null : a[0]).localeCompare(
+        subjectName(b[0] === "__none__" ? null : b[0]),
+        "pt-BR"
+      )
+    )
+  }, [filteredNotebooks, subjectName])
+
+  const pendingQuestions = useMemo(() => {
+    let total = 0
+    for (const id of selected) {
+      const nb = notebooks.find((n) => n.id === id)
+      if (nb) total += Math.max(0, nb.question_count - nb.answered_count)
+    }
+    return total
+  }, [selected, notebooks])
+
   const openSessions = sessions.filter((s) => s.status === "in_progress")
 
   function formatElapsed(ms?: number) {
@@ -117,24 +169,31 @@ export default function SemanaPage() {
       {openSessions.length > 0 && (
         <section className="mt-8 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
           <h2 className="font-semibold text-blue-900">Estudos combinados em andamento</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Salvos na sua conta — pode sair e voltar quando quiser.
-          </p>
           <ul className="mt-4 space-y-2">
             {openSessions.map((s) => {
               const total = Array.isArray(s.queue) ? s.queue.length : 0
               const done = (s.answered_tec_ids ?? []).length
               return (
-                <li key={s.id}>
+                <li
+                  key={s.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-4 py-3"
+                >
                   <Link
                     href={`/questoes/estudo/${s.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-4 py-3 text-sm hover:border-blue-300"
+                    className="min-w-0 flex-1 text-sm font-medium text-blue-800 hover:underline"
                   >
-                    <span className="font-medium">{s.name}</span>
-                    <span className="text-slate-500">
-                      {done}/{total} questões · {formatElapsed(s.study_elapsed_ms)}
+                    {s.name}
+                    <span className="ml-2 font-normal text-slate-500">
+                      {done}/{total} · {formatElapsed(s.study_elapsed_ms)}
                     </span>
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => deleteSession(s.id, s.name)}
+                    className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Excluir
+                  </button>
                 </li>
               )
             })}
@@ -145,19 +204,14 @@ export default function SemanaPage() {
       <section className="mt-8 rounded-xl border bg-white p-4">
         <h2 className="font-semibold">Importar vários PDFs</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Sem escolher matéria — os cadernos vão para{" "}
+          Cadernos vão para{" "}
           <Link href="/questoes/importados" className="text-blue-600 underline">
             Importados
           </Link>
           .
         </p>
         <div className="mt-3 flex flex-wrap gap-3">
-          <input
-            type="file"
-            accept=".pdf"
-            multiple
-            onChange={(e) => setFiles(e.target.files)}
-          />
+          <input type="file" accept=".pdf" multiple onChange={(e) => setFiles(e.target.files)} />
           <button
             type="button"
             onClick={batchImport}
@@ -175,33 +229,75 @@ export default function SemanaPage() {
         <input
           value={sessionName}
           onChange={(e) => setSessionName(e.target.value)}
+          placeholder="Nome do estudo"
           className="mt-3 w-full max-w-md rounded border px-3 py-2 text-sm"
         />
         <label className="mt-2 flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={shuffle}
-            onChange={(e) => setShuffle(e.target.checked)}
-          />
+          <input type="checkbox" checked={shuffle} onChange={(e) => setShuffle(e.target.checked)} />
           Ordem aleatória
         </label>
-        <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto">
-          {notebooks.map((nb) => (
-            <li key={nb.id}>
-              <label className="flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selected.has(nb.id)}
-                  onChange={() => toggle(nb.id)}
-                />
-                <span className="font-medium">{nb.name}</span>
-                <span className="text-slate-500">
-                  ({nb.answered_count}/{nb.question_count})
-                </span>
-              </label>
-            </li>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar caderno..."
+            className="min-w-[12rem] flex-1 rounded border px-3 py-2 text-sm"
+          />
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={(e) => setShowCompleted(e.target.checked)}
+            />
+            Incluir cadernos concluídos
+          </label>
+        </div>
+
+        <p className="mt-3 text-sm text-slate-600">
+          {selected.size} caderno(s) · ~{pendingQuestions} questões pendentes no total
+        </p>
+
+        <div className="mt-4 max-h-80 space-y-4 overflow-y-auto">
+          {grouped.length === 0 && (
+            <p className="text-sm text-slate-500">
+              {showCompleted
+                ? "Nenhum caderno encontrado."
+                : "Nenhum caderno com questões pendentes. Marque “Incluir concluídos” ou importe PDFs."}
+            </p>
+          )}
+          {grouped.map(([subjectKey, list]) => (
+            <div key={subjectKey}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {subjectName(subjectKey === "__none__" ? null : subjectKey)}
+              </p>
+              <ul className="space-y-1">
+                {list.map((nb) => {
+                  const pending = Math.max(0, nb.question_count - nb.answered_count)
+                  return (
+                    <li key={nb.id}>
+                      <label className="flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(nb.id)}
+                          onChange={() => toggle(nb.id)}
+                        />
+                        <span className="min-w-0 flex-1 font-medium">{nb.name}</span>
+                        <span className="shrink-0 text-slate-500">
+                          {nb.answered_count}/{nb.question_count}
+                          {pending > 0 && (
+                            <span className="ml-1 text-amber-700">({pending} pendentes)</span>
+                          )}
+                        </span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
+
         <button
           type="button"
           onClick={startCombined}

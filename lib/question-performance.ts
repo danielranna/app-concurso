@@ -20,7 +20,9 @@ export async function fetchQuestionPerformance(questionId: string, userId: strin
 
   const { data: myAttempts } = await supabaseServer
     .from("question_attempts")
-    .select("selected_answer, is_correct, duration_ms, created_at")
+    .select(
+      "selected_answer, is_correct, duration_ms, created_at, confidence_level, outcome_category"
+    )
     .eq("question_id", questionId)
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
@@ -55,6 +57,27 @@ export async function fetchQuestionPerformance(questionId: string, userId: strin
   const myTotal = my.length
   const myCorrect = my.filter((a) => a.is_correct).length
 
+  const OUTCOME_LABELS: Record<string, string> = {
+    conhecimento_solido: "Conhecimento sólido",
+    conhecimento_fragil: "Conhecimento frágil",
+    lacuna_critica: "Lacuna crítica",
+    lacuna_consciente: "Lacuna consciente",
+    falso_positivo: "Falso positivo",
+    conteudo_desconhecido: "Conteúdo desconhecido",
+  }
+
+  const outcomeCounts: Record<string, number> = {}
+  for (const a of my) {
+    const key = (a as { outcome_category?: string }).outcome_category ?? "outro"
+    outcomeCounts[key] = (outcomeCounts[key] ?? 0) + 1
+  }
+  const outcome_breakdown = Object.entries(outcomeCounts).map(([key, count]) => ({
+    key,
+    label: OUTCOME_LABELS[key] ?? key,
+    count,
+    pct: myTotal > 0 ? (count / myTotal) * 100 : 0,
+  }))
+
   let difficulty = "Médio"
   if (globalCorrectPct >= 70) difficulty = "Fácil"
   else if (globalCorrectPct < 40) difficulty = "Difícil"
@@ -79,7 +102,13 @@ export async function fetchQuestionPerformance(questionId: string, userId: strin
         is_correct: a.is_correct,
         selected_answer: a.selected_answer,
         duration_ms: a.duration_ms,
+        confidence_level: (a as { confidence_level?: string }).confidence_level,
+        outcome_category: (a as { outcome_category?: string }).outcome_category,
+        outcome_label:
+          OUTCOME_LABELS[(a as { outcome_category?: string }).outcome_category ?? ""] ??
+          (a as { outcome_category?: string }).outcome_category,
       })),
+      outcome_breakdown,
     },
   }
 }

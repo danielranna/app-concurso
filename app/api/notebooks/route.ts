@@ -22,11 +22,16 @@ export async function GET(req: Request) {
   else if (subject_id) query = query.eq("subject_id", subject_id)
   if (folder_id) query = query.eq("folder_id", folder_id)
   if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
-  if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+
+  let rows = data ?? []
+  if (searchParams.get("incomplete") === "1") {
+    rows = rows.filter((nb) => (nb.answered_count ?? 0) < (nb.question_count ?? 0))
+  }
+
+  return NextResponse.json(rows)
 }
 
 export async function POST(req: Request) {

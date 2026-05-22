@@ -6,6 +6,9 @@ import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Trash2 } from "lucide-react"
 import QuestionSolver from "@/components/questions/QuestionSolver"
+import StudyTimer from "@/components/questions/StudyTimer"
+import type { ConfidenceLevel } from "@/lib/question-types"
+import type { NavMode } from "@/lib/study-navigation"
 
 export default function ResolverCadernoPage() {
   const params = useParams()
@@ -17,6 +20,8 @@ export default function ResolverCadernoPage() {
     topic_id: string
   } | null>(null)
   const [notebookName, setNotebookName] = useState("")
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const [timerReady, setTimerReady] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -28,60 +33,66 @@ export default function ResolverCadernoPage() {
       fetch(`/api/notebooks/${notebookId}`)
         .then((r) => r.json())
         .then((d) => setNotebookName(d.notebook?.name ?? ""))
+      fetch(`/api/notebooks/${notebookId}/queue?user_id=${user.id}`)
+        .then((r) => r.json())
+        .then((d) => {
+          setElapsedMs(d.study_elapsed_ms ?? 0)
+          setTimerReady(true)
+        })
     })
   }, [notebookId, router])
 
   const fetchQueueSimple = useCallback(
-    async (opts?: { nav?: string }) => {
-    if (!userId) {
+    async (opts?: { nav?: NavMode }) => {
+      if (!userId) {
+        return {
+          current: null,
+          question: null,
+          options: [],
+          stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
+        }
+      }
+      const qParams = new URLSearchParams({ user_id: userId })
+      if (opts?.nav) qParams.set("nav", opts.nav)
+      const res = await fetch(`/api/notebooks/${notebookId}/queue?${qParams}`)
+      const data = await res.json()
+      let options: { label: string; text: string }[] = (data.options ?? []).map(
+        (o: { label: string; text: string }) => ({ label: o.label, text: o.text })
+      )
+      const question = data.question
+      if (question?.type === "certo_errado" && options.length === 0) {
+        options = [
+          { label: "Certo", text: "Certo" },
+          { label: "Errado", text: "Errado" },
+        ]
+      }
+      if (question && userId) {
+        const mParams = new URLSearchParams({
+          user_id: userId,
+          resolve: "1",
+          tec_subject: question.tec_subject ?? "",
+        })
+        if (question.tec_topic) mParams.set("tec_topic", question.tec_topic)
+        const m = await fetch(`/api/questions/mappings?${mParams}`).then((r) => r.json())
+        if (m?.subject_id) {
+          setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+        }
+      }
       return {
-        current: null,
-        question: null,
-        options: [],
-        stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
+        current: data.current ?? data.queue?.[0] ?? null,
+        question,
+        options,
+        stats: data.stats,
+        position: data.position,
       }
-    }
-    const params = new URLSearchParams({ user_id: userId })
-    if (opts?.nav) params.set("nav", opts.nav)
-    const res = await fetch(`/api/notebooks/${notebookId}/queue?${params}`)
-    const data = await res.json()
-    let options: { label: string; text: string }[] = (data.options ?? []).map(
-      (o: { label: string; text: string }) => ({ label: o.label, text: o.text })
-    )
-    const question = data.question
-    if (question?.type === "certo_errado" && options.length === 0) {
-      options = [
-        { label: "Certo", text: "Certo" },
-        { label: "Errado", text: "Errado" },
-      ]
-    }
-    if (question && userId) {
-      const params = new URLSearchParams({
-        user_id: userId,
-        resolve: "1",
-        tec_subject: question.tec_subject ?? "",
-      })
-      if (question.tec_topic) params.set("tec_topic", question.tec_topic)
-      const m = await fetch(`/api/questions/mappings?${params}`).then((r) => r.json())
-      if (m?.subject_id) {
-        setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
-      }
-    }
-    return {
-      current: data.current ?? data.queue?.[0] ?? null,
-      question,
-      options,
-      stats: data.stats,
-      position: data.position,
-      study_elapsed_ms: data.study_elapsed_ms,
-    }
-  },
+    },
     [notebookId, userId]
   )
 
   const persistElapsed = useCallback(
     async (ms: number) => {
       if (!userId) return
+      setElapsedMs(ms)
       await fetch(`/api/notebooks/${notebookId}/timer`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -96,6 +107,8 @@ export default function ResolverCadernoPage() {
       question_id: string
       selected_answer: string
       duration_ms: number
+      tec_id: number
+      confidence_level: ConfidenceLevel
     }) => {
       const res = await fetch(`/api/notebooks/${notebookId}/answer`, {
         method: "POST",
@@ -127,7 +140,12 @@ export default function ResolverCadernoPage() {
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-bold">{notebookName}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-bold">{notebookName}</h1>
+          {timerReady && (
+            <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />
+          )}
+        </div>
         <button
           type="button"
           onClick={deleteNotebook}
@@ -143,7 +161,6 @@ export default function ResolverCadernoPage() {
           notebookId={notebookId}
           fetchQueue={fetchQueueSimple}
           submitAnswer={submitAnswer}
-          persistElapsed={persistElapsed}
           mapping={mapping}
         />
       </div>

@@ -6,6 +6,9 @@ import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft } from "lucide-react"
 import QuestionSolver from "@/components/questions/QuestionSolver"
+import StudyTimer from "@/components/questions/StudyTimer"
+import type { ConfidenceLevel } from "@/lib/question-types"
+import type { NavMode } from "@/lib/study-navigation"
 
 export default function EstudoCombinadoPage() {
   const params = useParams()
@@ -13,8 +16,16 @@ export default function EstudoCombinadoPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [sessionName, setSessionName] = useState("")
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const [timerReady, setTimerReady] = useState(false)
   const [childProgress, setChildProgress] = useState<
-    { notebook_id: string; total: number; answered: number; completed_at: string | null; notebooks?: { name: string } }[]
+    {
+      notebook_id: string
+      total: number
+      answered: number
+      completed_at: string | null
+      notebooks?: { name: string }
+    }[]
   >([])
   const [mapping, setMapping] = useState<{
     subject_id: string
@@ -28,60 +39,67 @@ export default function EstudoCombinadoPage() {
         return
       }
       setUserId(user.id)
+      fetch(`/api/study-sessions/${sessionId}/queue?user_id=${user.id}`)
+        .then((r) => r.json())
+        .then((d) => {
+          setSessionName(d.session?.name ?? "")
+          setChildProgress(d.child_progress ?? [])
+          setElapsedMs(d.study_elapsed_ms ?? 0)
+          setTimerReady(true)
+        })
     })
-  }, [router])
+  }, [sessionId, router])
 
   const fetchQueue = useCallback(
-    async (opts?: { nav?: string }) => {
-    if (!userId) {
+    async (opts?: { nav?: NavMode }) => {
+      if (!userId) {
+        return {
+          current: null,
+          question: null,
+          options: [],
+          stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
+        }
+      }
+      const qParams = new URLSearchParams({ user_id: userId })
+      if (opts?.nav) qParams.set("nav", opts.nav)
+      const res = await fetch(`/api/study-sessions/${sessionId}/queue?${qParams}`)
+      const data = await res.json()
+      setSessionName(data.session?.name ?? "")
+      setChildProgress(data.child_progress ?? [])
+      let options = data.options ?? []
+      if (data.question?.type === "certo_errado" && options.length === 0) {
+        options = [
+          { label: "Certo", text: "Certo" },
+          { label: "Errado", text: "Errado" },
+        ]
+      }
+      if (data.question && userId) {
+        const mParams = new URLSearchParams({
+          user_id: userId,
+          resolve: "1",
+          tec_subject: data.question.tec_subject ?? "",
+        })
+        if (data.question.tec_topic) mParams.set("tec_topic", data.question.tec_topic)
+        const m = await fetch(`/api/questions/mappings?${mParams}`).then((r) => r.json())
+        if (m?.subject_id) {
+          setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+        }
+      }
       return {
-        current: null,
-        question: null,
-        options: [],
-        stats: { total: 0, resolved: 0, correct: 0, wrong: 0, pending: 0 },
+        current: data.current,
+        question: data.question,
+        options,
+        stats: data.stats,
+        position: data.position,
       }
-    }
-    const params = new URLSearchParams({ user_id: userId })
-    if (opts?.nav) params.set("nav", opts.nav)
-    const res = await fetch(`/api/study-sessions/${sessionId}/queue?${params}`)
-    const data = await res.json()
-    setSessionName(data.session?.name ?? "")
-    setChildProgress(data.child_progress ?? [])
-    let options = data.options ?? []
-    if (data.question?.type === "certo_errado" && options.length === 0) {
-      options = [
-        { label: "Certo", text: "Certo" },
-        { label: "Errado", text: "Errado" },
-      ]
-    }
-    if (data.question && userId) {
-      const params = new URLSearchParams({
-        user_id: userId,
-        resolve: "1",
-        tec_subject: data.question.tec_subject ?? "",
-      })
-      if (data.question.tec_topic) params.set("tec_topic", data.question.tec_topic)
-      const m = await fetch(`/api/questions/mappings?${params}`).then((r) => r.json())
-      if (m?.subject_id) {
-        setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
-      }
-    }
-    return {
-      current: data.current,
-      question: data.question,
-      options,
-      stats: data.stats,
-      position: data.position,
-      study_elapsed_ms: data.study_elapsed_ms,
-      child_progress: data.child_progress,
-    }
-  },
+    },
     [sessionId, userId]
   )
 
   const persistElapsed = useCallback(
     async (ms: number) => {
       if (!userId) return
+      setElapsedMs(ms)
       await fetch(`/api/study-sessions/${sessionId}/timer`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -98,6 +116,7 @@ export default function EstudoCombinadoPage() {
       duration_ms: number
       tec_id: number
       notebook_id?: string
+      confidence_level: ConfidenceLevel
     }) => {
       const res = await fetch(`/api/study-sessions/${sessionId}/answer`, {
         method: "POST",
@@ -122,7 +141,10 @@ export default function EstudoCombinadoPage() {
       >
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
-      <h1 className="text-xl font-bold">{sessionName}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-xl font-bold">{sessionName}</h1>
+        {timerReady && <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />}
+      </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {childProgress.map((c) => (
           <span
@@ -142,7 +164,6 @@ export default function EstudoCombinadoPage() {
           studySessionId={sessionId}
           fetchQueue={fetchQueue}
           submitAnswer={submitAnswer}
-          persistElapsed={persistElapsed}
           mapping={mapping}
         />
       </div>

@@ -56,7 +56,9 @@ export default function PerformanceModal({ questionId, userId, onClose }: Props)
       is_correct: boolean
       selected_answer: string
       duration_ms: number | null
+      outcome_label?: string
     }[]
+    outcome_breakdown?: { label: string; count: number; pct: number }[]
   }
 
   const globalPie = [
@@ -142,12 +144,22 @@ export default function PerformanceModal({ questionId, userId, onClose }: Props)
               </ResponsiveContainer>
             </div>
             <p className="text-sm">Total: {mine?.total_resolutions ?? 0}</p>
+            {(mine?.outcome_breakdown?.length ?? 0) > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                {mine.outcome_breakdown!.map((o) => (
+                  <li key={o.label}>
+                    {o.label}: {o.count} ({o.pct.toFixed(0)}%)
+                  </li>
+                ))}
+              </ul>
+            )}
             <ul className="mt-2 max-h-32 overflow-y-auto text-xs text-slate-600">
               {(mine?.history ?? []).map((h, i) => (
                 <li key={i}>
                   {new Date(h.date).toLocaleDateString("pt-BR")} —{" "}
                   {h.is_correct ? "Acertou" : "Errou"} — {h.selected_answer}{" "}
                   {formatMs(h.duration_ms)}
+                  {h.outcome_label ? ` · ${h.outcome_label}` : ""}
                 </li>
               ))}
             </ul>

@@ -73,6 +73,16 @@ export type NotebookFolderRow = {
   updated_at: string
 }
 
+export type ConfidenceLevel = "seguro" | "inseguro" | "chute"
+
+export type OutcomeCategory =
+  | "conhecimento_solido"
+  | "conhecimento_fragil"
+  | "lacuna_critica"
+  | "lacuna_consciente"
+  | "falso_positivo"
+  | "conteudo_desconhecido"
+
 export type StudyQueueItem = {
   question_id: string
   tec_id: number

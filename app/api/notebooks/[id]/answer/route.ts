@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import {
+  computeOutcomeCategory,
   normalizeAnswer,
+  parseConfidenceLevel,
   recordAttempt,
   refreshNotebookProgress,
 } from "@/lib/question-study"
@@ -12,7 +14,7 @@ export async function POST(
 ) {
   const { id: notebook_id } = await params
   const body = await req.json()
-  const { user_id, question_id, selected_answer, duration_ms } = body
+  const { user_id, question_id, selected_answer, duration_ms, confidence_level } = body
 
   if (!user_id || !question_id || !selected_answer) {
     return NextResponse.json({ error: "Campos obrigatórios" }, { status: 400 })
@@ -34,6 +36,7 @@ export async function POST(
     question.correct_answer
   )
 
+  const confidence = parseConfidenceLevel(confidence_level)
   await recordAttempt({
     user_id,
     question_id,
@@ -42,6 +45,7 @@ export async function POST(
     selected_answer,
     is_correct,
     duration_ms: duration_ms ?? null,
+    confidence_level: confidence,
   })
 
   await refreshNotebookProgress(notebook_id, user_id)
@@ -50,5 +54,7 @@ export async function POST(
     is_correct,
     correct_answer: question.correct_answer,
     tec_url: question.tec_url,
+    confidence_level: confidence,
+    outcome_category: computeOutcomeCategory(confidence, is_correct),
   })
 }

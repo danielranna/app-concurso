@@ -1,5 +1,27 @@
 import { supabaseServer } from "./supabase-server"
-import type { StudyQueueItem } from "./question-types"
+import type {
+  ConfidenceLevel,
+  OutcomeCategory,
+  StudyQueueItem,
+} from "./question-types"
+
+export function computeOutcomeCategory(
+  confidence: ConfidenceLevel,
+  is_correct: boolean
+): OutcomeCategory {
+  if (confidence === "chute") {
+    return is_correct ? "falso_positivo" : "conteudo_desconhecido"
+  }
+  if (confidence === "inseguro") {
+    return is_correct ? "conhecimento_fragil" : "lacuna_consciente"
+  }
+  return is_correct ? "conhecimento_solido" : "lacuna_critica"
+}
+
+export function parseConfidenceLevel(raw: unknown): ConfidenceLevel {
+  if (raw === "inseguro" || raw === "chute") return raw
+  return "seguro"
+}
 
 function mapNotebookRows(
   rows: {
@@ -150,7 +172,10 @@ export async function recordAttempt(params: {
   selected_answer: string
   is_correct: boolean
   duration_ms: number | null
+  confidence_level?: ConfidenceLevel
 }) {
+  const confidence = params.confidence_level ?? "seguro"
+  const outcome_category = computeOutcomeCategory(confidence, params.is_correct)
   const { error } = await supabaseServer.from("question_attempts").insert({
     user_id: params.user_id,
     question_id: params.question_id,
@@ -159,6 +184,8 @@ export async function recordAttempt(params: {
     selected_answer: params.selected_answer,
     is_correct: params.is_correct,
     duration_ms: params.duration_ms,
+    confidence_level: confidence,
+    outcome_category,
   })
   if (error) throw new Error(error.message)
 }
