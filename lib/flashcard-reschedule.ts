@@ -48,7 +48,7 @@ export async function setCardDueAt(userId: string, cardId: string, dueAt: Date) 
     if (days >= 1) fsrsCard.state = State.Review
     stateData = serializeFsrsCard(fsrsCard) as unknown as Record<string, unknown>
   } else {
-    const fsrsCard = emptyFsrsCard(now)
+    const fsrsCard = emptyFsrsCard()
     fsrsCard.due = dueAt
     fsrsCard.scheduled_days = days
     if (days >= 1) fsrsCard.state = State.Review
