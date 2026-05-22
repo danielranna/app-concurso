@@ -1,6 +1,7 @@
 import { State } from "ts-fsrs"
 import { supabaseServer } from "./supabase-server"
 import { DEFAULT_WEEKDAY_LIMITS, type FlashcardRow, type WeekdayLimits } from "./flashcard-types"
+import { isEligibleForStudy } from "./flashcard-due"
 import { deserializeFsrsCard } from "./fsrs-scheduler"
 
 const STATE_PRIORITY: Record<number, number> = {
@@ -56,7 +57,13 @@ type DueRow = {
 
 export async function fetchDueStates(
   userId: string,
-  options?: { deckId?: string; includeNew?: boolean; before?: Date; dueNowOnly?: boolean }
+  options?: {
+    deckId?: string
+    subjectId?: string
+    includeNew?: boolean
+    before?: Date
+    dueNowOnly?: boolean
+  }
 ) {
   const before = options?.before ?? endOfDay()
 
@@ -91,10 +98,24 @@ export async function fetchDueStates(
     query = query.eq("flashcards.deck_id", options.deckId)
   }
 
+  let subjectDeckIds: string[] | null = null
+  if (options?.subjectId) {
+    const { data: subjectDecks } = await supabaseServer
+      .from("flashcard_decks")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("subject_id", options.subjectId)
+    subjectDeckIds = (subjectDecks ?? []).map((d) => d.id)
+  }
+
   const { data, error } = await query
   if (error) throw error
 
   let rows = (data ?? []) as unknown as DueRow[]
+
+  if (subjectDeckIds) {
+    rows = rows.filter((r) => subjectDeckIds!.includes(r.flashcards.deck_id))
+  }
 
   if (!options?.includeNew) {
     rows = rows.filter((r) => {
@@ -148,7 +169,7 @@ export function shuffleStudyQueue(rows: DueRow[]): DueRow[] {
 
 export async function getStudyQueue(
   userId: string,
-  deckId?: string
+  options?: { deckId?: string; subjectId?: string }
 ): Promise<{
   rows: DueRow[]
   limit: number | null
@@ -161,16 +182,21 @@ export async function getStudyQueue(
   const now = new Date()
 
   const allToday = await fetchDueStates(userId, {
-    deckId,
+    deckId: options?.deckId,
+    subjectId: options?.subjectId,
     includeNew: true,
     before: endOfDay(),
   })
-  const dueNow = allToday.filter((r) => new Date(r.due_at) <= now)
-  const shuffled = shuffleStudyQueue(dueNow)
-  const totalDue = allToday.length
+  const studyDue = allToday.filter((r) =>
+    isEligibleForStudy(r.due_at, r.state_data, now)
+  )
+  const shuffled = shuffleStudyQueue(studyDue)
+  const totalDue = studyDue.length
   const capped = limit === null ? shuffled : shuffled.slice(0, limit)
 
-  const laterToday = allToday.filter((r) => new Date(r.due_at) > now)
+  const laterToday = allToday.filter(
+    (r) => !isEligibleForStudy(r.due_at, r.state_data, now)
+  )
   const nextDueMs = laterToday.length
     ? Math.min(...laterToday.map((r) => new Date(r.due_at).getTime()))
     : null

@@ -1,5 +1,5 @@
 import { supabaseServer } from "./supabase-server"
-import { endOfDay } from "./flashcard-queue"
+import { isDueForToday, isOverdue } from "./flashcard-due"
 
 export type PanelFilter = "due_today" | "overdue" | "all"
 
@@ -47,7 +47,6 @@ export async function fetchPanelData(
   }
 ) {
   const now = new Date()
-  const todayEnd = endOfDay()
 
   const [{ data: subjects }, { data: decks }, { data: cards, error: cardsErr }] =
     await Promise.all([
@@ -85,8 +84,8 @@ export async function fetchPanelData(
       const due = dueOf(c)
       if (!due) continue
       const d = new Date(due)
-      if (d < now) overdue++
-      if (d <= todayEnd) dueToday++
+      if (isOverdue(d, now)) overdue++
+      if (isDueForToday(d, now)) dueToday++
     }
     return { total: deckCards.length, due_today: dueToday, overdue }
   }
@@ -153,13 +152,12 @@ export async function fetchPanelData(
         type: c.type,
         preview: cardPreview(c),
         due_at: due,
-        is_overdue: dueDate ? dueDate < now : false,
-        is_due_today: dueDate ? dueDate <= todayEnd : false,
+        is_overdue: dueDate ? isOverdue(dueDate, now) : false,
+        is_due_today: dueDate ? isDueForToday(dueDate, now) : true,
       }
     })
     .filter((c) => {
       if (options.filter === "all") return true
-      if (!c.due_at) return options.filter === "due_today"
       if (options.filter === "overdue") return c.is_overdue
       return c.is_due_today
     })
@@ -171,23 +169,31 @@ export async function fetchPanelData(
 
   const subjectNameById = Object.fromEntries((subjects ?? []).map((s) => [s.id, s.name]))
 
+  const scopedForTotals = filtered
+  const cardsOut = list.map((c) => ({
+    ...c,
+    subject_name: c.subject_id ? subjectNameById[c.subject_id] ?? null : null,
+  }))
+
+  const countDueToday = (rows: CardRow[]) =>
+    rows.filter((c) => {
+      const due = dueOf(c)
+      return isDueForToday(due ? new Date(due) : null, now)
+    }).length
+  const countOverdue = (rows: CardRow[]) =>
+    rows.filter((c) => {
+      const due = dueOf(c)
+      return due && isOverdue(new Date(due), now)
+    }).length
+
   return {
     subjects: subjectGroups,
     uncategorized_decks: uncategorizedDecks,
-    cards: list.map((c) => ({
-      ...c,
-      subject_name: c.subject_id ? subjectNameById[c.subject_id] ?? null : null,
-    })),
+    cards: cardsOut,
     totals: {
-      due_today: allCards.filter((c) => {
-        const due = dueOf(c)
-        return due && new Date(due) <= todayEnd
-      }).length,
-      overdue: allCards.filter((c) => {
-        const due = dueOf(c)
-        return due && new Date(due) < now
-      }).length,
-      all: allCards.length,
+      due_today: countDueToday(scopedForTotals),
+      overdue: countOverdue(scopedForTotals),
+      all: scopedForTotals.length,
     },
   }
 }

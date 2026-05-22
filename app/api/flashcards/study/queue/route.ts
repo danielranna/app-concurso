@@ -12,16 +12,17 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const user_id = searchParams.get("user_id")
   const deck_id = searchParams.get("deck_id") ?? undefined
+  const subject_id = searchParams.get("subject_id") ?? undefined
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
   }
 
   try {
-    const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(
-      user_id,
-      deck_id ?? undefined
-    )
+    const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(user_id, {
+      deckId: deck_id,
+      subjectId: subject_id,
+    })
 
     if (rows.length === 0) {
       return NextResponse.json({

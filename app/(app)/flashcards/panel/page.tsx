@@ -13,6 +13,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Trash2,
 } from "lucide-react"
 
 type PanelFilter = "due_today" | "overdue" | "all"
@@ -75,11 +76,14 @@ export default function FlashcardsPanelPage() {
   const searchParams = useSearchParams()
   const initialFilter = (searchParams.get("filter") as PanelFilter) || "due_today"
   const initialSubjectId = searchParams.get("subject_id")
+  const initialDeckId = searchParams.get("deck_id")
 
   const [userId, setUserId] = useState<string | null>(null)
   const [filter, setFilter] = useState<PanelFilter>(initialFilter)
-  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null)
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(initialSubjectId)
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(initialDeckId)
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
+    initialDeckId ? null : initialSubjectId
+  )
   const [subjects, setSubjects] = useState<SubjectGroup[]>([])
   const [uncategorizedDecks, setUncategorizedDecks] = useState<DeckNode[]>([])
   const [cards, setCards] = useState<PanelCard[]>([])
@@ -129,10 +133,48 @@ export default function FlashcardsPanelPage() {
     }
   }, [subjects, expandedSubjects.size])
 
+  function updateUrl(deckId: string | null, subjectId: string | null) {
+    const params = new URLSearchParams()
+    if (subjectId) params.set("subject_id", subjectId)
+    if (deckId) params.set("deck_id", deckId)
+    const q = params.toString()
+    router.replace(q ? `/flashcards/panel?${q}` : "/flashcards/panel", { scroll: false })
+  }
+
   function selectDeck(deckId: string | null, subjectId: string | null) {
     setSelectedDeckId(deckId)
     setSelectedSubjectId(deckId ? null : subjectId)
+    updateUrl(deckId, deckId ? null : subjectId)
   }
+
+  function selectSubject(subjectId: string) {
+    setSelectedSubjectId(subjectId)
+    setSelectedDeckId(null)
+    updateUrl(null, subjectId)
+    setExpandedSubjects((prev) => new Set(prev).add(subjectId))
+  }
+
+  const activeSubject =
+    subjects.find((s) => s.id === selectedSubjectId) ||
+    (selectedDeckId
+      ? subjects.find((s) => s.decks.some((d) => d.id === selectedDeckId))
+      : undefined)
+  const activeDeck = selectedDeckId
+    ? subjects.flatMap((s) => s.decks).find((d) => d.id === selectedDeckId) ||
+      uncategorizedDecks.find((d) => d.id === selectedDeckId)
+    : null
+
+  const newCardHref = selectedDeckId
+    ? `/flashcards/cards/new?deck_id=${selectedDeckId}`
+    : null
+
+  const studyHref = (() => {
+    const p = new URLSearchParams()
+    if (selectedDeckId) p.set("deck_id", selectedDeckId)
+    else if (selectedSubjectId) p.set("subject_id", selectedSubjectId)
+    const q = p.toString()
+    return q ? `/flashcards/study?${q}` : "/flashcards/study"
+  })()
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -183,6 +225,19 @@ export default function FlashcardsPanelPage() {
     loadPanel(userId)
   }
 
+  async function deleteSelected() {
+    if (!userId || selected.size === 0) return
+    if (!confirm(`Excluir ${selected.size} card(s)?`)) return
+    setBusy(true)
+    await fetch("/api/flashcards/cards/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, card_ids: [...selected] }),
+    })
+    setBusy(false)
+    loadPanel(userId)
+  }
+
   async function createDeck() {
     if (!userId || !newDeckName.trim()) return
     await fetch("/api/flashcards/decks", {
@@ -213,18 +268,54 @@ export default function FlashcardsPanelPage() {
           <Link href="/flashcards" className="text-slate-600 hover:text-slate-900">
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <div className="flex items-center gap-2">
-            <LayoutGrid className="h-5 w-5 text-slate-600" />
-            <h1 className="text-lg font-semibold text-slate-800">Painel de flashcards</h1>
+          <div>
+            <div className="flex items-center gap-2">
+              <LayoutGrid className="h-5 w-5 text-slate-600" />
+              <h1 className="text-lg font-semibold text-slate-800">Painel de flashcards</h1>
+            </div>
+            {(activeSubject || activeDeck) && (
+              <p className="mt-1 text-sm text-slate-600">
+                {activeDeck ? (
+                  <>
+                    {activeSubject && (
+                      <span className="font-medium text-slate-800">{activeSubject.name}</span>
+                    )}
+                    {activeSubject && " · "}
+                    <span>{activeDeck.name}</span>
+                  </>
+                ) : (
+                  <span className="font-medium text-slate-800">{activeSubject?.name}</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
-        <Link
-          href="/flashcards/study"
-          className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
-        >
-          <Play className="h-4 w-4" />
-          Estudar
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {newCardHref ? (
+            <Link
+              href={newCardHref}
+              className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800 hover:bg-slate-50"
+            >
+              <Plus className="h-4 w-4" />
+              Novo card
+            </Link>
+          ) : (
+            <span
+              title="Selecione um baralho na barra lateral"
+              className="flex cursor-not-allowed items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2 text-sm text-slate-400"
+            >
+              <Plus className="h-4 w-4" />
+              Novo card
+            </span>
+          )}
+          <Link
+            href={studyHref}
+            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+          >
+            <Play className="h-4 w-4" />
+            Estudar
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
@@ -246,26 +337,44 @@ export default function FlashcardsPanelPage() {
             const open = expandedSubjects.has(subject.id)
             return (
               <div key={subject.id} className="mb-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExpandedSubjects((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(subject.id)) next.delete(subject.id)
-                      else next.add(subject.id)
-                      return next
-                    })
-                  }}
-                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-800"
-                >
-                  {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  {subject.name}
-                  {(subject.due_today > 0 || subject.overdue > 0) && (
-                    <span className="ml-auto text-[10px] font-normal normal-case text-emerald-700">
-                      {subject.due_today + subject.overdue}
-                    </span>
-                  )}
-                </button>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpandedSubjects((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(subject.id)) next.delete(subject.id)
+                        else next.add(subject.id)
+                        return next
+                      })
+                    }}
+                    className="rounded p-0.5 text-slate-400 hover:bg-slate-200"
+                  >
+                    {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectSubject(subject.id)}
+                    className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide ${
+                      selectedSubjectId === subject.id && !selectedDeckId
+                        ? "bg-slate-900 text-white"
+                        : "text-slate-500 hover:bg-slate-200 hover:text-slate-800"
+                    }`}
+                  >
+                    <span className="truncate">{subject.name}</span>
+                    {(subject.due_today > 0 || subject.overdue > 0) && (
+                      <span
+                        className={`ml-auto shrink-0 text-[10px] font-normal normal-case ${
+                          selectedSubjectId === subject.id && !selectedDeckId
+                            ? "text-emerald-200"
+                            : "text-emerald-700"
+                        }`}
+                      >
+                        {subject.due_today + subject.overdue}
+                      </span>
+                    )}
+                  </button>
+                </div>
                 {open &&
                   subject.decks.map((deck) => (
                     <button
@@ -387,6 +496,15 @@ export default function FlashcardsPanelPage() {
                 className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm text-white hover:bg-amber-800 disabled:opacity-50"
               >
                 Distribuir datas
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={deleteSelected}
+                className="flex items-center gap-1 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir
               </button>
               <p className="text-xs text-amber-800">
                 Espalha as revisões de hoje até {spreadDays} dias (estilo Anki).

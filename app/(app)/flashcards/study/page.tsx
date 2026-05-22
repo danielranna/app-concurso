@@ -20,6 +20,7 @@ export default function StudyPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const deckId = searchParams.get("deck_id")
+  const subjectId = searchParams.get("subject_id")
 
   const [userId, setUserId] = useState<string | null>(null)
   const [card, setCard] = useState<StudyCard | null>(null)
@@ -34,8 +35,10 @@ export default function StudyPage() {
   const loadQueue = useCallback(async (uid: string, silent = false) => {
     if (!silent) setLoading(true)
     setRevealed(false)
-    const q = deckId ? `&deck_id=${deckId}` : ""
-    const res = await fetch(`/api/flashcards/study/queue?user_id=${uid}${q}`)
+    const params = new URLSearchParams({ user_id: uid })
+    if (deckId) params.set("deck_id", deckId)
+    if (subjectId) params.set("subject_id", subjectId)
+    const res = await fetch(`/api/flashcards/study/queue?${params}`)
     const data = await res.json()
     if (!silent) setLoading(false)
     if (!data.card) {
@@ -58,7 +61,7 @@ export default function StudyPage() {
     setCard(data.card)
     setPreview(data.preview)
     setRemaining(data.remaining)
-  }, [deckId])
+  }, [deckId, subjectId])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
