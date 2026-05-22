@@ -88,7 +88,7 @@ export default function NewCardPage() {
   if (!userId) return null
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-6">
+    <main className={`mx-auto px-6 py-6 ${type === "cloze_image" ? "max-w-5xl" : "max-w-2xl"}`}>
       <Link href={`/flashcards/decks/${deckId}`} className="text-sm text-slate-600 hover:underline">
         ← Voltar
       </Link>

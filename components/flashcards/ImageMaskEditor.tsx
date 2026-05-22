@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import FlashcardImage from "@/components/flashcards/FlashcardImage"
 import type { ImageMask } from "@/lib/flashcard-types"
 
 type Props = {
@@ -46,12 +47,11 @@ export default function ImageMaskEditor({ imageUrl, masks, onChange }: Props) {
       <p className="text-sm text-slate-600">Arraste na imagem para criar máscaras de oclusão.</p>
       <div
         ref={containerRef}
-        className="relative inline-block max-w-full cursor-crosshair select-none"
+        className="relative w-full max-w-4xl cursor-crosshair select-none"
         onMouseDown={onMouseDown}
         onMouseUp={onMouseUp}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt="Card" className="max-h-96 rounded-lg border" draggable={false} />
+        <FlashcardImage src={imageUrl} variant="editor" />
         {masks.map((m, i) => (
           <div
             key={i}

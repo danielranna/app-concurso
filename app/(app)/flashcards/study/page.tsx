@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import FlashcardImage from "@/components/flashcards/FlashcardImage"
 
 type StudyCard = {
   id: string
@@ -88,7 +89,7 @@ export default function StudyPage() {
   const display = revealed && card ? card.back : card?.front
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-8">
+    <main className={`mx-auto px-6 py-8 ${card?.type === "cloze_image" ? "max-w-5xl" : "max-w-2xl"}`}>
       <div className="mb-4 flex items-center justify-between text-sm text-slate-500">
         <Link href="/flashcards">← Sair</Link>
         <span>{remaining > 0 ? `+${remaining} na fila` : "último"}</span>
@@ -102,8 +103,7 @@ export default function StudyPage() {
             <p className="mb-2 text-xs text-slate-400">{card.deck_name}</p>
           )}
           {display.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={display.image_url} alt="Card" className="mx-auto max-h-80 rounded-lg" />
+            <FlashcardImage src={display.image_url} variant="study" />
           ) : (
             <div
               className="prose prose-slate max-w-none text-lg"
