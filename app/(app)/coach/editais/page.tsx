@@ -10,7 +10,8 @@ import {
   Sparkles,
   Star,
 } from "lucide-react"
-import type { ExamTarget } from "@/lib/coach-types"
+import ExamPlanReportCard from "@/components/coach/ExamPlanReportCard"
+import type { ExamPlanStructured, ExamTarget } from "@/lib/coach-types"
 
 type SubjectRow = { id: string; name: string }
 
@@ -63,7 +64,7 @@ type DocRow = {
 type PlanReport = {
   id: string
   summary_md: string | null
-  structured: { headline?: string; exam_readiness_score?: number }
+  structured: ExamPlanStructured
   created_at: string
 }
 
@@ -532,24 +533,12 @@ export default function CoachEditaisPage() {
             {reports.map((r) => (
               <li
                 key={r.id}
-                className="rounded-xl border border-slate-200 bg-white p-4 text-sm"
+                className="rounded-xl border border-slate-200 bg-white p-4"
               >
-                <p className="font-medium text-slate-900">
-                  {r.structured?.headline ?? "Plano"}
-                  {r.structured?.exam_readiness_score != null && (
-                    <span className="ml-2 text-violet-700">
-                      Prontidão: {r.structured.exam_readiness_score}%
-                    </span>
-                  )}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {new Date(r.created_at).toLocaleString("pt-BR")}
-                </p>
-                {r.summary_md && (
-                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-slate-600">
-                    {r.summary_md.slice(0, 2000)}
-                  </pre>
-                )}
+                <ExamPlanReportCard
+                  createdAt={r.created_at}
+                  structured={r.structured ?? {}}
+                />
               </li>
             ))}
           </ul>

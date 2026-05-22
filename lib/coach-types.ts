@@ -67,6 +67,33 @@ export type NotebookReportStructured = {
   confidence_in_analysis: string
 }
 
+export type ExamPlanStructured = {
+  headline?: string
+  subject_priority_rank?: {
+    subject_name: string
+    priority: number
+    why?: string
+  }[]
+  topic_matrix?: {
+    subject?: string
+    topic?: string
+    edital_weight_hint?: string
+    incidence_hint?: string
+    your_gap?: string
+    action?: string
+  }[]
+  weekly_plan?: {
+    day: string
+    focus: string
+    minutes: number
+    resource: string
+  }[]
+  executable_actions?: ExecutableAction[]
+  risks_if_ignored?: string[]
+  exam_readiness_score?: number
+  raw?: string
+}
+
 export type ExamTarget = {
   id: string
   user_id: string

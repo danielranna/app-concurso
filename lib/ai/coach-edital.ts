@@ -7,6 +7,11 @@ import {
 import { computeLearningSignals, getTopicStatsForSubject } from "../learning-signals"
 import { aiComplete } from "./client"
 import { getUserAiCredentials } from "./user-credentials"
+import {
+  asExamPlanStructured,
+  buildCoachEditalSummaryMd,
+  parseCoachEditalJson,
+} from "../coach-edital-format"
 
 const SYSTEM = `Você é coach de concursos. Cruza edital (pesos), incidência histórica por matéria e desempenho do aluno.
 Priorize ROI: peso do edital × incidência × gap do aluno. Use APENAS os dados JSON e trechos de PDF fornecidos.
@@ -139,20 +144,10 @@ export async function generateCoachEditalPlan(
     credentials
   )
 
-  let structured: Record<string, unknown> = {}
-  try {
-    structured = JSON.parse(result.text || "{}")
-  } catch {
-    structured = { headline: "Plano gerado", raw: result.text }
-  }
+  const structuredRaw = parseCoachEditalJson(result.text || "{}")
+  const structured = asExamPlanStructured(structuredRaw)
 
-  const summaryMd =
-    typeof structured.headline === "string"
-      ? `# Plano — ${exam.name}\n\n${structured.headline}\n\n` +
-        (structured.weekly_plan
-          ? `## Semana sugerida\n${JSON.stringify(structured.weekly_plan, null, 2)}`
-          : "")
-      : result.text
+  const summaryMd = buildCoachEditalSummaryMd(exam.name, structured)
 
   const { data: report, error: repErr } = await supabaseServer
     .from("exam_target_reports")
