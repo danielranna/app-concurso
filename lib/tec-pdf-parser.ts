@@ -173,6 +173,7 @@ const ENUNCIADO_PHRASES =
   "A frase|Tenho-me|Certo dia|A obtenção|A Sociedade Empresária|Nessa situação|Isenção do|Com o objetivo|" +
   "O diretor|Ao examinar|Ao lidar|O item que|No Brasil|É modalidade|Quanto ao|O Princípio|um município|Um município|" +
   "Um Auditor(?: Fiscal)?|Considere a|um município está|Um município está|O processo|" +
+  "A administração|O poder|O poder-dever|" +
   "[A-ZÁÉÍÓÚÃÕÇ][a-záéíóúãõçÁÉÍÓÚÃÕÇ-]* ficou"
 
 const ENUNCIADO_LINE_START_RE = new RegExp(
@@ -206,11 +207,13 @@ function cleanMetaLine(line: string): string {
     .trim()
 }
 
+const MCQ_OPTION_RE = /\s[a-e]\)\s+/i
+
 function splitTopicFromStatement(tail: string): { topic: string; statementPart: string } {
   let idx = tail.search(STATEMENT_START_RE)
   if (idx < 0) idx = tail.search(MCQ_STMT_FALLBACK_RE)
   if (idx < 0) {
-    const optIdx = tail.search(/\s[a-e]\)\s/i)
+    const optIdx = tail.search(MCQ_OPTION_RE)
     if (optIdx > 0) {
       const beforeOpts = tail.slice(0, optIdx)
       let idx2 = beforeOpts.search(STATEMENT_START_RE)
@@ -320,7 +323,9 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
   tec_topic = capped.topic
   rest = capped.rest
 
-  const isCertoErrado = /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
+  const hasMcqOptions = MCQ_OPTION_RE.test(rest)
+  const isCertoErrado =
+    !hasMcqOptions && /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
   const type: QuestionType = isCertoErrado ? "certo_errado" : "multiple_choice"
 
   let statement = ""
@@ -338,11 +343,11 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
       { label: "Errado", text: "Errado" },
     ]
   } else {
-    const firstOpt = rest.search(/\s[a-e]\)\s/i)
+    const firstOpt = rest.search(MCQ_OPTION_RE)
     if (firstOpt < 0) throw new Error("alternativas não encontradas")
     statement = rest.slice(0, firstOpt).trim()
     const optsPart = rest.slice(firstOpt).trim()
-    const optRe = /([a-e])\)\s+([\s\S]*?)(?=\s[a-e]\)\s|$)/gi
+    const optRe = /([a-e])\)\s+([\s\S]*?)(?=\s[a-e]\)\s+|$)/gi
     let om: RegExpExecArray | null
     while ((om = optRe.exec(optsPart)) !== null) {
       options.push({

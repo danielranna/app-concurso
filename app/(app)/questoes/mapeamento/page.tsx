@@ -27,6 +27,11 @@ type Topic = { id: string; name: string }
 
 type Tab = "subjects" | "topics"
 
+type TecTopicGroupBlock = {
+  tec_subject: string
+  topics: TecTopicGroup[]
+}
+
 export default function MapeamentoPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
@@ -34,6 +39,9 @@ export default function MapeamentoPage() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [unmappedSubjects, setUnmappedSubjects] = useState<TecSubjectGroup[]>([])
   const [unmappedTopics, setUnmappedTopics] = useState<TecTopicGroup[]>([])
+  const [unmappedTopicGroups, setUnmappedTopicGroups] = useState<TecTopicGroupBlock[]>(
+    []
+  )
   const [selectedSubject, setSelectedSubject] = useState<TecSubjectGroup | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<TecTopicGroup | null>(null)
   const [yourSubjectId, setYourSubjectId] = useState("")
@@ -43,16 +51,20 @@ export default function MapeamentoPage() {
   const [message, setMessage] = useState<string | null>(null)
 
   const reload = useCallback(async (uid: string) => {
-    const [s, t] = await Promise.all([
+    const [s, t, g] = await Promise.all([
       fetch(`/api/questions/mappings?user_id=${uid}&unmapped=subjects`).then((r) =>
         r.json()
       ),
       fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics`).then((r) =>
         r.json()
       ),
+      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics_grouped`).then((r) =>
+        r.json()
+      ),
     ])
     setUnmappedSubjects(Array.isArray(s) ? s : [])
     setUnmappedTopics(Array.isArray(t) ? t : [])
+    setUnmappedTopicGroups(Array.isArray(g) ? g : [])
   }, [])
 
   useEffect(() => {
@@ -106,7 +118,7 @@ export default function MapeamentoPage() {
       return
     }
     setMessage(
-      `“${selectedSubject.tec_subject}” vinculada — ${selectedSubject.count} questões passam a usar essa matéria.`
+      `“${selectedSubject.tec_subject}” vinculada — ${selectedSubject.count} questões usam essa matéria. Assuntos com tema de mesmo nome na sua matéria serão reconhecidos automaticamente.`
     )
     setSelectedSubject(null)
     setYourSubjectId("")
@@ -162,10 +174,10 @@ export default function MapeamentoPage() {
       </Link>
       <h1 className="text-2xl font-bold">Associar matérias e assuntos</h1>
       <p className="mt-1 max-w-2xl text-sm text-slate-600">
-        <strong>Matéria TEC</strong> (ex.: Raciocínio Lógico): escolha a sua matéria uma vez —
-        todas as questões dessa matéria no TEC entram nela. Depois, em{" "}
-        <strong>Assuntos</strong>, vincule cada assunto do PDF ao seu tema (crie um novo ou
-        escolha um existente se for igual).
+        Cada <strong>matéria TEC</strong> traz os <strong>assuntos</strong> dela no PDF. Vincule a
+        matéria à sua uma vez — todas as questões dessa matéria passam para ela. Depois vincule
+        cada <strong>assunto</strong> ao seu tema (ou crie um novo). Se já existir um tema com o
+        mesmo nome na sua matéria, o app associa automaticamente ao resolver/importar.
       </p>
 
       <div className="mt-4 flex gap-2 border-b">
@@ -239,33 +251,44 @@ export default function MapeamentoPage() {
           )}
 
           {tab === "topics" &&
-            unmappedTopics.map((u) => (
-              <li key={`${u.tec_subject}|||${u.tec_topic}`}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedTopic(u)
-                    setYourTopicId("")
-                  }}
-                  className={`w-full rounded-lg border px-4 py-3 text-left text-sm ${
-                    selectedTopic?.tec_topic === u.tec_topic &&
-                    selectedTopic?.tec_subject === u.tec_subject
-                      ? "border-blue-500 bg-blue-50"
-                      : "bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <p className="text-xs font-medium text-slate-500">{u.tec_subject}</p>
-                  <p className="font-semibold text-slate-900">{u.tec_topic}</p>
-                  {u.sample_statement && (
-                    <p className="mt-1 line-clamp-2 text-slate-600">{u.sample_statement}</p>
+            unmappedTopicGroups.map((group) => (
+              <li key={group.tec_subject} className="rounded-lg border bg-slate-50/80 p-3">
+                <p className="border-b border-slate-200 pb-2 text-sm font-semibold text-blue-800">
+                  {group.tec_subject}
+                  {!group.topics[0]?.mapped_subject_name && (
+                    <span className="ml-2 text-xs font-normal text-amber-700">
+                      (vincule a matéria antes)
+                    </span>
                   )}
-                  <p className="mt-2 text-xs text-slate-400">
-                    {u.count} questões
-                    {u.mapped_subject_name
-                      ? ` · matéria: ${u.mapped_subject_name}`
-                      : " · vincule a matéria TEC antes"}
-                  </p>
-                </button>
+                  {group.topics[0]?.mapped_subject_name && (
+                    <span className="ml-2 text-xs font-normal text-slate-500">
+                      → {group.topics[0].mapped_subject_name}
+                    </span>
+                  )}
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {group.topics.map((u) => (
+                    <li key={`${u.tec_subject}|||${u.tec_topic}`}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTopic(u)
+                          setYourTopicId("")
+                          if (u.mapped_subject_id) setYourSubjectId(u.mapped_subject_id)
+                        }}
+                        className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
+                          selectedTopic?.tec_topic === u.tec_topic &&
+                          selectedTopic?.tec_subject === u.tec_subject
+                            ? "border-blue-500 bg-blue-50"
+                            : "bg-white hover:bg-slate-50"
+                        }`}
+                      >
+                        <p className="font-medium text-slate-900">{u.tec_topic}</p>
+                        <p className="mt-1 text-xs text-slate-400">{u.count} questões</p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           {tab === "topics" && unmappedTopics.length === 0 && (

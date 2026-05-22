@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server"
 import {
   listUnmappedTecSubjects,
   listUnmappedTecTopics,
+  listUnmappedTecTopicsGrouped,
   saveSubjectMapping,
   saveTopicMapping,
   createTopicAndMapping,
@@ -26,6 +27,11 @@ export async function GET(req: Request) {
 
   if (mode === "topics") {
     const items = await listUnmappedTecTopics(user_id)
+    return NextResponse.json(items)
+  }
+
+  if (mode === "topics_grouped") {
+    const items = await listUnmappedTecTopicsGrouped(user_id)
     return NextResponse.json(items)
   }
 

@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft } from "lucide-react"
 
+type TecGroup = { tec_subject: string; topics: string[] }
+
 type Facets = {
   bancas: string[]
   orgaos: string[]
@@ -13,6 +15,7 @@ type Facets = {
   anos: number[]
   tec_subjects: string[]
   tec_topics: string[]
+  tec_groups: TecGroup[]
 }
 
 type Subject = { id: string; name: string }
@@ -23,7 +26,7 @@ const CATEGORIES = [
   { key: "cargo", label: "Cargo" },
   { key: "ano", label: "Ano" },
   { key: "tec_subject", label: "Matéria TEC" },
-  { key: "tec_topic", label: "Assunto TEC" },
+  { key: "tec_topic", label: "Assuntos (por matéria)" },
 ] as const
 
 export default function BancoPage() {
@@ -70,6 +73,23 @@ export default function BancoPage() {
     })
   }
 
+  /** Assunto sempre carrega a matéria TEC pai no filtro. */
+  function toggleTopic(tecSubject: string, tecTopic: string) {
+    setFilters((prev) => {
+      const topics = prev.tec_topic ?? []
+      const subjects = prev.tec_subject ?? []
+      const has = topics.includes(tecTopic)
+      const nextTopics = has
+        ? topics.filter((t) => t !== tecTopic)
+        : [...topics, tecTopic]
+      let nextSubjects = subjects
+      if (!has && !subjects.includes(tecSubject)) {
+        nextSubjects = [...subjects, tecSubject]
+      }
+      return { ...prev, tec_topic: nextTopics, tec_subject: nextSubjects }
+    })
+  }
+
   function facetValues(key: string): string[] {
     if (!facets) return []
     const map: Record<string, string[] | number[]> = {
@@ -81,6 +101,15 @@ export default function BancoPage() {
       tec_topic: facets.tec_topics,
     }
     return (map[key] ?? []) as string[]
+  }
+
+  const visibleTecGroups = (): TecGroup[] => {
+    if (!facets?.tec_groups.length) return []
+    const selectedSubjects = filters.tec_subject ?? []
+    if (activeCategory === "tec_topic" && selectedSubjects.length > 0) {
+      return facets.tec_groups.filter((g) => selectedSubjects.includes(g.tec_subject))
+    }
+    return facets.tec_groups
   }
 
   async function createFromFilter() {
@@ -110,6 +139,9 @@ export default function BancoPage() {
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
       <h1 className="text-xl font-bold">Banco de questões</h1>
+      <p className="mt-1 text-xs text-slate-500">
+        Matéria e assunto TEC vêm juntos no PDF. Ao marcar um assunto, a matéria dele entra no filtro.
+      </p>
       <div className="mt-4 flex min-h-0 flex-1 gap-4">
         <nav className="w-44 shrink-0 space-y-1 border-r pr-2">
           {CATEGORIES.map((c) => (
@@ -127,29 +159,66 @@ export default function BancoPage() {
         </nav>
         <div className="min-w-0 flex-1 overflow-y-auto border-r pr-4">
           <p className="mb-2 text-sm font-medium text-slate-600">{activeCategory}</p>
-          <ul className="space-y-1">
-            {facetValues(activeCategory).map((v) => (
-              <li key={v}>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={(filters[activeCategory] ?? []).includes(v)}
-                    onChange={() => toggleFilter(activeCategory, v)}
-                  />
-                  {v}
-                </label>
-              </li>
-            ))}
-          </ul>
+
+          {activeCategory === "tec_topic" && facets?.tec_groups.length ? (
+            <div className="space-y-4">
+              {(filters.tec_subject?.length ?? 0) > 0 && (
+                <p className="text-xs text-slate-500">
+                  Mostrando assuntos das matérias selecionadas. Limpe &quot;Matéria TEC&quot; para ver
+                  todas.
+                </p>
+              )}
+              {visibleTecGroups().map((g) => (
+                <div key={g.tec_subject} className="rounded-lg border bg-slate-50/80 p-3">
+                  <label className="flex cursor-pointer items-center gap-2 border-b border-slate-200 pb-2 text-sm font-semibold text-blue-800">
+                    <input
+                      type="checkbox"
+                      checked={(filters.tec_subject ?? []).includes(g.tec_subject)}
+                      onChange={() => toggleFilter("tec_subject", g.tec_subject)}
+                    />
+                    {g.tec_subject}
+                  </label>
+                  <ul className="mt-2 space-y-1 pl-1">
+                    {g.topics.map((topic) => (
+                      <li key={`${g.tec_subject}|||${topic}`}>
+                        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={(filters.tec_topic ?? []).includes(topic)}
+                            onChange={() => toggleTopic(g.tec_subject, topic)}
+                          />
+                          <span>{topic}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <ul className="space-y-1">
+              {facetValues(activeCategory).map((v) => (
+                <li key={v}>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={(filters[activeCategory] ?? []).includes(v)}
+                      onChange={() => toggleFilter(activeCategory, v)}
+                    />
+                    {v}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        <div className="w-72 shrink-0 flex flex-col">
-          <p className="text-sm font-medium">
-            Filtros ativos: {activeFilters.length}
-          </p>
+        <div className="flex w-72 shrink-0 flex-col">
+          <p className="text-sm font-medium">Filtros ativos: {activeFilters.length}</p>
           <ul className="mt-2 flex-1 overflow-y-auto text-xs text-slate-600">
             {activeFilters.map(({ k, v }) => (
               <li key={`${k}-${v}`} className="mb-1 rounded bg-slate-100 px-2 py-1">
-                {k}: {v}
+                {k === "tec_subject" ? "matéria" : k === "tec_topic" ? "assunto" : k}: {v}
               </li>
             ))}
           </ul>
@@ -168,7 +237,7 @@ export default function BancoPage() {
               onChange={(e) => setSubjectId(e.target.value)}
               className="w-full rounded border px-2 py-1 text-sm"
             >
-              <option value="">Matéria</option>
+              <option value="">Sua matéria (organização)</option>
               {subjects.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}

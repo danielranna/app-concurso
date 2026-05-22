@@ -31,6 +31,11 @@ export async function fetchBankQuestions(
   return { questions: (data ?? []) as QuestionRow[], total: count ?? 0 }
 }
 
+export type TecTaxonomyGroup = {
+  tec_subject: string
+  topics: string[]
+}
+
 export async function fetchFilterFacets(): Promise<{
   bancas: string[]
   orgaos: string[]
@@ -38,6 +43,7 @@ export async function fetchFilterFacets(): Promise<{
   anos: number[]
   tec_subjects: string[]
   tec_topics: string[]
+  tec_groups: TecTaxonomyGroup[]
 }> {
   const { data, error } = await supabaseServer
     .from("questions")
@@ -58,6 +64,23 @@ export async function fetchFilterFacets(): Promise<{
     return true
   }
 
+  const groupMap = new Map<string, Set<string>>()
+  for (const r of rows) {
+    const sub = r.tec_subject?.trim()
+    const top = r.tec_topic?.trim()
+    if (!sub || !cleanFacet(sub) || !top || !cleanFacet(top)) continue
+    const set = groupMap.get(sub) ?? new Set<string>()
+    set.add(top)
+    groupMap.set(sub, set)
+  }
+
+  const tec_groups = [...groupMap.entries()]
+    .map(([tec_subject, topics]) => ({
+      tec_subject,
+      topics: [...topics].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    }))
+    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+
   return {
     bancas: uniq(rows.map((r) => r.banca).filter(cleanFacet)),
     orgaos: uniq(rows.map((r) => r.orgao)),
@@ -65,8 +88,9 @@ export async function fetchFilterFacets(): Promise<{
     anos: [...new Set(rows.map((r) => r.ano).filter((a): a is number => a != null))].sort(
       (a, b) => b - a
     ),
-    tec_subjects: uniq(rows.map((r) => r.tec_subject).filter(cleanFacet)),
-    tec_topics: uniq(rows.map((r) => r.tec_topic).filter(cleanFacet)),
+    tec_subjects: tec_groups.map((g) => g.tec_subject),
+    tec_topics: tec_groups.flatMap((g) => g.topics),
+    tec_groups,
   }
 }
 

@@ -249,7 +249,7 @@ export async function resolveQuestionMapping(
   const subject_id = sub?.subject_id ?? null
 
   let topic_id: string | null = null
-  if (tecTopic) {
+  if (tecTopic && subject_id) {
     const top = mappings.find(
       (m) =>
         !isSubjectLevelMapping(m.tec_topic) &&
@@ -257,9 +257,42 @@ export async function resolveQuestionMapping(
         normKey(m.tec_topic) === normKey(tecTopic)
     )
     topic_id = top?.topic_id ?? null
+
+    if (!topic_id) {
+      const { data: topics } = await supabaseServer
+        .from("topics")
+        .select("id, name")
+        .eq("user_id", userId)
+        .eq("subject_id", subject_id)
+      const match = (topics ?? []).find(
+        (t) => normKey(t.name) === normKey(tecTopic)
+      )
+      topic_id = match?.id ?? null
+    }
   }
 
   return { subject_id, topic_id }
+}
+
+/** Assuntos pendentes agrupados pela matéria TEC (hierarquia do PDF). */
+export async function listUnmappedTecTopicsGrouped(
+  userId: string
+): Promise<{ tec_subject: string; topics: TecTopicGroup[] }[]> {
+  const flat = await listUnmappedTecTopics(userId)
+  const map = new Map<string, TecTopicGroup[]>()
+  for (const t of flat) {
+    const list = map.get(t.tec_subject) ?? []
+    list.push(t)
+    map.set(t.tec_subject, list)
+  }
+  return [...map.entries()]
+    .map(([tec_subject, topics]) => ({
+      tec_subject,
+      topics: topics.sort((a, b) =>
+        a.tec_topic.localeCompare(b.tec_topic, "pt-BR")
+      ),
+    }))
+    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
 }
 
 /** @deprecated use listUnmappedTecSubjects + listUnmappedTecTopics */

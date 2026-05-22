@@ -173,6 +173,19 @@ e) opção E
 Gabarito 1) A
 `
 
+const DIR_ADM_MCQ_SNIPPET = `
+www.tecconcursos.com.br/questoes/2349960
+CEBRASPE (CESPE) - TJ TRT8/TRT 8/Administrativa/2023
+Direito Administrativo (Doutrina e Leis Federais) - Princípios Implícitos, Reconhecidos e Infraconstitucionais
+A administração pública possui o poder-dever de rever os seus próprios atos, seja para anulá-los por vício de legalidade, seja para revogá-los por questões de conveniência e de oportunidade. Trata-se, nesse caso, do princípio da administração pública da
+a)  eficiência.
+b)  moralidade.
+c)  segurança jurídica.
+d)  autotutela.
+e)  impessoalidade.
+Gabarito 16) D
+`
+
 const CIENCIA_CE_SNIPPET = `
 www.tecconcursos.com.br/questoes/9990001
 CEBRASPE (CESPE) - ANL (Org X)/Org X/Area/2024
@@ -303,6 +316,16 @@ function runTests() {
 
   const q325 = parseTecPdfText(AUDITORIA_325825_LINES).questions[0]
   assert(q325.statement.startsWith("As normas brasileiras"), `325 stmt: ${q325.statement.slice(0, 40)}`)
+
+  const dirAdm = parseTecPdfText(DIR_ADM_MCQ_SNIPPET)
+  assert(dirAdm.questions.length === 1, `dirAdm count: ${dirAdm.questions.length}`)
+  assert(dirAdm.questions[0].type === "multiple_choice", "dirAdm type")
+  assert(
+    dirAdm.questions[0].tec_topic?.includes("Infraconstitucionais"),
+    `dirAdm topic: ${dirAdm.questions[0].tec_topic}`
+  )
+  assert(dirAdm.questions[0].options.length === 5, `dirAdm opts: ${dirAdm.questions[0].options.length}`)
+  assert(!dirAdm.questions[0].statement.includes("eficiência."), "stmt should not start with option")
 
   const ci = parseTecPdfText(CIENCIA_CE_SNIPPET)
   const ciq = ci.questions[0]
