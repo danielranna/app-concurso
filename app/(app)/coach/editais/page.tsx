@@ -27,6 +27,7 @@ type BlockMapping = {
   subject_name: string | null
   match_score: number
   group_count: number
+  manual?: boolean
 }
 
 type SubjectMapping = {
@@ -79,6 +80,7 @@ export default function CoachEditaisPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<string | null>(null)
   const [planning, setPlanning] = useState(false)
+  const [savingMapping, setSavingMapping] = useState<string | null>(null)
   const active = targets.find((t) => t.id === selectedId) ?? targets.find((t) => t.is_active)
 
   function reloadTargets(uid: string) {
@@ -189,6 +191,35 @@ export default function CoachEditaisPage() {
       alert("Falha no envio. Verifique o bucket coach-documents no Supabase.")
     } finally {
       setUploading(null)
+    }
+  }
+
+  async function updateIncidenceMapping(
+    excelLabel: string,
+    subjectId: string | null
+  ) {
+    if (!userId || !incidenceWorkbook) return
+    setSavingMapping(excelLabel)
+    try {
+      const res = await fetch(
+        `/api/coach/documents/${incidenceWorkbook.id}/incidence-mapping`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            excel_label: excelLabel,
+            subject_id: subjectId,
+          }),
+        }
+      )
+      const data = await res.json()
+      if (data.error) alert(data.error)
+      else if (selectedId) reloadDocs(userId, selectedId)
+    } catch {
+      alert("Não foi possível salvar o vínculo.")
+    } finally {
+      setSavingMapping(null)
     }
   }
 
@@ -384,14 +415,18 @@ export default function CoachEditaisPage() {
           {mappings?.by_block && mappings.by_block.length > 0 && (
             <div className="space-y-2 border-t border-slate-200 pt-4">
               <p className="text-sm font-medium text-slate-800">
-                Vínculo automático (Excel → suas matérias)
+                Vínculo Excel → suas matérias
               </p>
-              <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white">
+              <p className="text-xs text-slate-600">
+                Ajuste no menu da coluna &quot;Sua matéria&quot; quando o
+                automático errar. Salva na hora.
+              </p>
+              <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-white">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-50">
                     <tr className="text-left text-slate-500">
                       <th className="px-3 py-2">No Excel</th>
-                      <th className="px-3 py-2">Sua matéria</th>
+                      <th className="min-w-[200px] px-3 py-2">Sua matéria</th>
                       <th className="px-3 py-2">Agrup.</th>
                     </tr>
                   </thead>
@@ -403,15 +438,43 @@ export default function CoachEditaisPage() {
                           row.subject_id ? "" : "bg-amber-50/80"
                         }`}
                       >
-                        <td className="px-3 py-1.5">{row.excel_label}</td>
-                        <td className="px-3 py-1.5">
-                          {row.subject_name ?? (
-                            <span className="text-amber-800">
-                              sem correspondência
-                            </span>
-                          )}
+                        <td className="px-3 py-1.5 align-top">
+                          <span className="line-clamp-2">{row.excel_label}</span>
                         </td>
-                        <td className="px-3 py-1.5">{row.group_count}</td>
+                        <td className="px-3 py-1.5">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <select
+                              value={row.subject_id ?? ""}
+                              disabled={
+                                savingMapping === row.excel_label || !subjects.length
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value
+                                updateIncidenceMapping(
+                                  row.excel_label,
+                                  v === "" ? null : v
+                                )
+                              }}
+                              className="max-w-full min-w-[160px] flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-50"
+                            >
+                              <option value="">— sem vínculo —</option>
+                              {subjects.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                            {savingMapping === row.excel_label && (
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400" />
+                            )}
+                            {row.manual && (
+                              <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-800">
+                                editado
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-1.5 align-top">{row.group_count}</td>
                       </tr>
                     ))}
                   </tbody>

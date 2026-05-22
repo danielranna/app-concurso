@@ -9,6 +9,7 @@ import {
   groupsForSubjectFromBlocks,
   mapIncidenceBlocksToSubjects,
   pickBlockForSubject,
+  type ManualOverrides,
   type SubjectRow,
 } from "./incidence-subject-map"
 
@@ -27,10 +28,26 @@ export type IncidenceWorkbookDoc = {
   parsed_tables: {
     scope?: string
     blocks?: IncidenceSubjectBlock[]
+    manual_overrides?: ManualOverrides
     subject_mappings?: ReturnType<typeof mapIncidenceBlocksToSubjects>
     block_count?: number
     sheet_names?: string[]
   }
+}
+
+export function getManualOverridesFromDoc(doc: {
+  parsed_tables?: Record<string, unknown> | null
+}): ManualOverrides {
+  const pt = (doc.parsed_tables ?? {}) as { manual_overrides?: ManualOverrides }
+  return pt.manual_overrides ?? {}
+}
+
+function recomputeSubjectMappings(
+  blocks: IncidenceSubjectBlock[],
+  subjects: SubjectRow[],
+  manualOverrides: ManualOverrides
+) {
+  return mapIncidenceBlocksToSubjects(blocks, subjects, manualOverrides)
 }
 
 /** Único Excel de incidência da prova (todas as matérias no arquivo). */
@@ -65,9 +82,11 @@ export async function buildIncidencePayloadForExam(
     .select("id, name")
     .eq("user_id", userId)
 
+  const manualOverrides = wb ? getManualOverridesFromDoc(wb) : {}
   const mapping = mapIncidenceBlocksToSubjects(
     blocks,
-    (subjects ?? []) as SubjectRow[]
+    (subjects ?? []) as SubjectRow[],
+    manualOverrides
   )
 
   return {
@@ -120,12 +139,14 @@ export async function uploadCoachDocument(params: {
       .select("id, name")
       .eq("user_id", params.userId)
 
+    const isWorkbook = !params.subjectId
+    const manualOverrides: ManualOverrides = isWorkbook ? {} : {}
+
     const subjectMappings = mapIncidenceBlocksToSubjects(
       parsed.blocks,
-      (subjects ?? []) as SubjectRow[]
+      (subjects ?? []) as SubjectRow[],
+      manualOverrides
     )
-
-    const isWorkbook = !params.subjectId
 
     if (isWorkbook) {
       await supabaseServer
@@ -148,6 +169,7 @@ export async function uploadCoachDocument(params: {
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
       block_count: parsed.blocks.length,
+      manual_overrides: isWorkbook ? manualOverrides : undefined,
       subject_mappings: isWorkbook ? subjectMappings : undefined,
       matched_subject_label: block?.subject_label ?? null,
       groups: block?.groups ?? [],
@@ -263,7 +285,17 @@ export async function incidenceGroupsForSubject(
 ) {
   const wb = await getExamIncidenceWorkbook(userId, examTargetId)
   if (wb?.parsed_tables?.blocks?.length) {
-    return groupsForSubjectFromBlocks(wb.parsed_tables.blocks, subjectName)
+    const { data: subjects } = await supabaseServer
+      .from("subjects")
+      .select("id, name")
+      .eq("user_id", userId)
+    return groupsForSubjectFromBlocks(
+      wb.parsed_tables.blocks,
+      subjectName,
+      subjectId,
+      (subjects ?? []) as SubjectRow[],
+      getManualOverridesFromDoc(wb)
+    )
   }
   const docs = await listCoachDocuments(userId, {
     examTargetId,
@@ -272,4 +304,67 @@ export async function incidenceGroupsForSubject(
   })
   const legacy = docs[0]
   return legacy ? documentIncidenceGroups(legacy) : []
+}
+
+export async function setIncidenceBlockOverride(params: {
+  userId: string
+  documentId: string
+  excelLabel: string
+  subjectId: string | null
+}) {
+  const { data: doc, error } = await supabaseServer
+    .from("subject_documents")
+    .select("*")
+    .eq("id", params.documentId)
+    .eq("user_id", params.userId)
+    .eq("doc_type", "incidence")
+    .single()
+
+  if (error || !doc) throw new Error("Documento de incidência não encontrado")
+
+  const pt = (doc.parsed_tables ?? {}) as {
+    scope?: string
+    blocks?: IncidenceSubjectBlock[]
+    manual_overrides?: ManualOverrides
+  }
+
+  if (pt.scope !== "exam_workbook" || !pt.blocks?.length) {
+    throw new Error("Edição de vínculo só vale para o Excel completo da prova")
+  }
+
+  const block = pt.blocks.find((b) => b.subject_label === params.excelLabel)
+  if (!block) throw new Error("Bloco não encontrado no Excel importado")
+
+  const manual_overrides: ManualOverrides = {
+    ...(pt.manual_overrides ?? {}),
+    [params.excelLabel]: params.subjectId,
+  }
+
+  const { data: subjects } = await supabaseServer
+    .from("subjects")
+    .select("id, name")
+    .eq("user_id", params.userId)
+
+  const subject_mappings = recomputeSubjectMappings(
+    pt.blocks,
+    (subjects ?? []) as SubjectRow[],
+    manual_overrides
+  )
+
+  const parsed_tables = {
+    ...pt,
+    manual_overrides,
+    subject_mappings,
+  }
+
+  const { data: updated, error: upErr } = await supabaseServer
+    .from("subject_documents")
+    .update({ parsed_tables })
+    .eq("id", params.documentId)
+    .eq("user_id", params.userId)
+    .select("*")
+    .single()
+
+  if (upErr) throw new Error(upErr.message)
+  return updated
 }
