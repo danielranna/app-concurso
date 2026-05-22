@@ -1,13 +1,14 @@
-import { createRequire } from "module"
-import { join } from "path"
+type PdfParseFn = (buffer: Buffer) => Promise<{ text: string; numpages?: number }>
 
-const require = createRequire(join(process.cwd(), "package.json"))
+/**
+ * Usa lib/pdf-parse.js (não index.js) para evitar branch de debug do pacote
+ * e permitir que o Next inclua o módulo no bundle da função serverless.
+ */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse: PdfParseFn = require("pdf-parse/lib/pdf-parse.js")
 
-type PdfParseFn = (buffer: Buffer) => Promise<{ text: string; numpages: number }>
-
-/** Extração de texto em Node/Vercel (sem worker do pdfjs). */
+/** Extração de texto em Node/Vercel. */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfParse = require("pdf-parse") as PdfParseFn
   const result = await pdfParse(buffer)
   return result.text ?? ""
 }
