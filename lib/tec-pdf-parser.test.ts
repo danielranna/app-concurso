@@ -186,6 +186,19 @@ e)  impessoalidade.
 Gabarito 16) D
 `
 
+const CIENCIA_AS_FONTES_SNIPPET = `
+www.tecconcursos.com.br/questoes/1916046
+CEBRASPE (CESPE) - ADP (DPE RO)/DPE RO/Redes e Comunicação de Dados/2022
+TI - Ciência de Dados e Inteligência Artificial - Dados Estruturados, Não-Estruturados e Semiestruturados
+As fontes de dados não estruturados incluem
+a) a planilha eletrônica.
+b) a rede social.
+c) a linguagem de programação.
+d) o arquivo XML.
+e) o banco de dados.
+Gabarito 1) B
+`
+
 const CIENCIA_CE_SNIPPET = `
 www.tecconcursos.com.br/questoes/9990001
 CEBRASPE (CESPE) - ANL (Org X)/Org X/Area/2024
@@ -316,6 +329,19 @@ function runTests() {
 
   const q325 = parseTecPdfText(AUDITORIA_325825_LINES).questions[0]
   assert(q325.statement.startsWith("As normas brasileiras"), `325 stmt: ${q325.statement.slice(0, 40)}`)
+
+  const asFontes = parseTecPdfText(CIENCIA_AS_FONTES_SNIPPET)
+  assert(asFontes.questions.length === 1, `asFontes count: ${asFontes.questions.length}`)
+  assert(asFontes.warnings.length === 0, `asFontes warnings: ${asFontes.warnings.join("; ")}`)
+  assert(asFontes.questions[0].options.length === 5, `asFontes opts: ${asFontes.questions[0].options.length}`)
+  assert(
+    asFontes.questions[0].statement.startsWith("As fontes de dados"),
+    `asFontes stmt: ${asFontes.questions[0].statement.slice(0, 40)}`
+  )
+  assert(
+    asFontes.questions[0].tec_topic?.includes("Semiestruturados"),
+    `asFontes topic: ${asFontes.questions[0].tec_topic}`
+  )
 
   const dirAdm = parseTecPdfText(DIR_ADM_MCQ_SNIPPET)
   assert(dirAdm.questions.length === 1, `dirAdm count: ${dirAdm.questions.length}`)

@@ -164,7 +164,7 @@ const ENUNCIADO_PHRASES =
   "A seguir|Considerando(?:-se)?|No que se refere|No que diz respeito|No argumento seguinte|" +
   "A respeito(?: de)?|Acerca (?:de |das |do )?|À luz (?:de |das |do )?|Julgue o|Assinale a(?: opção)?|" +
   "Em relação(?: a)?|Com relação|Com respeito a|Com base(?: nas| no)?|Tendo em vista|Diante do|Segundo o|" +
-  "De acordo com|Sabendo que|Suponha que|Considere que|Observe que|As normas|Dadas as|Elemento|Fluxos|" +
+  "De acordo com|Sabendo que|Suponha que|Considere que|Observe que|As normas|As fontes|Dadas as|Elemento|Fluxos|" +
   "No tocante|Relativamente|Nos termos(?: do| da)?|Analise|Qual a|Qual o|Para responder|Conforme (?:a|o) |" +
   "Quando utiliza|Quando o|Em um|Em nova|Um Auditor|Uma empresa|A empresa|A secretaria|O objetivo|" +
   "O auditor|O Estado|O ato|O lançamento|A função|A Sociedade|A Constituição|A fiscalização|A atitude|" +
@@ -192,7 +192,13 @@ const TAIL_ITEM_NUMBER_RE = /\s(\d+\)\s)/
 const TAIL_NUMBER_LOOKAHEAD = 220
 
 const MCQ_STMT_FALLBACK_RE =
-  /\s(Elemento\s|Fluxos\s|As normas\b|A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|diretor|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s)/i
+  /\s(Elemento\s|Fluxos\s|As normas\b|As fontes\b|A\s+(?:Lei|resolução|portaria|Constituição|medida|norma|seguinte|figura|tabela|frase|opção)|O\s+(?:modelo|item|texto|serviço|processo|princípio|diretor|sistema|a|o|e)\b|Na\s|No\s|Em\s|Um\s|Uma\s)/i
+
+/** Enunciado colado ao assunto, antes das alternativas a)–e). */
+const STATEMENT_BEFORE_OPTIONS_RE =
+  /\s(?:(?:As|Os)\s+(?!-)|Assinale|Considerando|Uma empresa|Um\s|Uma\s|A\s+(?:empresa|secretaria|função|frase|obtenção|propósito|administração)\b|O\s+(?:objetivo|auditor|Estado|ato|sistema|processo|poder)\b|Em\s|No\s|Na\s|Para\s|Nessa\s)/i
+
+const MCQ_OPTION_LINE_RE = /^[a-e]\)\s/i
 
 function isEnunciadoLine(line: string): boolean {
   const t = line.trim()
@@ -224,6 +230,13 @@ function splitTopicFromStatement(tail: string): { topic: string; statementPart: 
           statementPart: tail.slice(idx2).trim(),
         }
       }
+      const idx3 = beforeOpts.search(STATEMENT_BEFORE_OPTIONS_RE)
+      if (idx3 > 8) {
+        return {
+          topic: beforeOpts.slice(0, idx3).trim(),
+          statementPart: tail.slice(idx3).trim(),
+        }
+      }
     }
     return { topic: tail, statementPart: "" }
   }
@@ -243,15 +256,27 @@ function splitTaxonomyByLines(afterMeta: string): {
   if (lines.length < 2) return null
 
   const firstStmt = lines.findIndex((l) => isEnunciadoLine(l))
-  if (firstStmt <= 0) return null
-
-  const taxLines = lines.slice(0, firstStmt).filter((l) => l.includes(" - "))
-  if (taxLines.length === 0) return null
-
-  return {
-    taxonomyLine: taxLines.join(" "),
-    rest: lines.slice(firstStmt).join("\n"),
+  if (firstStmt > 0) {
+    const taxLines = lines.slice(0, firstStmt).filter((l) => l.includes(" - "))
+    if (taxLines.length === 0) return null
+    return {
+      taxonomyLine: taxLines.join(" "),
+      rest: lines.slice(firstStmt).join("\n"),
+    }
   }
+
+  const optLine = lines.findIndex((l) => MCQ_OPTION_LINE_RE.test(l))
+  if (optLine > 1) {
+    const taxLines = lines.slice(0, optLine).filter((l) => l.includes(" - "))
+    if (taxLines.length === 0) return null
+    const stmtLines = lines.slice(taxLines.length, optLine)
+    return {
+      taxonomyLine: taxLines.join(" "),
+      rest: [...stmtLines, ...lines.slice(optLine)].join("\n"),
+    }
+  }
+
+  return null
 }
 
 function splitTaxonomySingleLine(afterMeta: string): {
