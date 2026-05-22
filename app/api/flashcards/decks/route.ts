@@ -9,7 +9,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabaseServer
     .from("flashcard_decks")
-    .select("id, name, fsrs_parameters, created_at")
+    .select("id, name, subject_id, fsrs_parameters, created_at")
     .eq("user_id", user_id)
     .order("name")
 
@@ -19,7 +19,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, name, fsrs_parameters } = body
+  const { user_id, name, subject_id, fsrs_parameters } = body
 
   if (!user_id || !name?.trim()) {
     return NextResponse.json({ error: "user_id e name são obrigatórios" }, { status: 400 })
@@ -30,6 +30,7 @@ export async function POST(req: Request) {
     .insert({
       user_id,
       name: name.trim(),
+      subject_id: subject_id ?? null,
       fsrs_parameters: fsrs_parameters ?? {},
     })
     .select()

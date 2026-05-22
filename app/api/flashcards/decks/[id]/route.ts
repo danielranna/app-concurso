@@ -7,7 +7,7 @@ export async function PUT(
 ) {
   const { id } = await params
   const body = await req.json()
-  const { user_id, name, fsrs_parameters } = body
+  const { user_id, name, subject_id, fsrs_parameters } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
@@ -15,6 +15,7 @@ export async function PUT(
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (name !== undefined) updates.name = name
+  if (subject_id !== undefined) updates.subject_id = subject_id
   if (fsrs_parameters !== undefined) updates.fsrs_parameters = fsrs_parameters
 
   const { data, error } = await supabaseServer
