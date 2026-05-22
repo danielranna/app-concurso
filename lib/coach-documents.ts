@@ -3,8 +3,14 @@ import { extractPdfText } from "./pdf-extract"
 import {
   incidenceSummaryForLlm,
   parseIncidenceXlsx,
-  type ParsedIncidenceWorkbook,
+  type IncidenceSubjectBlock,
 } from "./incidence-xlsx"
+import {
+  groupsForSubjectFromBlocks,
+  mapIncidenceBlocksToSubjects,
+  pickBlockForSubject,
+  type SubjectRow,
+} from "./incidence-subject-map"
 
 function truncateText(text: string, maxChars: number) {
   if (text.length <= maxChars) return text
@@ -15,25 +21,69 @@ export const COACH_DOCS_BUCKET = "coach-documents"
 
 export type CoachDocType = "edital" | "incidence" | "study_material"
 
-function norm(s: string) {
-  return s
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .trim()
+export type IncidenceWorkbookDoc = {
+  id: string
+  title: string
+  parsed_tables: {
+    scope?: string
+    blocks?: IncidenceSubjectBlock[]
+    subject_mappings?: ReturnType<typeof mapIncidenceBlocksToSubjects>
+    block_count?: number
+    sheet_names?: string[]
+  }
 }
 
-function pickBlockForSubject(
-  parsed: ParsedIncidenceWorkbook,
-  subjectName: string
-) {
-  const n = norm(subjectName)
-  const exact = parsed.blocks.find((b) => norm(b.subject_label) === n)
-  if (exact) return exact
-  const partial = parsed.blocks.find(
-    (b) => norm(b.subject_label).includes(n) || n.includes(norm(b.subject_label))
+/** Único Excel de incidência da prova (todas as matérias no arquivo). */
+export async function getExamIncidenceWorkbook(
+  userId: string,
+  examTargetId: string
+): Promise<IncidenceWorkbookDoc | null> {
+  const docs = await listCoachDocuments(userId, {
+    examTargetId,
+    docType: "incidence",
+  })
+  const wb = docs.find(
+    (d) =>
+      !d.subject_id &&
+      (d.parsed_tables as { scope?: string } | null)?.scope === "exam_workbook"
   )
-  return partial ?? parsed.blocks[0] ?? null
+  if (!wb) return null
+  return wb as IncidenceWorkbookDoc
+}
+
+export async function buildIncidencePayloadForExam(
+  userId: string,
+  examTargetId: string
+) {
+  const wb = await getExamIncidenceWorkbook(userId, examTargetId)
+  const blocks =
+    (wb?.parsed_tables as { blocks?: IncidenceSubjectBlock[] } | null)?.blocks ??
+    []
+
+  const { data: subjects } = await supabaseServer
+    .from("subjects")
+    .select("id, name")
+    .eq("user_id", userId)
+
+  const mapping = mapIncidenceBlocksToSubjects(
+    blocks,
+    (subjects ?? []) as SubjectRow[]
+  )
+
+  return {
+    workbook: wb,
+    blocks,
+    mapping,
+    for_llm: mapping.by_subject.map((row) => ({
+      subject_id: row.subject_id,
+      subject_name: row.subject_name,
+      excel_label: row.excel_label,
+      top_topics: [...row.groups]
+        .sort((a, b) => b.percent - a.percent)
+        .slice(0, 8)
+        .map((g) => ({ name: g.name, percent: g.percent, qty: g.quantity })),
+    })),
+  }
 }
 
 export async function uploadCoachDocument(params: {
@@ -59,16 +109,46 @@ export async function uploadCoachDocument(params: {
     if (!["xlsx", "xls"].includes(ext)) {
       throw new Error("Incidência deve ser arquivo Excel (.xlsx ou .xls)")
     }
+    if (!params.examTargetId) {
+      throw new Error("exam_target_id obrigatório para incidência")
+    }
+
     const parsed = parseIncidenceXlsx(buffer)
+
+    const { data: subjects } = await supabaseServer
+      .from("subjects")
+      .select("id, name")
+      .eq("user_id", params.userId)
+
+    const subjectMappings = mapIncidenceBlocksToSubjects(
+      parsed.blocks,
+      (subjects ?? []) as SubjectRow[]
+    )
+
+    const isWorkbook = !params.subjectId
+
+    if (isWorkbook) {
+      await supabaseServer
+        .from("subject_documents")
+        .delete()
+        .eq("user_id", params.userId)
+        .eq("exam_target_id", params.examTargetId)
+        .eq("doc_type", "incidence")
+        .is("subject_id", null)
+    }
+
     const block =
       params.subjectName != null
-        ? pickBlockForSubject(parsed, params.subjectName)
-        : parsed.blocks[0]
+        ? pickBlockForSubject(parsed.blocks, params.subjectName)
+        : null
 
     parsed_tables = {
       format: "xlsx_incidence",
+      scope: isWorkbook ? "exam_workbook" : "single_subject",
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
+      block_count: parsed.blocks.length,
+      subject_mappings: isWorkbook ? subjectMappings : undefined,
       matched_subject_label: block?.subject_label ?? null,
       groups: block?.groups ?? [],
       group_count: block?.groups.length ?? 0,
@@ -172,4 +252,24 @@ export function documentIncidenceGroups(doc: {
     groups?: { name: string; percent: number; quantity: number; code: string }[]
   }
   return pt.groups ?? []
+}
+
+/** Grupos de incidência para uma matéria (workbook único ou upload antigo por matéria). */
+export async function incidenceGroupsForSubject(
+  userId: string,
+  examTargetId: string,
+  subjectId: string,
+  subjectName: string
+) {
+  const wb = await getExamIncidenceWorkbook(userId, examTargetId)
+  if (wb?.parsed_tables?.blocks?.length) {
+    return groupsForSubjectFromBlocks(wb.parsed_tables.blocks, subjectName)
+  }
+  const docs = await listCoachDocuments(userId, {
+    examTargetId,
+    subjectId,
+    docType: "incidence",
+  })
+  const legacy = docs[0]
+  return legacy ? documentIncidenceGroups(legacy) : []
 }

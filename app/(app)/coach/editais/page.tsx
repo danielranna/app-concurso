@@ -21,6 +21,21 @@ type IncidenceGroup = {
   percent: number
 }
 
+type BlockMapping = {
+  excel_label: string
+  subject_id: string | null
+  subject_name: string | null
+  match_score: number
+  group_count: number
+}
+
+type SubjectMapping = {
+  subject_id: string
+  subject_name: string
+  excel_label: string
+  match_score: number
+}
+
 type DocRow = {
   id: string
   title: string
@@ -31,9 +46,16 @@ type DocRow = {
   parsed_tables?: {
     char_count?: number
     format?: string
+    scope?: string
+    block_count?: number
     group_count?: number
     groups?: IncidenceGroup[]
     matched_subject_label?: string
+    subject_mappings?: {
+      by_block?: BlockMapping[]
+      by_subject?: SubjectMapping[]
+      unmapped_subjects?: { id: string; name: string }[]
+    }
   }
 }
 
@@ -57,8 +79,6 @@ export default function CoachEditaisPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<string | null>(null)
   const [planning, setPlanning] = useState(false)
-  const [incidenceSubjectId, setIncidenceSubjectId] = useState("")
-
   const active = targets.find((t) => t.id === selectedId) ?? targets.find((t) => t.is_active)
 
   function reloadTargets(uid: string) {
@@ -93,10 +113,7 @@ export default function CoachEditaisPage() {
       reloadTargets(user.id)
       fetch(`/api/subjects?user_id=${user.id}`)
         .then((r) => r.json())
-        .then((s) => {
-          setSubjects(s ?? [])
-          if (s?.[0]) setIncidenceSubjectId(s[0].id)
-        })
+        .then((s) => setSubjects(s ?? []))
     })
   }, [router])
 
@@ -136,11 +153,7 @@ export default function CoachEditaisPage() {
     reloadTargets(userId)
   }
 
-  async function uploadDoc(
-    docType: "edital" | "incidence",
-    file: File,
-    subjectId?: string
-  ) {
+  async function uploadDoc(docType: "edital" | "incidence", file: File) {
     if (!userId || !selectedId) {
       alert("Selecione uma prova na lista acima.")
       return
@@ -151,7 +164,6 @@ export default function CoachEditaisPage() {
     form.set("doc_type", docType)
     form.set("file", file)
     form.set("exam_target_id", selectedId)
-    if (subjectId) form.set("subject_id", subjectId)
     form.set("title", file.name)
 
     try {
@@ -164,9 +176,12 @@ export default function CoachEditaisPage() {
         alert(data.error)
       } else {
         reloadDocs(userId, selectedId)
-        if (docType === "incidence" && data.parsed_tables?.group_count != null) {
+        if (docType === "incidence") {
+          const n = data.parsed_tables?.block_count ?? 0
+          const mapped =
+            data.parsed_tables?.subject_mappings?.by_subject?.length ?? 0
           alert(
-            `Incidência importada: ${data.parsed_tables.group_count} agrupamentos (sem subtópicos).`
+            `Excel importado: ${n} blocos de matéria no arquivo. ${mapped} vinculados automaticamente às suas matérias.`
           )
         }
       }
@@ -197,13 +212,23 @@ export default function CoachEditaisPage() {
   }
 
   const editalDoc = docs.find((d) => d.doc_type === "edital")
-  const incidenceDocs = docs.filter((d) => d.doc_type === "incidence")
+  const incidenceWorkbook = docs.find(
+    (d) =>
+      d.doc_type === "incidence" &&
+      !d.subject_id &&
+      d.parsed_tables?.scope === "exam_workbook"
+  )
+  const legacyIncidenceDocs = docs.filter(
+    (d) => d.doc_type === "incidence" && d.subject_id
+  )
+  const mappings = incidenceWorkbook?.parsed_tables?.subject_mappings
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-600">
-        Cadastre a prova, envie o PDF do edital e um PDF de incidência por
-        matéria. O coach cruza com seu desempenho e gera o plano.
+        Cadastre a prova, envie o PDF do edital e um único Excel de incidência
+        (todas as matérias no mesmo arquivo). O coach distribui automaticamente
+        para cada matéria sua.
       </p>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -321,88 +346,91 @@ export default function CoachEditaisPage() {
 
           <div className="space-y-2 border-t border-slate-200 pt-4">
             <p className="text-sm font-medium text-slate-800">
-              Incidência por matéria (Excel)
+              Incidência — um Excel para toda a prova
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={incidenceSubjectId}
-                onChange={(e) => setIncidenceSubjectId(e.target.value)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              >
-                {!subjects.length && (
-                  <option value="">Cadastre matérias em Configurações</option>
-                )}
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
-                <FileUp className="h-4 w-4" />
-                {uploading === "incidence"
-                  ? "Enviando…"
-                  : "Enviar Excel de incidência"}
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                  className="sr-only"
-                  disabled={!!uploading || !incidenceSubjectId}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f) uploadDoc("incidence", f, incidenceSubjectId)
-                    e.target.value = ""
-                  }}
-                />
-              </label>
-            </div>
+            <p className="text-xs text-slate-600">
+              O mesmo arquivo que você já tem (várias disciplinas em abas ou
+              blocos). Não precisa separar por matéria.
+            </p>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+              <FileUp className="h-4 w-4" />
+              {uploading === "incidence"
+                ? "Enviando…"
+                : incidenceWorkbook
+                  ? "Substituir Excel de incidência"
+                  : "Enviar Excel completo"}
+              <input
+                type="file"
+                accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                className="sr-only"
+                disabled={!!uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadDoc("incidence", f)
+                  e.target.value = ""
+                }}
+              />
+            </label>
+            {incidenceWorkbook && (
+              <p className="text-xs font-medium text-emerald-700">
+                ✓ {incidenceWorkbook.title} —{" "}
+                {incidenceWorkbook.parsed_tables?.block_count ?? 0} blocos no
+                arquivo,{" "}
+                {mappings?.by_subject?.length ?? 0} matérias vinculadas
+              </p>
+            )}
           </div>
 
-          {incidenceDocs.length > 0 && (
-            <div className="space-y-3 border-t border-slate-200 pt-4">
-              {incidenceDocs.map((d) => {
-                const sub = subjects.find((s) => s.id === d.subject_id)
-                const groups = d.parsed_tables?.groups ?? []
-                return (
-                  <div
-                    key={d.id}
-                    className="rounded-lg border border-slate-200 bg-white p-3 text-sm"
-                  >
-                    <p className="font-medium text-slate-900">
-                      {sub?.name ?? "Matéria"} — {d.title}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {groups.length} agrupamentos
-                      {d.parsed_tables?.matched_subject_label &&
-                        ` · bloco “${d.parsed_tables.matched_subject_label}”`}
-                    </p>
-                    {groups.length > 0 && (
-                      <table className="mt-2 w-full text-xs">
-                        <thead>
-                          <tr className="text-left text-slate-500">
-                            <th className="py-1">Assunto</th>
-                            <th>Qtd</th>
-                            <th>%</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...groups]
-                            .sort((a, b) => b.percent - a.percent)
-                            .slice(0, 12)
-                            .map((g) => (
-                              <tr key={g.code} className="border-t border-slate-100">
-                                <td className="py-1 pr-2">{g.name}</td>
-                                <td>{g.quantity}</td>
-                                <td>{g.percent.toFixed(1)}%</td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )
-              })}
+          {mappings?.by_block && mappings.by_block.length > 0 && (
+            <div className="space-y-2 border-t border-slate-200 pt-4">
+              <p className="text-sm font-medium text-slate-800">
+                Vínculo automático (Excel → suas matérias)
+              </p>
+              <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr className="text-left text-slate-500">
+                      <th className="px-3 py-2">No Excel</th>
+                      <th className="px-3 py-2">Sua matéria</th>
+                      <th className="px-3 py-2">Agrup.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mappings.by_block.map((row) => (
+                      <tr
+                        key={row.excel_label}
+                        className={`border-t border-slate-100 ${
+                          row.subject_id ? "" : "bg-amber-50/80"
+                        }`}
+                      >
+                        <td className="px-3 py-1.5">{row.excel_label}</td>
+                        <td className="px-3 py-1.5">
+                          {row.subject_name ?? (
+                            <span className="text-amber-800">
+                              sem correspondência
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5">{row.group_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(mappings.unmapped_subjects?.length ?? 0) > 0 && (
+                <p className="text-xs text-amber-800">
+                  Matérias suas sem bloco no Excel:{" "}
+                  {mappings.unmapped_subjects!.map((s) => s.name).join(", ")}
+                </p>
+              )}
             </div>
+          )}
+
+          {legacyIncidenceDocs.length > 0 && !incidenceWorkbook && (
+            <p className="text-xs text-slate-500 border-t border-slate-200 pt-2">
+              Você ainda tem {legacyIncidenceDocs.length} Excel(s) antigos por
+              matéria — envie o arquivo completo acima para unificar.
+            </p>
           )}
 
           <button

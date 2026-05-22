@@ -29,9 +29,9 @@ export async function POST(req: Request) {
       )
     }
 
-    if (doc_type === "incidence" && !subject_id) {
+    if (doc_type === "incidence" && !exam_target_id) {
       return NextResponse.json(
-        { error: "subject_id obrigatório para incidência" },
+        { error: "exam_target_id obrigatório para incidência" },
         { status: 400 }
       )
     }

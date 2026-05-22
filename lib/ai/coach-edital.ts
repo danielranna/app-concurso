@@ -1,5 +1,6 @@
 import { supabaseServer } from "../supabase-server"
 import {
+  buildIncidencePayloadForExam,
   documentTextExcerpt,
   listCoachDocuments,
 } from "../coach-documents"
@@ -70,22 +71,31 @@ export async function generateCoachEditalPlan(
 
   const docs = await listCoachDocuments(userId, { examTargetId })
   const editalDoc = docs.find((d) => d.doc_type === "edital")
-  const incidenceDocs = docs.filter((d) => d.doc_type === "incidence")
+  const incidencePayload = await buildIncidencePayloadForExam(
+    userId,
+    examTargetId
+  )
 
   const editalText = editalDoc ? documentTextExcerpt(editalDoc).slice(0, 25_000) : ""
-  const incidenceBySubject = incidenceDocs.map((d) => {
-    const pt = (d.parsed_tables ?? {}) as Record<string, unknown>
-    return {
-      subject_id: d.subject_id,
-      title: d.title,
-      format: pt.format ?? "unknown",
-      groups:
-        (pt.groups as { name: string; percent: number; quantity: number }[]) ??
-        [],
-      summary: pt.summary_for_llm ?? [],
-      excerpt: documentTextExcerpt(d).slice(0, 12_000),
-    }
-  })
+  const incidenceBySubject =
+    incidencePayload.for_llm.length > 0
+      ? incidencePayload.for_llm
+      : docs
+          .filter((d) => d.doc_type === "incidence" && d.subject_id)
+          .map((d) => {
+            const pt = (d.parsed_tables ?? {}) as Record<string, unknown>
+            return {
+              subject_id: d.subject_id,
+              subject_name: null,
+              excel_label: pt.matched_subject_label ?? d.title,
+              top_topics:
+                (pt.groups as {
+                  name: string
+                  percent: number
+                  quantity: number
+                }[]) ?? [],
+            }
+          })
 
   const performance = await buildPerformanceSnapshot(userId)
 
@@ -99,7 +109,17 @@ export async function generateCoachEditalPlan(
   const input = {
     exam_target: exam,
     edital_excerpt: editalText || null,
-    incidence_documents: incidenceBySubject,
+    incidence_workbook: incidencePayload.workbook
+      ? {
+          title: incidencePayload.workbook.title,
+          block_count: incidencePayload.blocks.length,
+          mapped_subjects: incidencePayload.mapping.by_subject.length,
+          unmapped_subjects: incidencePayload.mapping.unmapped_subjects.map(
+            (s) => s.name
+          ),
+        }
+      : null,
+    incidence_by_subject: incidenceBySubject,
     performance_snapshot: performance,
     recent_notebook_summaries: (recentReports ?? []).map((r) => ({
       subject_id: r.subject_id,
