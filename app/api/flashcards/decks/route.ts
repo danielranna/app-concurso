@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ensureSubjectDecks } from "@/lib/flashcard-subjects"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function GET(req: Request) {
@@ -7,35 +8,52 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
   }
 
-  const { data, error } = await supabaseServer
-    .from("flashcard_decks")
-    .select("id, name, subject_id, fsrs_parameters, created_at")
-    .eq("user_id", user_id)
-    .order("name")
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+  try {
+    const { subjects } = await ensureSubjectDecks(user_id)
+    const list = subjects.map((s) => ({
+      id: s.deck_id,
+      name: s.name,
+      subject_id: s.subject_id,
+      fsrs_parameters: {},
+      created_at: null,
+    }))
+    return NextResponse.json(list)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, name, subject_id, fsrs_parameters } = body
+  const { user_id, subject_id, fsrs_parameters } = body
 
-  if (!user_id || !name?.trim()) {
-    return NextResponse.json({ error: "user_id e name são obrigatórios" }, { status: 400 })
+  if (!user_id || !subject_id) {
+    return NextResponse.json(
+      { error: "Baralhos são criados automaticamente por matéria (subject_id)" },
+      { status: 400 }
+    )
   }
 
-  const { data, error } = await supabaseServer
-    .from("flashcard_decks")
-    .insert({
-      user_id,
-      name: name.trim(),
-      subject_id: subject_id ?? null,
-      fsrs_parameters: fsrs_parameters ?? {},
-    })
-    .select()
-    .single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  try {
+    const { subjects } = await ensureSubjectDecks(user_id)
+    const existing = subjects.find((s) => s.subject_id === subject_id)
+    if (existing) {
+      if (fsrs_parameters) {
+        await supabaseServer
+          .from("flashcard_decks")
+          .update({ fsrs_parameters, updated_at: new Date().toISOString() })
+          .eq("id", existing.deck_id)
+      }
+      return NextResponse.json({
+        id: existing.deck_id,
+        name: existing.name,
+        subject_id: existing.subject_id,
+      })
+    }
+    return NextResponse.json({ error: "Matéria não encontrada" }, { status: 404 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }

@@ -7,8 +7,6 @@ import { supabase } from "@/lib/supabase"
 import {
   ArrowLeft,
   Calendar,
-  ChevronDown,
-  ChevronRight,
   LayoutGrid,
   Pencil,
   Play,
@@ -17,6 +15,15 @@ import {
 } from "lucide-react"
 
 type PanelFilter = "due_today" | "overdue" | "all"
+
+type SubjectRow = {
+  id: string
+  name: string
+  deck_id: string
+  card_count: number
+  due_today: number
+  overdue: number
+}
 
 type PanelCard = {
   id: string
@@ -27,23 +34,6 @@ type PanelCard = {
   due_at: string | null
   is_overdue: boolean
   is_due_today: boolean
-}
-
-type DeckNode = {
-  id: string
-  name: string
-  card_count: number
-  due_today: number
-  overdue: number
-}
-
-type SubjectGroup = {
-  id: string
-  name: string
-  decks: DeckNode[]
-  due_today: number
-  overdue: number
-  card_count: number
 }
 
 function formatDue(dateStr: string | null) {
@@ -76,32 +66,31 @@ export default function FlashcardsPanelPage() {
   const searchParams = useSearchParams()
   const initialFilter = (searchParams.get("filter") as PanelFilter) || "due_today"
   const initialSubjectId = searchParams.get("subject_id")
-  const initialDeckId = searchParams.get("deck_id")
+  const initialOrphan = searchParams.get("orphan") === "1"
 
   const [userId, setUserId] = useState<string | null>(null)
   const [filter, setFilter] = useState<PanelFilter>(initialFilter)
-  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(initialDeckId)
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
-    initialDeckId ? null : initialSubjectId
+    initialOrphan ? null : initialSubjectId
   )
-  const [subjects, setSubjects] = useState<SubjectGroup[]>([])
-  const [uncategorizedDecks, setUncategorizedDecks] = useState<DeckNode[]>([])
+  const [viewOrphan, setViewOrphan] = useState(initialOrphan)
+  const [subjects, setSubjects] = useState<SubjectRow[]>([])
+  const [orphan, setOrphan] = useState<{ card_count: number; due_today: number; overdue: number } | null>(
+    null
+  )
   const [cards, setCards] = useState<PanelCard[]>([])
   const [totals, setTotals] = useState({ due_today: 0, overdue: 0, all: 0 })
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [spreadDays, setSpreadDays] = useState(30)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [expandedSubjects, setExpandedSubjects] = useState<Set<string>>(new Set())
   const [editingCard, setEditingCard] = useState<PanelCard | null>(null)
   const [editDue, setEditDue] = useState("")
-  const [newDeckName, setNewDeckName] = useState("")
-  const [newDeckSubjectId, setNewDeckSubjectId] = useState("")
 
   const loadPanel = useCallback(async (uid: string) => {
     setLoading(true)
     const params = new URLSearchParams({ user_id: uid, filter })
-    if (selectedDeckId) params.set("deck_id", selectedDeckId)
+    if (viewOrphan) params.set("orphan", "1")
     else if (selectedSubjectId) params.set("subject_id", selectedSubjectId)
 
     const res = await fetch(`/api/flashcards/panel?${params}`)
@@ -110,11 +99,11 @@ export default function FlashcardsPanelPage() {
     if (data.error) return
 
     setSubjects(data.subjects ?? [])
-    setUncategorizedDecks(data.uncategorized_decks ?? [])
+    setOrphan(data.orphan ?? null)
     setCards(data.cards ?? [])
     setTotals(data.totals ?? { due_today: 0, overdue: 0, all: 0 })
     setSelected(new Set())
-  }, [filter, selectedDeckId, selectedSubjectId])
+  }, [filter, selectedSubjectId, viewOrphan])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -127,51 +116,41 @@ export default function FlashcardsPanelPage() {
     })
   }, [router, loadPanel])
 
-  useEffect(() => {
-    if (subjects.length && expandedSubjects.size === 0) {
-      setExpandedSubjects(new Set(subjects.map((s) => s.id)))
-    }
-  }, [subjects, expandedSubjects.size])
-
-  function updateUrl(deckId: string | null, subjectId: string | null) {
+  function updateUrl(subjectId: string | null, orphanView: boolean) {
     const params = new URLSearchParams()
-    if (subjectId) params.set("subject_id", subjectId)
-    if (deckId) params.set("deck_id", deckId)
+    if (orphanView) params.set("orphan", "1")
+    else if (subjectId) params.set("subject_id", subjectId)
     const q = params.toString()
     router.replace(q ? `/flashcards/panel?${q}` : "/flashcards/panel", { scroll: false })
   }
 
-  function selectDeck(deckId: string | null, subjectId: string | null) {
-    setSelectedDeckId(deckId)
-    setSelectedSubjectId(deckId ? null : subjectId)
-    updateUrl(deckId, deckId ? null : subjectId)
+  function selectAll() {
+    setViewOrphan(false)
+    setSelectedSubjectId(null)
+    updateUrl(null, false)
   }
 
   function selectSubject(subjectId: string) {
+    setViewOrphan(false)
     setSelectedSubjectId(subjectId)
-    setSelectedDeckId(null)
-    updateUrl(null, subjectId)
-    setExpandedSubjects((prev) => new Set(prev).add(subjectId))
+    updateUrl(subjectId, false)
   }
 
-  const activeSubject =
-    subjects.find((s) => s.id === selectedSubjectId) ||
-    (selectedDeckId
-      ? subjects.find((s) => s.decks.some((d) => d.id === selectedDeckId))
-      : undefined)
-  const activeDeck = selectedDeckId
-    ? subjects.flatMap((s) => s.decks).find((d) => d.id === selectedDeckId) ||
-      uncategorizedDecks.find((d) => d.id === selectedDeckId)
-    : null
+  function selectOrphan() {
+    setViewOrphan(true)
+    setSelectedSubjectId(null)
+    updateUrl(null, true)
+  }
 
-  const newCardHref = selectedDeckId
-    ? `/flashcards/cards/new?deck_id=${selectedDeckId}`
+  const activeSubject = subjects.find((s) => s.id === selectedSubjectId)
+
+  const newCardHref = activeSubject
+    ? `/flashcards/cards/new?deck_id=${activeSubject.deck_id}`
     : null
 
   const studyHref = (() => {
     const p = new URLSearchParams()
-    if (selectedDeckId) p.set("deck_id", selectedDeckId)
-    else if (selectedSubjectId) p.set("subject_id", selectedSubjectId)
+    if (activeSubject) p.set("subject_id", activeSubject.id)
     const q = p.toString()
     return q ? `/flashcards/study?${q}` : "/flashcards/study"
   })()
@@ -238,21 +217,6 @@ export default function FlashcardsPanelPage() {
     loadPanel(userId)
   }
 
-  async function createDeck() {
-    if (!userId || !newDeckName.trim()) return
-    await fetch("/api/flashcards/decks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        name: newDeckName.trim(),
-        subject_id: newDeckSubjectId || null,
-      }),
-    })
-    setNewDeckName("")
-    loadPanel(userId)
-  }
-
   if (!userId) return null
 
   const filterTabs: { key: PanelFilter; label: string; count: number }[] = [
@@ -260,6 +224,12 @@ export default function FlashcardsPanelPage() {
     { key: "overdue", label: "Atrasados", count: totals.overdue },
     { key: "all", label: "Todos", count: totals.all },
   ]
+
+  const contextLabel = viewOrphan
+    ? "Cards sem matéria vinculada"
+    : activeSubject
+      ? activeSubject.name
+      : null
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col">
@@ -273,20 +243,8 @@ export default function FlashcardsPanelPage() {
               <LayoutGrid className="h-5 w-5 text-slate-600" />
               <h1 className="text-lg font-semibold text-slate-800">Painel de flashcards</h1>
             </div>
-            {(activeSubject || activeDeck) && (
-              <p className="mt-1 text-sm text-slate-600">
-                {activeDeck ? (
-                  <>
-                    {activeSubject && (
-                      <span className="font-medium text-slate-800">{activeSubject.name}</span>
-                    )}
-                    {activeSubject && " · "}
-                    <span>{activeDeck.name}</span>
-                  </>
-                ) : (
-                  <span className="font-medium text-slate-800">{activeSubject?.name}</span>
-                )}
-              </p>
+            {contextLabel && (
+              <p className="mt-1 text-sm font-medium text-emerald-800">{contextLabel}</p>
             )}
           </div>
         </div>
@@ -301,7 +259,7 @@ export default function FlashcardsPanelPage() {
             </Link>
           ) : (
             <span
-              title="Selecione um baralho na barra lateral"
+              title="Selecione uma matéria"
               className="flex cursor-not-allowed items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2 text-sm text-slate-400"
             >
               <Plus className="h-4 w-4" />
@@ -319,140 +277,68 @@ export default function FlashcardsPanelPage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-3">
           <button
             type="button"
-            onClick={() => selectDeck(null, null)}
+            onClick={selectAll}
             className={`mb-2 w-full rounded-lg px-3 py-2 text-left text-sm ${
-              !selectedDeckId && !selectedSubjectId
+              !selectedSubjectId && !viewOrphan
                 ? "bg-slate-900 text-white"
                 : "text-slate-700 hover:bg-slate-200"
             }`}
           >
-            Todos os baralhos
+            Todas as matérias
           </button>
 
-          {subjects.map((subject) => {
-            const open = expandedSubjects.has(subject.id)
-            return (
-              <div key={subject.id} className="mb-1">
-                <div className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExpandedSubjects((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(subject.id)) next.delete(subject.id)
-                        else next.add(subject.id)
-                        return next
-                      })
-                    }}
-                    className="rounded p-0.5 text-slate-400 hover:bg-slate-200"
-                  >
-                    {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => selectSubject(subject.id)}
-                    className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide ${
-                      selectedSubjectId === subject.id && !selectedDeckId
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-500 hover:bg-slate-200 hover:text-slate-800"
-                    }`}
-                  >
-                    <span className="truncate">{subject.name}</span>
-                    {(subject.due_today > 0 || subject.overdue > 0) && (
-                      <span
-                        className={`ml-auto shrink-0 text-[10px] font-normal normal-case ${
-                          selectedSubjectId === subject.id && !selectedDeckId
-                            ? "text-emerald-200"
-                            : "text-emerald-700"
-                        }`}
-                      >
-                        {subject.due_today + subject.overdue}
-                      </span>
-                    )}
-                  </button>
-                </div>
-                {open &&
-                  subject.decks.map((deck) => (
-                    <button
-                      key={deck.id}
-                      type="button"
-                      onClick={() => selectDeck(deck.id, subject.id)}
-                      className={`ml-4 mb-0.5 flex w-[calc(100%-1rem)] items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
-                        selectedDeckId === deck.id
-                          ? "bg-white font-medium text-slate-900 shadow-sm"
-                          : "text-slate-600 hover:bg-white/80"
-                      }`}
-                    >
-                      <span className="truncate">{deck.name}</span>
-                      <span className="shrink-0 text-xs text-slate-400">{deck.card_count}</span>
-                    </button>
-                  ))}
-                {open && subject.decks.length === 0 && (
-                  <p className="ml-4 text-xs text-slate-400">Nenhum baralho</p>
+          {subjects.map((subject) => (
+            <button
+              key={subject.id}
+              type="button"
+              onClick={() => selectSubject(subject.id)}
+              className={`mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${
+                selectedSubjectId === subject.id && !viewOrphan
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              <span className="truncate font-medium">{subject.name}</span>
+              <span
+                className={`ml-2 shrink-0 text-xs ${
+                  selectedSubjectId === subject.id && !viewOrphan
+                    ? "text-slate-300"
+                    : "text-slate-400"
+                }`}
+              >
+                {subject.card_count}
+                {(subject.due_today > 0 || subject.overdue > 0) && (
+                  <span className="ml-1 text-emerald-600">
+                    · {subject.due_today + subject.overdue}
+                  </span>
                 )}
-              </div>
-            )
-          })}
+              </span>
+            </button>
+          ))}
 
-          {uncategorizedDecks.length > 0 && (
-            <div className="mt-3 border-t border-slate-200 pt-3">
-              <p className="mb-1 px-1 text-xs font-semibold uppercase text-slate-400">Sem matéria</p>
-              {uncategorizedDecks.map((deck) => (
-                <button
-                  key={deck.id}
-                  type="button"
-                  onClick={() => selectDeck(deck.id, null)}
-                  className={`mb-0.5 flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
-                    selectedDeckId === deck.id
-                      ? "bg-white font-medium shadow-sm"
-                      : "text-slate-600 hover:bg-white/80"
-                  }`}
-                >
-                  <span className="truncate">{deck.name}</span>
-                  <span className="text-xs text-slate-400">{deck.card_count}</span>
-                </button>
-              ))}
-            </div>
+          {orphan && orphan.card_count > 0 && (
+            <button
+              type="button"
+              onClick={selectOrphan}
+              className={`mt-3 w-full rounded-lg border border-dashed px-3 py-2 text-left text-sm ${
+                viewOrphan
+                  ? "border-amber-400 bg-amber-50 text-amber-900"
+                  : "border-slate-300 text-slate-600 hover:bg-white"
+              }`}
+            >
+              Sem matéria ({orphan.card_count})
+            </button>
           )}
 
-          <div className="mt-4 border-t border-slate-200 pt-3">
-            <p className="mb-2 text-xs font-medium text-slate-500">Novo baralho</p>
-            <select
-              value={newDeckSubjectId}
-              onChange={(e) => setNewDeckSubjectId(e.target.value)}
-              className="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"
-            >
-              <option value="">Sem matéria</option>
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <div className="flex gap-1">
-              <input
-                value={newDeckName}
-                onChange={(e) => setNewDeckName(e.target.value)}
-                placeholder="Nome"
-                className="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
-                onKeyDown={(e) => e.key === "Enter" && createDeck()}
-              />
-              <button
-                type="button"
-                onClick={createDeck}
-                className="rounded bg-slate-900 px-2 text-white"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+          <p className="mt-4 border-t border-slate-200 pt-3 text-xs text-slate-500">
+            Cada matéria do app é um baralho. Novas matérias em Erros aparecem aqui
+            automaticamente.
+          </p>
         </aside>
 
-        {/* Main */}
         <main className="flex flex-1 flex-col overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-white px-4 py-3">
             {filterTabs.map((tab) => (
@@ -506,9 +392,6 @@ export default function FlashcardsPanelPage() {
                 <Trash2 className="h-4 w-4" />
                 Excluir
               </button>
-              <p className="text-xs text-amber-800">
-                Espalha as revisões de hoje até {spreadDays} dias (estilo Anki).
-              </p>
             </div>
           )}
 
@@ -549,10 +432,9 @@ export default function FlashcardsPanelPage() {
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-slate-800">{card.preview}</p>
-                      <p className="text-xs text-slate-500">
-                        {card.subject_name ? `${card.subject_name} · ` : ""}
-                        {card.deck_name}
-                      </p>
+                      {card.subject_name && (
+                        <p className="text-xs text-slate-500">{card.subject_name}</p>
+                      )}
                     </div>
                     <span
                       className={`shrink-0 text-xs font-medium ${

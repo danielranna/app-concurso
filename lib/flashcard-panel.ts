@@ -1,5 +1,6 @@
 import { supabaseServer } from "./supabase-server"
 import { isDueForToday, isOverdue } from "./flashcard-due"
+import { ensureSubjectDecks } from "./flashcard-subjects"
 
 export type PanelFilter = "due_today" | "overdue" | "all"
 
@@ -42,41 +43,30 @@ export async function fetchPanelData(
   userId: string,
   options: {
     filter: PanelFilter
-    deckId?: string
     subjectId?: string
+    deckId?: string
+    orphanOnly?: boolean
   }
 ) {
   const now = new Date()
+  const { subjects: subjectDecks, orphan_deck_ids } = await ensureSubjectDecks(userId)
 
-  const [{ data: subjects }, { data: decks }, { data: cards, error: cardsErr }] =
-    await Promise.all([
-      supabaseServer
-        .from("subjects")
-        .select("id, name")
-        .eq("user_id", userId)
-        .order("name"),
-      supabaseServer
-        .from("flashcard_decks")
-        .select("id, name, subject_id")
-        .eq("user_id", userId)
-        .order("name"),
-      supabaseServer
-        .from("flashcards")
-        .select(
-          `
-          id, deck_id, type, front_text, cloze_text,
-          flashcard_decks ( id, name, subject_id ),
-          flashcard_states ( due_at )
-        `
-        )
-        .eq("user_id", userId),
-    ])
+  const { data: cards, error: cardsErr } = await supabaseServer
+    .from("flashcards")
+    .select(
+      `
+      id, deck_id, type, front_text, cloze_text,
+      flashcard_decks ( id, name, subject_id ),
+      flashcard_states ( due_at )
+    `
+    )
+    .eq("user_id", userId)
 
   if (cardsErr) throw cardsErr
 
   const allCards = (cards ?? []) as unknown as CardRow[]
 
-  const deckStats = (deckId: string) => {
+  const statsForDeck = (deckId: string) => {
     const deckCards = allCards.filter((c) => c.deck_id === deckId)
     let dueToday = 0
     let overdue = 0
@@ -87,56 +77,44 @@ export async function fetchPanelData(
       if (isOverdue(d, now)) overdue++
       if (isDueForToday(d, now)) dueToday++
     }
-    return { total: deckCards.length, due_today: dueToday, overdue }
-  }
-
-  type DeckNode = {
-    id: string
-    name: string
-    subject_id: string | null
-    card_count: number
-    due_today: number
-    overdue: number
-  }
-
-  const deckNodes: DeckNode[] = (decks ?? []).map((d) => {
-    const stats = deckStats(d.id)
     return {
-      id: d.id,
-      name: d.name,
-      subject_id: d.subject_id ?? null,
-      card_count: stats.total,
-      due_today: stats.due_today,
-      overdue: stats.overdue,
+      card_count: deckCards.length,
+      due_today: dueToday,
+      overdue,
     }
-  })
+  }
 
-  const subjectGroups = (subjects ?? []).map((s) => ({
-    id: s.id,
+  const subjects = subjectDecks.map((s) => ({
+    id: s.subject_id,
     name: s.name,
-    decks: deckNodes.filter((d) => d.subject_id === s.id),
-    due_today: 0,
-    overdue: 0,
-    card_count: 0,
+    deck_id: s.deck_id,
+    ...statsForDeck(s.deck_id),
   }))
 
-  for (const g of subjectGroups) {
-    g.due_today = g.decks.reduce((n, d) => n + d.due_today, 0)
-    g.overdue = g.decks.reduce((n, d) => n + d.overdue, 0)
-    g.card_count = g.decks.reduce((n, d) => n + d.card_count, 0)
+  const orphanStats = orphan_deck_ids.reduce(
+    (acc, deckId) => {
+      const st = statsForDeck(deckId)
+      acc.card_count += st.card_count
+      acc.due_today += st.due_today
+      acc.overdue += st.overdue
+      return acc
+    },
+    { card_count: 0, due_today: 0, overdue: 0 }
+  )
+
+  let activeDeckId: string | null = null
+  if (options.subjectId) {
+    activeDeckId = subjects.find((s) => s.id === options.subjectId)?.deck_id ?? null
+  } else if (options.deckId) {
+    activeDeckId = options.deckId
   }
 
-  const uncategorizedDecks = deckNodes.filter((d) => !d.subject_id)
-
   let filtered = allCards
-
-  if (options.deckId) {
-    filtered = filtered.filter((c) => c.deck_id === options.deckId)
-  } else if (options.subjectId) {
-    const deckIds = new Set(
-      deckNodes.filter((d) => d.subject_id === options.subjectId).map((d) => d.id)
-    )
-    filtered = filtered.filter((c) => deckIds.has(c.deck_id))
+  if (options.orphanOnly && orphan_deck_ids.length > 0) {
+    const orphanSet = new Set(orphan_deck_ids)
+    filtered = filtered.filter((c) => orphanSet.has(c.deck_id))
+  } else if (activeDeckId) {
+    filtered = filtered.filter((c) => c.deck_id === activeDeckId)
   }
 
   const list = filtered
@@ -144,11 +122,12 @@ export async function fetchPanelData(
       const due = dueOf(c)
       const d = deckOf(c)
       const dueDate = due ? new Date(due) : null
+      const subject = subjects.find((s) => s.deck_id === c.deck_id)
       return {
         id: c.id,
         deck_id: c.deck_id,
-        deck_name: d?.name ?? "—",
-        subject_id: d?.subject_id ?? null,
+        deck_name: subject?.name ?? d?.name ?? "—",
+        subject_id: d?.subject_id ?? subject?.id ?? null,
         type: c.type,
         preview: cardPreview(c),
         due_at: due,
@@ -167,12 +146,10 @@ export async function fetchPanelData(
       return ta - tb
     })
 
-  const subjectNameById = Object.fromEntries((subjects ?? []).map((s) => [s.id, s.name]))
-
   const scopedForTotals = filtered
   const cardsOut = list.map((c) => ({
     ...c,
-    subject_name: c.subject_id ? subjectNameById[c.subject_id] ?? null : null,
+    subject_name: subjects.find((s) => s.id === c.subject_id)?.name ?? null,
   }))
 
   const countDueToday = (rows: CardRow[]) =>
@@ -187,8 +164,8 @@ export async function fetchPanelData(
     }).length
 
   return {
-    subjects: subjectGroups,
-    uncategorized_decks: uncategorizedDecks,
+    subjects,
+    orphan: orphanStats.card_count > 0 ? { ...orphanStats, deck_ids: orphan_deck_ids } : null,
     cards: cardsOut,
     totals: {
       due_today: countDueToday(scopedForTotals),

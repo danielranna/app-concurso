@@ -7,6 +7,7 @@ export async function GET(req: Request) {
   const filter = (searchParams.get("filter") ?? "due_today") as PanelFilter
   const deck_id = searchParams.get("deck_id") ?? undefined
   const subject_id = searchParams.get("subject_id") ?? undefined
+  const orphanOnly = searchParams.get("orphan") === "1"
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
@@ -17,7 +18,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    const data = await fetchPanelData(user_id, { filter, deckId: deck_id, subjectId: subject_id })
+    const data = await fetchPanelData(user_id, {
+      filter,
+      deckId: deck_id,
+      subjectId: subject_id,
+      orphanOnly,
+    })
     return NextResponse.json(data)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

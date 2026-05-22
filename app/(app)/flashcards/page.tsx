@@ -6,28 +6,24 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { LayoutGrid, Play, Plus, Settings } from "lucide-react"
 
-type SubjectSummary = {
+type SubjectRow = {
   id: string
   name: string
+  deck_id: string
   due_today: number
   overdue: number
   card_count: number
 }
 
-type DeckOption = { id: string; name: string; subject_id: string | null }
-
 export default function FlashcardsHomePage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
-  const [subjects, setSubjects] = useState<SubjectSummary[]>([])
-  const [decks, setDecks] = useState<DeckOption[]>([])
-  const [uncategorized, setUncategorized] = useState({
-    due_today: 0,
-    overdue: 0,
-    card_count: 0,
-  })
+  const [subjects, setSubjects] = useState<SubjectRow[]>([])
+  const [orphan, setOrphan] = useState<{ card_count: number; due_today: number; overdue: number } | null>(
+    null
+  )
   const [totalDueToday, setTotalDueToday] = useState(0)
-  const [pickDeckOpen, setPickDeckOpen] = useState(false)
+  const [pickSubjectOpen, setPickSubjectOpen] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -36,40 +32,27 @@ export default function FlashcardsHomePage() {
         return
       }
       setUserId(user.id)
-      Promise.all([
-        fetch(`/api/flashcards/panel?user_id=${user.id}&filter=all`).then((r) => r.json()),
-        fetch(`/api/flashcards/decks?user_id=${user.id}`).then((r) => r.json()),
-      ]).then(([panel, deckList]) => {
-        setSubjects(
-          (panel.subjects ?? []).map(
-            (s: {
-              id: string
-              name: string
-              due_today: number
-              overdue: number
-              card_count: number
-            }) => ({
-              id: s.id,
-              name: s.name,
-              due_today: s.due_today,
-              overdue: s.overdue,
-              card_count: s.card_count,
-            })
+      fetch(`/api/flashcards/panel?user_id=${user.id}&filter=all`)
+        .then((r) => r.json())
+        .then((data) => {
+          setSubjects(
+            (data.subjects ?? []).map(
+              (s: SubjectRow) => ({
+                id: s.id,
+                name: s.name,
+                deck_id: s.deck_id,
+                due_today: s.due_today,
+                overdue: s.overdue,
+                card_count: s.card_count,
+              })
+            )
           )
-        )
-        const unc = (panel.uncategorized_decks ?? []) as {
-          due_today: number
-          overdue: number
-          card_count: number
-        }[]
-        setUncategorized({
-          due_today: unc.reduce((n, d) => n + d.due_today, 0),
-          overdue: unc.reduce((n, d) => n + d.overdue, 0),
-          card_count: unc.reduce((n, d) => n + d.card_count, 0),
+          setOrphan(data.orphan ?? null)
+          const allDue =
+            (data.subjects ?? []).reduce((n: number, s: SubjectRow) => n + s.due_today, 0) +
+            (data.orphan?.due_today ?? 0)
+          setTotalDueToday(allDue)
         })
-        setTotalDueToday(panel.totals?.due_today ?? 0)
-        setDecks(deckList ?? [])
-      })
     })
   }, [router])
 
@@ -79,13 +62,12 @@ export default function FlashcardsHomePage() {
 
   if (!userId) return null
 
-  const subjectNameById = Object.fromEntries(subjects.map((s) => [s.id, s.name]))
-
   return (
     <main className="px-6 py-6">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">Flashcards</h1>
+          <p className="mt-1 text-sm text-slate-500">Uma matéria = um baralho</p>
           {totalDueToday > 0 && (
             <p className="mt-1 text-sm text-emerald-700">
               {totalDueToday} para revisar hoje
@@ -96,8 +78,8 @@ export default function FlashcardsHomePage() {
           <button
             type="button"
             onClick={() => {
-              if (decks.length === 1) goNewCard(decks[0].id)
-              else setPickDeckOpen(true)
+              if (subjects.length === 1) goNewCard(subjects[0].deck_id)
+              else setPickSubjectOpen(true)
             }}
             className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-800 hover:bg-slate-50"
           >
@@ -130,13 +112,13 @@ export default function FlashcardsHomePage() {
       <section>
         <h2 className="mb-4 text-lg font-semibold text-slate-800">Matérias</h2>
 
-        {subjects.length === 0 && uncategorized.card_count === 0 ? (
+        {subjects.length === 0 && !orphan?.card_count ? (
           <p className="text-slate-500">
-            Crie matérias em Erros ou baralhos no{" "}
-            <Link href="/flashcards/panel" className="text-emerald-600 hover:underline">
-              painel
-            </Link>
-            .
+            Crie matérias em{" "}
+            <Link href="/erros" className="text-emerald-600 hover:underline">
+              Erros
+            </Link>{" "}
+            — o baralho de flashcards é criado automaticamente.
           </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -168,54 +150,41 @@ export default function FlashcardsHomePage() {
               </Link>
             ))}
 
-            {uncategorized.card_count > 0 && (
+            {orphan && orphan.card_count > 0 && (
               <Link
-                href="/flashcards/panel"
-                className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 hover:bg-slate-100"
+                href="/flashcards/panel?orphan=1"
+                className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-4 hover:bg-amber-50"
               >
-                <p className="font-semibold text-slate-700">Sem matéria</p>
-                <p className="mt-2 text-sm text-slate-600">{uncategorized.card_count} cards</p>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  {uncategorized.due_today > 0 && (
-                    <span className="text-emerald-700">{uncategorized.due_today} hoje</span>
-                  )}
-                  {uncategorized.overdue > 0 && (
-                    <span className="text-amber-700">{uncategorized.overdue} atrasados</span>
-                  )}
-                </div>
+                <p className="font-semibold text-amber-900">Sem matéria</p>
+                <p className="mt-2 text-sm text-amber-800">{orphan.card_count} cards antigos</p>
               </Link>
             )}
           </div>
         )}
       </section>
 
-      {pickDeckOpen && (
+      {pickSubjectOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
-            <h3 className="font-semibold text-slate-800">Escolha o baralho</h3>
-            {decks.length === 0 ? (
+            <h3 className="font-semibold text-slate-800">Escolha a matéria</h3>
+            {subjects.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">
-                Crie um baralho no{" "}
-                <Link href="/flashcards/panel" className="text-emerald-600 hover:underline">
-                  painel
-                </Link>{" "}
-                primeiro.
+                Crie uma matéria em{" "}
+                <Link href="/erros" className="text-emerald-600 hover:underline">
+                  Erros
+                </Link>
+                .
               </p>
             ) : (
               <ul className="mt-3 space-y-1">
-                {decks.map((d) => (
-                  <li key={d.id}>
+                {subjects.map((s) => (
+                  <li key={s.id}>
                     <button
                       type="button"
-                      onClick={() => goNewCard(d.id)}
+                      onClick={() => goNewCard(s.deck_id)}
                       className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100"
                     >
-                      <span className="font-medium text-slate-800">{d.name}</span>
-                      {d.subject_id && (
-                        <span className="ml-2 text-xs text-slate-500">
-                          {subjectNameById[d.subject_id]}
-                        </span>
-                      )}
+                      {s.name}
                     </button>
                   </li>
                 ))}
@@ -223,7 +192,7 @@ export default function FlashcardsHomePage() {
             )}
             <button
               type="button"
-              onClick={() => setPickDeckOpen(false)}
+              onClick={() => setPickSubjectOpen(false)}
               className="mt-4 w-full rounded-lg border py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
               Cancelar
