@@ -14,6 +14,13 @@ import type { ExamTarget } from "@/lib/coach-types"
 
 type SubjectRow = { id: string; name: string }
 
+type IncidenceGroup = {
+  code: string
+  name: string
+  quantity: number
+  percent: number
+}
+
 type DocRow = {
   id: string
   title: string
@@ -21,7 +28,13 @@ type DocRow = {
   subject_id: string | null
   status: string
   created_at: string
-  parsed_tables?: { char_count?: number }
+  parsed_tables?: {
+    char_count?: number
+    format?: string
+    group_count?: number
+    groups?: IncidenceGroup[]
+    matched_subject_label?: string
+  }
 }
 
 type PlanReport = {
@@ -49,14 +62,15 @@ export default function CoachEditaisPage() {
   const active = targets.find((t) => t.id === selectedId) ?? targets.find((t) => t.is_active)
 
   function reloadTargets(uid: string) {
-    fetch(`/api/coach/exam-targets?user_id=${uid}`)
+    return fetch(`/api/coach/exam-targets?user_id=${uid}`)
       .then((r) => r.json())
       .then((list: ExamTarget[]) => {
         setTargets(list ?? [])
-        if (!selectedId && list?.length) {
-          const act = list.find((t) => t.is_active) ?? list[0]
-          setSelectedId(act?.id ?? null)
+        const act = list.find((t) => t.is_active) ?? list[0]
+        if (act && (!selectedId || !list.some((t) => t.id === selectedId))) {
+          setSelectedId(act.id)
         }
+        return list
       })
   }
 
@@ -127,7 +141,10 @@ export default function CoachEditaisPage() {
     file: File,
     subjectId?: string
   ) {
-    if (!userId || !selectedId) return
+    if (!userId || !selectedId) {
+      alert("Selecione uma prova na lista acima.")
+      return
+    }
     setUploading(docType)
     const form = new FormData()
     form.set("user_id", userId)
@@ -137,14 +154,27 @@ export default function CoachEditaisPage() {
     if (subjectId) form.set("subject_id", subjectId)
     form.set("title", file.name)
 
-    const res = await fetch("/api/coach/documents/upload", {
-      method: "POST",
-      body: form,
-    })
-    const data = await res.json()
-    setUploading(null)
-    if (data.error) alert(data.error)
-    else reloadDocs(userId, selectedId)
+    try {
+      const res = await fetch("/api/coach/documents/upload", {
+        method: "POST",
+        body: form,
+      })
+      const data = await res.json()
+      if (data.error) {
+        alert(data.error)
+      } else {
+        reloadDocs(userId, selectedId)
+        if (docType === "incidence" && data.parsed_tables?.group_count != null) {
+          alert(
+            `Incidência importada: ${data.parsed_tables.group_count} agrupamentos (sem subtópicos).`
+          )
+        }
+      }
+    } catch {
+      alert("Falha no envio. Verifique o bucket coach-documents no Supabase.")
+    } finally {
+      setUploading(null)
+    }
   }
 
   async function generatePlan() {
@@ -249,20 +279,30 @@ export default function CoachEditaisPage() {
         ))}
       </ul>
 
-      {active && (
-        <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+      {!targets.length && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Crie uma prova alvo acima para liberar o envio de edital e incidência.
+        </p>
+      )}
+
+      {active ? (
+        <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4">
           <h3 className="font-semibold text-slate-900">
             Documentos — {active.name}
           </h3>
+          <p className="text-xs text-slate-600">
+            Edital = PDF. Incidência = Excel (.xlsx) com agrupamentos (códigos
+            01, 02, 03…); subtópicos (02.01, etc.) são ignorados de propósito.
+          </p>
 
           <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
               <FileUp className="h-4 w-4" />
-              {uploading === "edital" ? "Enviando…" : "PDF do edital"}
+              {uploading === "edital" ? "Enviando…" : "Enviar PDF do edital"}
               <input
                 type="file"
-                accept="application/pdf"
-                className="hidden"
+                accept="application/pdf,.pdf"
+                className="sr-only"
                 disabled={!!uploading}
                 onChange={(e) => {
                   const f = e.target.files?.[0]
@@ -272,53 +312,97 @@ export default function CoachEditaisPage() {
               />
             </label>
             {editalDoc && (
-              <span className="text-xs text-emerald-700">
+              <span className="text-xs font-medium text-emerald-700">
                 ✓ {editalDoc.title} (
                 {editalDoc.parsed_tables?.char_count ?? 0} caracteres)
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
-            <select
-              value={incidenceSubjectId}
-              onChange={(e) => setIncidenceSubjectId(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            >
-              {subjects.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <FileUp className="h-4 w-4" />
-              {uploading === "incidence" ? "Enviando…" : "PDF incidência (matéria)"}
-              <input
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                disabled={!!uploading || !incidenceSubjectId}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadDoc("incidence", f, incidenceSubjectId)
-                  e.target.value = ""
-                }}
-              />
-            </label>
+          <div className="space-y-2 border-t border-slate-200 pt-4">
+            <p className="text-sm font-medium text-slate-800">
+              Incidência por matéria (Excel)
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={incidenceSubjectId}
+                onChange={(e) => setIncidenceSubjectId(e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              >
+                {!subjects.length && (
+                  <option value="">Cadastre matérias em Configurações</option>
+                )}
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+                <FileUp className="h-4 w-4" />
+                {uploading === "incidence"
+                  ? "Enviando…"
+                  : "Enviar Excel de incidência"}
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  className="sr-only"
+                  disabled={!!uploading || !incidenceSubjectId}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) uploadDoc("incidence", f, incidenceSubjectId)
+                    e.target.value = ""
+                  }}
+                />
+              </label>
+            </div>
           </div>
 
           {incidenceDocs.length > 0 && (
-            <ul className="text-xs text-slate-600">
+            <div className="space-y-3 border-t border-slate-200 pt-4">
               {incidenceDocs.map((d) => {
                 const sub = subjects.find((s) => s.id === d.subject_id)
+                const groups = d.parsed_tables?.groups ?? []
                 return (
-                  <li key={d.id}>
-                    ✓ Incidência — {sub?.name ?? "?"}: {d.title}
-                  </li>
+                  <div
+                    key={d.id}
+                    className="rounded-lg border border-slate-200 bg-white p-3 text-sm"
+                  >
+                    <p className="font-medium text-slate-900">
+                      {sub?.name ?? "Matéria"} — {d.title}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {groups.length} agrupamentos
+                      {d.parsed_tables?.matched_subject_label &&
+                        ` · bloco “${d.parsed_tables.matched_subject_label}”`}
+                    </p>
+                    {groups.length > 0 && (
+                      <table className="mt-2 w-full text-xs">
+                        <thead>
+                          <tr className="text-left text-slate-500">
+                            <th className="py-1">Assunto</th>
+                            <th>Qtd</th>
+                            <th>%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...groups]
+                            .sort((a, b) => b.percent - a.percent)
+                            .slice(0, 12)
+                            .map((g) => (
+                              <tr key={g.code} className="border-t border-slate-100">
+                                <td className="py-1 pr-2">{g.name}</td>
+                                <td>{g.quantity}</td>
+                                <td>{g.percent.toFixed(1)}%</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 )
               })}
-            </ul>
+            </div>
           )}
 
           <button
@@ -340,6 +424,12 @@ export default function CoachEditaisPage() {
             </p>
           )}
         </div>
+      ) : (
+        targets.length > 0 && (
+          <p className="text-sm text-slate-500">
+            Clique em uma prova na lista para enviar documentos.
+          </p>
+        )
       )}
 
       {reports.length > 0 && (

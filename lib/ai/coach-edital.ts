@@ -73,11 +73,19 @@ export async function generateCoachEditalPlan(
   const incidenceDocs = docs.filter((d) => d.doc_type === "incidence")
 
   const editalText = editalDoc ? documentTextExcerpt(editalDoc).slice(0, 25_000) : ""
-  const incidenceBySubject = incidenceDocs.map((d) => ({
-    subject_id: d.subject_id,
-    title: d.title,
-    excerpt: documentTextExcerpt(d).slice(0, 12_000),
-  }))
+  const incidenceBySubject = incidenceDocs.map((d) => {
+    const pt = (d.parsed_tables ?? {}) as Record<string, unknown>
+    return {
+      subject_id: d.subject_id,
+      title: d.title,
+      format: pt.format ?? "unknown",
+      groups:
+        (pt.groups as { name: string; percent: number; quantity: number }[]) ??
+        [],
+      summary: pt.summary_for_llm ?? [],
+      excerpt: documentTextExcerpt(d).slice(0, 12_000),
+    }
+  })
 
   const performance = await buildPerformanceSnapshot(userId)
 

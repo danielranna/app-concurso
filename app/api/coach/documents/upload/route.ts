@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
+import { supabaseServer } from "@/lib/supabase-server"
 
 export const runtime = "nodejs"
 export const maxDuration = 60
@@ -35,12 +36,23 @@ export async function POST(req: Request) {
       )
     }
 
+    let subjectName: string | null = null
+    if (subject_id) {
+      const { data: sub } = await supabaseServer
+        .from("subjects")
+        .select("name")
+        .eq("id", subject_id)
+        .single()
+      subjectName = sub?.name ?? null
+    }
+
     const doc = await uploadCoachDocument({
       userId: user_id,
       file,
       docType: doc_type,
       title: title || file.name,
       subjectId: subject_id,
+      subjectName,
       examTargetId: exam_target_id,
     })
 

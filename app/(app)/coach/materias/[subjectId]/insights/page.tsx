@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, Play } from "lucide-react"
+import { ArrowLeft, Loader2, Play, Sparkles } from "lucide-react"
 import type { LearningSignal } from "@/lib/coach-types"
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -36,6 +36,22 @@ export default function CoachInsightsPage() {
   >([])
   const [loading, setLoading] = useState(true)
   const [creatingNb, setCreatingNb] = useState(false)
+  const [priorities, setPriorities] = useState<{
+    narrative_summary?: string
+    top_priorities?: {
+      rank: number
+      title: string
+      why: string
+      domain: string
+      time_minutes: number
+    }[]
+    executable_actions?: {
+      label: string
+      type: string
+      params: Record<string, unknown>
+    }[]
+  } | null>(null)
+  const [loadingPriorities, setLoadingPriorities] = useState(false)
 
   function reload(uid: string) {
     setLoading(true)
@@ -68,6 +84,20 @@ export default function CoachInsightsPage() {
       reload(user.id)
     })
   }, [subjectId, router])
+
+  async function loadPriorities() {
+    if (!userId) return
+    setLoadingPriorities(true)
+    const res = await fetch("/api/coach/priorities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, subject_id: subjectId }),
+    })
+    const data = await res.json()
+    setLoadingPriorities(false)
+    if (data.error) alert(data.error)
+    else setPriorities(data.structured ?? null)
+  }
 
   async function createRemediationNotebook(
     params: Record<string, unknown>,
@@ -115,7 +145,42 @@ export default function CoachInsightsPage() {
         Matérias
       </Link>
 
-      <h2 className="text-xl font-bold text-slate-900">{subjectName}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-bold text-slate-900">{subjectName}</h2>
+        <button
+          type="button"
+          onClick={loadPriorities}
+          disabled={loadingPriorities}
+          className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white hover:bg-violet-800 disabled:opacity-50"
+        >
+          {loadingPriorities ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          Veredito de prioridades
+        </button>
+      </div>
+
+      {priorities && (
+        <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+          <p className="text-sm text-slate-800">
+            {priorities.narrative_summary}
+          </p>
+          <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm">
+            {(priorities.top_priorities ?? []).map((p) => (
+              <li key={p.rank}>
+                <span className="font-medium">{p.title}</span>
+                <span className="text-slate-600"> — {p.why}</span>
+                <span className="text-xs text-slate-500">
+                  {" "}
+                  ({p.time_minutes} min · {p.domain})
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">

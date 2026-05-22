@@ -1,5 +1,10 @@
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
+import {
+  incidenceSummaryForLlm,
+  parseIncidenceXlsx,
+  type ParsedIncidenceWorkbook,
+} from "./incidence-xlsx"
 
 function truncateText(text: string, maxChars: number) {
   if (text.length <= maxChars) return text
@@ -10,33 +15,98 @@ export const COACH_DOCS_BUCKET = "coach-documents"
 
 export type CoachDocType = "edital" | "incidence" | "study_material"
 
+function norm(s: string) {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .trim()
+}
+
+function pickBlockForSubject(
+  parsed: ParsedIncidenceWorkbook,
+  subjectName: string
+) {
+  const n = norm(subjectName)
+  const exact = parsed.blocks.find((b) => norm(b.subject_label) === n)
+  if (exact) return exact
+  const partial = parsed.blocks.find(
+    (b) => norm(b.subject_label).includes(n) || n.includes(norm(b.subject_label))
+  )
+  return partial ?? parsed.blocks[0] ?? null
+}
+
 export async function uploadCoachDocument(params: {
   userId: string
   file: File
   docType: CoachDocType
   title: string
   subjectId?: string | null
+  subjectName?: string | null
   examTargetId?: string | null
 }) {
   if (params.file.size > 20 * 1024 * 1024) {
-    throw new Error("PDF maior que 20 MB")
+    throw new Error("Arquivo maior que 20 MB")
   }
 
   const buffer = Buffer.from(await params.file.arrayBuffer())
-  const text = await extractPdfText(buffer)
-  const excerpt = truncateText(text, 120_000)
+  const ext = (params.file.name.split(".").pop() || "").toLowerCase()
 
-  const ext = params.file.name.split(".").pop() || "pdf"
+  let parsed_tables: Record<string, unknown> = {}
+  let contentType = params.file.type
+
+  if (params.docType === "incidence") {
+    if (!["xlsx", "xls"].includes(ext)) {
+      throw new Error("Incidência deve ser arquivo Excel (.xlsx ou .xls)")
+    }
+    const parsed = parseIncidenceXlsx(buffer)
+    const block =
+      params.subjectName != null
+        ? pickBlockForSubject(parsed, params.subjectName)
+        : parsed.blocks[0]
+
+    parsed_tables = {
+      format: "xlsx_incidence",
+      sheet_names: parsed.sheet_names,
+      blocks: parsed.blocks,
+      matched_subject_label: block?.subject_label ?? null,
+      groups: block?.groups ?? [],
+      group_count: block?.groups.length ?? 0,
+      summary_for_llm: incidenceSummaryForLlm(parsed),
+      text_excerpt: JSON.stringify(incidenceSummaryForLlm(parsed), null, 0).slice(
+        0,
+        50_000
+      ),
+    }
+    contentType =
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  } else {
+    if (ext !== "pdf") {
+      throw new Error("Este tipo de documento deve ser PDF")
+    }
+    const text = await extractPdfText(buffer)
+    const excerpt = truncateText(text, 120_000)
+    parsed_tables = { format: "pdf", text_excerpt: excerpt, char_count: text.length }
+    contentType = "application/pdf"
+  }
+
   const path = `${params.userId}/${params.docType}/${Date.now()}.${ext}`
 
   const { error: upErr } = await supabaseServer.storage
     .from(COACH_DOCS_BUCKET)
     .upload(path, buffer, {
-      contentType: params.file.type || "application/pdf",
+      contentType: contentType || "application/octet-stream",
       upsert: false,
     })
 
-  if (upErr) throw new Error(upErr.message)
+  if (upErr) {
+    if (upErr.message.includes("Bucket not found")) {
+      throw new Error(
+        'Crie o bucket "coach-documents" no Supabase Storage (privado).'
+      )
+    }
+    throw new Error(upErr.message)
+  }
 
   const { data: doc, error: insErr } = await supabaseServer
     .from("subject_documents")
@@ -47,7 +117,7 @@ export async function uploadCoachDocument(params: {
       doc_type: params.docType,
       file_path: path,
       title: params.title.trim() || params.file.name,
-      parsed_tables: { text_excerpt: excerpt, char_count: text.length },
+      parsed_tables,
       status: "ready",
     })
     .select("*")
@@ -86,8 +156,20 @@ export async function listCoachDocuments(
 }
 
 export function documentTextExcerpt(doc: {
-  parsed_tables?: { text_excerpt?: string } | null
+  parsed_tables?: Record<string, unknown> | null
 }) {
-  const pt = doc.parsed_tables as { text_excerpt?: string } | null
-  return pt?.text_excerpt ?? ""
+  const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+  if (pt.format === "xlsx_incidence") {
+    return String(pt.text_excerpt ?? JSON.stringify(pt.summary_for_llm ?? []))
+  }
+  return String(pt.text_excerpt ?? "")
+}
+
+export function documentIncidenceGroups(doc: {
+  parsed_tables?: Record<string, unknown> | null
+}) {
+  const pt = (doc.parsed_tables ?? {}) as {
+    groups?: { name: string; percent: number; quantity: number; code: string }[]
+  }
+  return pt.groups ?? []
 }
