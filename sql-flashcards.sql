@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS flashcard_bot_settings (
   phone_e164 TEXT,
   whatsapp_jid TEXT,
   whatsapp_display_label TEXT,
+  whatsapp_link_requested_at TIMESTAMPTZ,
+  whatsapp_authorized BOOLEAN DEFAULT FALSE,
   start_hour INTEGER DEFAULT 7 CHECK (start_hour BETWEEN 0 AND 23),
   end_hour INTEGER DEFAULT 19 CHECK (end_hour BETWEEN 0 AND 23),
   timezone TEXT DEFAULT 'America/Sao_Paulo',

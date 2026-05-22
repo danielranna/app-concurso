@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { DEFAULT_WEEKDAY_LIMITS, type WeekdayLimits } from "@/lib/flashcard-types"
-import { MessageCircle, RefreshCw } from "lucide-react"
+import { Link2, MessageCircle, RefreshCw, Unlink } from "lucide-react"
 
 const DAYS = [
   { key: "0", label: "Domingo" },
@@ -23,6 +23,10 @@ type WhatsAppUser = {
   engaged?: boolean
 }
 
+function apiKeyStorageKey(userId: string) {
+  return `fc_api_key_${userId}`
+}
+
 export default function FlashcardsSettingsPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
@@ -30,8 +34,9 @@ export default function FlashcardsSettingsPage() {
   const [bot, setBot] = useState({
     enabled: false,
     phone_e164: "",
-    whatsapp_jid: "" as string | null,
-    whatsapp_display_label: "" as string | null,
+    whatsapp_jid: null as string | null,
+    whatsapp_display_label: null as string | null,
+    whatsapp_authorized: false,
     start_hour: 7,
     end_hour: 19,
     timezone: "America/Sao_Paulo",
@@ -41,8 +46,30 @@ export default function FlashcardsSettingsPage() {
   const [waError, setWaError] = useState<string | null>(null)
   const [waHint, setWaHint] = useState<string | null>(null)
   const [waWarning, setWaWarning] = useState<string | null>(null)
+  const [hasApiKey, setHasApiKey] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState("")
   const [newApiKey, setNewApiKey] = useState<string | null>(null)
+  const [linkMessage, setLinkMessage] = useState<string | null>(null)
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [linkLoading, setLinkLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  const loadBotSettings = useCallback(async (uid: string) => {
+    const res = await fetch(`/api/flashcards/bot/settings/web?user_id=${uid}`)
+    const botData = await res.json()
+    setBot({
+      enabled: botData.enabled ?? false,
+      phone_e164: botData.phone_e164 ?? "",
+      whatsapp_jid: botData.whatsapp_jid ?? null,
+      whatsapp_display_label: botData.whatsapp_display_label ?? null,
+      whatsapp_authorized: botData.whatsapp_authorized ?? false,
+      start_hour: botData.start_hour ?? 7,
+      end_hour: botData.end_hour ?? 19,
+      timezone: botData.timezone ?? "America/Sao_Paulo",
+    })
+    const stored = sessionStorage.getItem(apiKeyStorageKey(uid))
+    if (stored) setApiKeyInput(stored)
+  }, [])
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -51,24 +78,22 @@ export default function FlashcardsSettingsPage() {
         return
       }
       setUserId(user.id)
-      const [schedRes, botRes] = await Promise.all([
+      const [schedRes, keysRes] = await Promise.all([
         fetch(`/api/flashcards/schedule-settings?user_id=${user.id}`),
-        fetch(`/api/flashcards/bot/settings/web?user_id=${user.id}`),
+        fetch(`/api/flashcards/api-keys?user_id=${user.id}`),
       ])
       const sched = await schedRes.json()
-      const botData = await botRes.json()
+      const keys = await keysRes.json()
       setLimits(sched.weekday_limits ?? DEFAULT_WEEKDAY_LIMITS)
-      setBot({
-        enabled: botData.enabled ?? false,
-        phone_e164: botData.phone_e164 ?? "",
-        whatsapp_jid: botData.whatsapp_jid ?? null,
-        whatsapp_display_label: botData.whatsapp_display_label ?? null,
-        start_hour: botData.start_hour ?? 7,
-        end_hour: botData.end_hour ?? 19,
-        timezone: botData.timezone ?? "America/Sao_Paulo",
-      })
+      setHasApiKey(Array.isArray(keys) && keys.length > 0)
+      await loadBotSettings(user.id)
     })
-  }, [router])
+  }, [router, loadBotSettings])
+
+  function getApiKeyForLink(): string | null {
+    const k = newApiKey ?? apiKeyInput.trim()
+    return k.startsWith("fc_") ? k : null
+  }
 
   async function fetchWhatsAppUsers() {
     if (!userId) return
@@ -86,9 +111,6 @@ export default function FlashcardsSettingsPage() {
         setWaUsers(data.users ?? [])
         setWaWarning(data.warning ?? null)
         setWaHint(data.hint ?? null)
-        if (data.hint && !data.users?.length) {
-          setWaError(null)
-        }
       }
     } catch {
       setWaError("Falha ao buscar contas. Tente novamente.")
@@ -102,14 +124,133 @@ export default function FlashcardsSettingsPage() {
       ...b,
       whatsapp_jid: u.userJid,
       whatsapp_display_label: u.displayLabel,
+      whatsapp_authorized: false,
     }))
+    setLinkMessage(null)
+    setLinkError(null)
+  }
+
+  async function saveBotSettingsOnly() {
+    if (!userId) return
+    await fetch("/api/flashcards/bot/settings/web", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        enabled: bot.enabled,
+        phone_e164: bot.phone_e164 || null,
+        whatsapp_jid: bot.whatsapp_jid,
+        whatsapp_display_label: bot.whatsapp_display_label,
+        whatsapp_authorized: bot.whatsapp_authorized,
+        start_hour: bot.start_hour,
+        end_hour: bot.end_hour,
+        timezone: bot.timezone,
+      }),
+    })
+  }
+
+  async function requestWhatsAppLink() {
+    if (!userId || !bot.whatsapp_jid) {
+      setLinkError("Escolha uma conta na lista antes de vincular.")
+      return
+    }
+    const apiKey = getApiKeyForLink()
+    if (!apiKey) {
+      setLinkError(
+        "Gere uma API key (fc_...) abaixo e copie, ou cole a chave que você já salvou."
+      )
+      return
+    }
+
+    setLinkLoading(true)
+    setLinkError(null)
+    setLinkMessage(null)
+
+    try {
+      await saveBotSettingsOnly()
+
+      const res = await fetch("/api/flashcards/whatsapp-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          userJid: bot.whatsapp_jid,
+          apiKey,
+          displayLabel: bot.whatsapp_display_label,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setLinkError(data.error ?? "Falha ao solicitar confirmação")
+        return
+      }
+
+      sessionStorage.setItem(apiKeyStorageKey(userId), apiKey)
+      setHasApiKey(true)
+      setLinkMessage(
+        data.message ??
+          "Confira o WhatsApp e responda SIM para autorizar. A mensagem pode levar até ~90 segundos."
+      )
+      setBot((b) => ({ ...b, whatsapp_authorized: false }))
+      await loadBotSettings(userId)
+    } catch {
+      setLinkError("Erro de rede ao vincular.")
+    } finally {
+      setLinkLoading(false)
+    }
+  }
+
+  async function unlinkWhatsApp() {
+    if (!userId) return
+    if (!confirm("Desvincular WhatsApp? Lembretes e cards no privado serão desativados até vincular de novo.")) {
+      return
+    }
+
+    setLinkLoading(true)
+    setLinkError(null)
+    setLinkMessage(null)
+
+    const apiKey = getApiKeyForLink()
+
+    try {
+      const res = await fetch("/api/flashcards/whatsapp-unlink", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, apiKey: apiKey ?? undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setLinkError(data.error ?? "Falha ao desvincular")
+        return
+      }
+      setBot((b) => ({
+        ...b,
+        whatsapp_jid: null,
+        whatsapp_display_label: null,
+        whatsapp_authorized: false,
+        enabled: false,
+      }))
+      setLinkMessage(data.message ?? "WhatsApp desvinculado.")
+      await loadBotSettings(userId)
+    } catch {
+      setLinkError("Erro ao desvincular.")
+    } finally {
+      setLinkLoading(false)
+    }
   }
 
   async function saveAll() {
     if (!userId) return
     if (bot.enabled && !bot.whatsapp_jid) {
-      alert("Ative o bot só depois de vincular uma conta WhatsApp (Buscar contas → escolher seu nome).")
+      alert("Ative o bot só depois de vincular o WhatsApp.")
       return
+    }
+    if (bot.enabled && bot.whatsapp_jid && !bot.whatsapp_authorized) {
+      const ok = confirm(
+        "O WhatsApp ainda não foi autorizado (SIM no privado). Ativar lembretes mesmo assim?"
+      )
+      if (!ok) return
     }
     await Promise.all([
       fetch("/api/flashcards/schedule-settings", {
@@ -117,20 +258,7 @@ export default function FlashcardsSettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, weekday_limits: limits }),
       }),
-      fetch("/api/flashcards/bot/settings/web", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          enabled: bot.enabled,
-          phone_e164: bot.phone_e164 || null,
-          whatsapp_jid: bot.whatsapp_jid,
-          whatsapp_display_label: bot.whatsapp_display_label,
-          start_hour: bot.start_hour,
-          end_hour: bot.end_hour,
-          timezone: bot.timezone,
-        }),
-      }),
+      saveBotSettingsOnly(),
     ])
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -144,10 +272,17 @@ export default function FlashcardsSettingsPage() {
       body: JSON.stringify({ user_id: userId }),
     })
     const data = await res.json()
-    setNewApiKey(data.api_key)
+    if (data.api_key) {
+      setNewApiKey(data.api_key)
+      setApiKeyInput(data.api_key)
+      sessionStorage.setItem(apiKeyStorageKey(userId), data.api_key)
+      setHasApiKey(true)
+    }
   }
 
   if (!userId) return null
+
+  const pendingAuth = bot.whatsapp_jid && !bot.whatsapp_authorized
 
   return (
     <main className="mx-auto max-w-xl px-6 py-6">
@@ -185,60 +320,135 @@ export default function FlashcardsSettingsPage() {
       <section className="mt-8 border-t pt-8">
         <h2 className="flex items-center gap-2 font-medium text-slate-800">
           <MessageCircle className="h-5 w-5" />
-          Bot WhatsApp (VPS)
+          WhatsApp (bot na VPS)
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Vincule seu nome do grupo (após <code className="text-xs">/sync-membros</code> no WhatsApp).
-          O bot envia lembretes e cards no privado para esse JID.
+          Cada pessoa usa sua própria <code className="text-xs">fc_...</code> — não precisa
+          trocar a chave na VPS quando outra pessoa entrar.
         </p>
+
+        {bot.whatsapp_authorized && bot.whatsapp_jid && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            WhatsApp autorizado — {bot.whatsapp_display_label ?? "conta vinculada"}
+          </div>
+        )}
+
+        {pendingAuth && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Aguardando SIM no privado do bot para{" "}
+            <strong>{bot.whatsapp_display_label}</strong>.
+          </div>
+        )}
+
+        {linkMessage && (
+          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            {linkMessage}
+          </div>
+        )}
+        {linkError && (
+          <p className="mt-3 text-sm text-red-600">{linkError}</p>
+        )}
 
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
           <button
             type="button"
             onClick={fetchWhatsAppUsers}
             disabled={waLoading}
-            className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${waLoading ? "animate-spin" : ""}`} />
-            {waLoading ? "Buscando..." : "Buscar contas do WhatsApp"}
+            Buscar contas do WhatsApp
           </button>
 
-          {waError && (
-            <p className="mt-3 text-sm text-red-600">{waError}</p>
-          )}
+          {waError && <p className="mt-3 text-sm text-red-600">{waError}</p>}
           {waHint && !waUsers.length && (
             <p className="mt-2 text-sm text-amber-700">{waHint}</p>
           )}
-          {waWarning && (
-            <p className="mt-2 text-sm text-amber-700">{waWarning}</p>
-          )}
+          {waWarning && <p className="mt-2 text-sm text-amber-700">{waWarning}</p>}
 
           {waUsers.length > 0 && (
-            <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto">
+            <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto">
               {waUsers.map((u) => (
                 <li key={u.userJid}>
                   <button
                     type="button"
                     onClick={() => selectWhatsAppUser(u)}
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                    className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
                       bot.whatsapp_jid === u.userJid
                         ? "bg-emerald-600 text-white"
                         : "bg-white hover:bg-slate-100"
                     }`}
                   >
                     {u.displayLabel}
-                    {u.engaged && (
-                      <span className="ml-2 text-xs opacity-80">(engajado)</span>
-                    )}
                   </button>
                 </li>
               ))}
             </ul>
           )}
 
-          {bot.whatsapp_jid && (
-            <p className="mt-3 text-sm text-emerald-800">
-              Vinculado: <strong>{bot.whatsapp_display_label ?? bot.whatsapp_jid}</strong>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={requestWhatsAppLink}
+              disabled={linkLoading || !bot.whatsapp_jid}
+              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <Link2 className="h-4 w-4" />
+              {linkLoading ? "Enviando..." : "Vincular e pedir confirmação"}
+            </button>
+            {bot.whatsapp_jid && (
+              <>
+                <button
+                  type="button"
+                  onClick={requestWhatsAppLink}
+                  disabled={linkLoading}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
+                >
+                  Reenviar confirmação
+                </button>
+                <button
+                  type="button"
+                  onClick={unlinkWhatsApp}
+                  disabled={linkLoading}
+                  className="flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+                >
+                  <Unlink className="h-4 w-4" />
+                  Desvincular
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-slate-200 p-4">
+          <p className="text-sm font-medium text-slate-800">API key desta conta</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {hasApiKey
+              ? "Use a chave fc_... que você gerou (cole abaixo se não tiver mais na tela)."
+              : "Gere uma chave antes de vincular."}
+          </p>
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder="fc_..."
+            value={apiKeyInput}
+            onChange={(e) => {
+              setApiKeyInput(e.target.value)
+              if (userId && e.target.value.startsWith("fc_")) {
+                sessionStorage.setItem(apiKeyStorageKey(userId), e.target.value)
+              }
+            }}
+            className="mt-2 w-full rounded border px-3 py-2 font-mono text-sm"
+          />
+          <button
+            onClick={generateKey}
+            className="mt-2 rounded-lg border border-slate-300 px-4 py-2 text-sm"
+          >
+            {hasApiKey ? "Gerar nova API key" : "Gerar API key"}
+          </button>
+          {newApiKey && (
+            <p className="mt-2 break-all rounded bg-amber-50 p-3 text-xs text-amber-900">
+              Copie agora (só aparece uma vez): <strong>{newApiKey}</strong>
             </p>
           )}
         </div>
@@ -251,18 +461,6 @@ export default function FlashcardsSettingsPage() {
           />
           <span className="text-sm">Ativar lembretes pelo bot</span>
         </label>
-
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs text-slate-500">
-            Telefone manual (opcional, legado)
-          </summary>
-          <input
-            className="mt-2 w-full rounded border px-3 py-2 text-sm"
-            placeholder="+5511999999999"
-            value={bot.phone_e164}
-            onChange={(e) => setBot((b) => ({ ...b, phone_e164: e.target.value }))}
-          />
-        </details>
 
         <div className="mt-2 flex gap-4">
           <div>
@@ -288,26 +486,13 @@ export default function FlashcardsSettingsPage() {
             />
           </div>
         </div>
-
-        <button
-          onClick={generateKey}
-          className="mt-4 rounded-lg border border-slate-300 px-4 py-2 text-sm"
-        >
-          Gerar API key para o bot (VPS)
-        </button>
-        {newApiKey && (
-          <p className="mt-2 break-all rounded bg-amber-50 p-3 text-xs text-amber-900">
-            Copie agora e coloque na VPS como <code>FLASHCARDS_API_KEY</code>:{" "}
-            <strong>{newApiKey}</strong>
-          </p>
-        )}
       </section>
 
       <button
         onClick={saveAll}
         className="mt-8 w-full rounded-lg bg-slate-900 py-3 text-white"
       >
-        {saved ? "Salvo!" : "Salvar configurações"}
+        {saved ? "Salvo!" : "Salvar horários e limites"}
       </button>
     </main>
   )

@@ -27,6 +27,34 @@ O bot envia mensagens no **privado** usando `whatsapp_jid` salvo nas settings (n
 
 **Rota interna do app:** `GET /api/flashcards/whatsapp-users?user_id=...` (proxy; o front não expõe o secret).
 
+### Vincular + confirmação SIM (obrigatório)
+
+Após escolher o contato e salvar `whatsapp_jid`, o app chama:
+
+`POST /api/flashcards/whatsapp-link` (proxy para Papa Vagas)
+
+```json
+{
+  "user_id": "uuid-supabase",
+  "userJid": "176518911234135@lid",
+  "apiKey": "fc_...",
+  "displayLabel": "Daniel Ranna"
+}
+```
+
+O bot envia SIM/NÃO no privado em até ~90s. Quando o usuário responde **SIM**, o Papa Vagas deve chamar:
+
+`POST /api/flashcards/bot/whatsapp-authorized`  
+`Authorization: Bearer <QUIZ_BOT_USERS_SECRET>`
+
+```json
+{ "userJid": "...", "apiKey": "fc_..." }
+```
+
+### Desvincular
+
+`POST /api/flashcards/whatsapp-unlink` — limpa JID no Supabase e tenta `flashcards-unlink-request` no quiz.
+
 ---
 
 ## Fluxo na VPS

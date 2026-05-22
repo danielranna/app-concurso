@@ -20,10 +20,14 @@ Guia alinhado à integração com o bot na VPS e o site Quiz (Papa Vagas).
 
 ## No app
 
-1. Configurações → **Buscar contas do WhatsApp**
-2. Escolher nome → **Salvar**
-3. **Gerar API key** → copiar `fc_...` para VPS
-4. Definir `start_hour` / `end_hour`
+1. **Gerar API key** (`fc_...`) — fica na conta da pessoa, não na VPS
+2. **Buscar contas do WhatsApp** → escolher nome
+3. **Vincular e pedir confirmação** → responde **SIM** no privado do bot
+4. Salvar horários / ativar lembretes
+
+**Desvincular:** botão na mesma tela.
+
+**Papa Vagas:** após SIM, chamar `POST .../api/flashcards/bot/whatsapp-authorized` no app Flashcards.
 
 ## VPS (.env)
 
