@@ -54,6 +54,94 @@ export type AiActionDraft = {
   resolved_at: string | null
 }
 
+export type ErrorTaxonomy =
+  | "desatencao"
+  | "pegadinha_interpretacao"
+  | "falta_compreensao"
+  | "calculo_procedimento"
+  | "falta_memorizacao"
+  | "nao_aplicavel"
+
+export type PerQuestionError = {
+  question_id: string
+  attempt_id?: string
+  tec_id?: number
+  tec_topic?: string
+  error_taxonomy: ErrorTaxonomy
+  priority_score?: number
+  specific_mistake?: string
+  explanation?: string
+  explanation_source?: "material" | "ai_generated"
+  brain_topic_status?: string
+  evidence?: string[]
+}
+
+export type TopicBrainEntry = {
+  status:
+    | "dominado"
+    | "forte"
+    | "instavel"
+    | "fraco"
+    | "critico"
+    | "ilusao_dominio"
+    | "em_evolucao"
+  dominio: number
+  estabilidade: number
+  retencao: number
+  predominant_error?: ErrorTaxonomy
+}
+
+export type SubjectBrainState = {
+  topic_map: Record<string, TopicBrainEntry>
+  error_profile_by_topic: Record<string, ErrorTaxonomy>
+  danger_topics: string[]
+  trend: "melhorando" | "piorando" | "estagnado" | "desconhecido"
+  last_report_id?: string
+}
+
+export type StrategicQueueItem = {
+  id: string
+  subject_id: string
+  topic_key: string
+  priority_score: number
+  incidence_weight: number
+  gap_score: number
+  retention_penalty: number
+  reason: string | null
+  source: "sql" | "llm"
+  computed_at: string
+}
+
+export type DailyStudyBlock = {
+  subject_id: string
+  subject_name?: string
+  type:
+    | "questions"
+    | "flashcards"
+    | "error_review"
+    | "read_material"
+    | "notebook_create"
+  count: number
+  minutes: number
+  label: string
+  params: Record<string, unknown>
+}
+
+export type DailyStudyPlan = {
+  id?: string
+  date: string
+  mode: "pre_edital" | "pos_edital" | "reta_final"
+  limits: {
+    questions: number
+    flashcards: number
+    summaries: number
+    error_reviews?: number
+  }
+  blocks: DailyStudyBlock[]
+  rotation_note?: string
+  narrative_summary?: string
+}
+
 export type NotebookReportStructured = {
   headline: string
   strengths: { topic: string; evidence: string }[]
@@ -64,6 +152,7 @@ export type NotebookReportStructured = {
   consolidated_topics: string[]
   actions_next_7_days: { action: string; priority: number; minutes_estimate: number }[]
   executable_actions: ExecutableAction[]
+  per_question_errors?: PerQuestionError[]
   confidence_in_analysis: string
 }
 

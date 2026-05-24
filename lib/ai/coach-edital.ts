@@ -192,5 +192,8 @@ export async function generateCoachEditalPlan(
     metadata: { exam_target_id: examTargetId, report_id: report?.id },
   })
 
+  const { syncEditalWeightsToQueue } = await import("./strategic-queue")
+  await syncEditalWeightsToQueue(userId, examTargetId).catch(() => {})
+
   return { report_id: report?.id, structured, summary_md: summaryMd }
 }

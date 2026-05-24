@@ -5,7 +5,8 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Loader2, Play, Sparkles } from "lucide-react"
-import type { LearningSignal } from "@/lib/coach-types"
+import type { LearningSignal, SubjectBrainState } from "@/lib/coach-types"
+import { BRAIN_STATUS_LABELS, ERROR_TAXONOMY_LABELS } from "@/lib/coach-labels"
 
 const SIGNAL_LABELS: Record<string, string> = {
   high_recurrence: "Alta reincidência",
@@ -52,6 +53,8 @@ export default function CoachInsightsPage() {
     }[]
   } | null>(null)
   const [loadingPriorities, setLoadingPriorities] = useState(false)
+  const [brain, setBrain] = useState<SubjectBrainState | null>(null)
+  const [brainSummary, setBrainSummary] = useState<string | null>(null)
 
   function reload(uid: string) {
     setLoading(true)
@@ -63,13 +66,18 @@ export default function CoachInsightsPage() {
       fetch(`/api/coach/reports?user_id=${uid}&subject_id=${subjectId}`).then(
         (r) => r.json()
       ),
+      fetch(`/api/coach/brain?user_id=${uid}&subject_id=${subjectId}`).then(
+        (r) => r.json()
+      ),
     ])
-      .then(([subs, sig, reps]) => {
+      .then(([subs, sig, reps, brainRes]) => {
         const sub = (subs ?? []).find((s: { id: string }) => s.id === subjectId)
         setSubjectName(sub?.name ?? "Matéria")
         setSignals(sig.signals ?? [])
         setTopicStats(sig.topic_stats ?? [])
         setReports(reps ?? [])
+        setBrain(brainRes.state ?? null)
+        setBrainSummary(brainRes.summary_md ?? null)
       })
       .finally(() => setLoading(false))
   }
@@ -161,6 +169,62 @@ export default function CoachInsightsPage() {
           Veredito de prioridades
         </button>
       </div>
+
+      {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
+          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-emerald-800">
+            Cérebro da matéria
+          </h3>
+          {brainSummary && (
+            <p className="mb-3 text-sm text-slate-700">{brainSummary}</p>
+          )}
+          <p className="mb-2 text-xs text-slate-500">
+            Tendência: {brain.trend}
+            {brain.danger_topics?.length
+              ? ` · Alerta: ${brain.danger_topics.slice(0, 3).join(", ")}`
+              : ""}
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-slate-600">
+                <tr>
+                  <th className="px-3 py-2">Tópico</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Domínio</th>
+                  <th className="px-3 py-2">Estab.</th>
+                  <th className="px-3 py-2">Retenção</th>
+                  <th className="px-3 py-2">Erro típico</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(brain.topic_map)
+                  .sort((a, b) => a[1].dominio - b[1].dominio)
+                  .slice(0, 12)
+                  .map(([topic, entry]) => (
+                    <tr key={topic} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium">{topic}</td>
+                      <td className="px-3 py-2">
+                        {BRAIN_STATUS_LABELS[entry.status] ?? entry.status}
+                      </td>
+                      <td className="px-3 py-2">{Math.round(entry.dominio * 100)}%</td>
+                      <td className="px-3 py-2">
+                        {Math.round(entry.estabilidade * 100)}%
+                      </td>
+                      <td className="px-3 py-2">
+                        {Math.round(entry.retencao * 100)}%
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {entry.predominant_error
+                          ? ERROR_TAXONOMY_LABELS[entry.predominant_error]
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {priorities && (
         <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">

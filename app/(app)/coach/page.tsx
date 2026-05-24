@@ -97,6 +97,15 @@ export default function CoachHubPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link
+          href="/coach/hoje"
+          className="rounded-xl border border-violet-200 bg-violet-50 p-4 shadow-sm transition hover:border-violet-300"
+        >
+          <Sparkles className="mb-2 h-5 w-5 text-violet-700" />
+          <p className="text-sm font-semibold text-violet-900">Plano de hoje</p>
+          <p className="text-xs text-violet-700">Agente de execução</p>
+        </Link>
+
+        <Link
           href="/coach/inbox"
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300"
         >

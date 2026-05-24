@@ -16,7 +16,7 @@ Priorize: (1) tópicos fracos, (2) padrões metacognitivos (6 categorias), (3) t
 (4) reincidência de erros, (5) consolidação. Cite tec_topic exatamente como no JSON.
 Use APENAS os dados do JSON; não invente estatísticas. Responda em português (BR).`
 
-function buildRuleBasedReport(
+export function buildRuleBasedReport(
   snapshot: Record<string, unknown>,
   useLlm: boolean
 ): NotebookReportStructured {
@@ -309,69 +309,17 @@ export async function enqueueNotebookReport(notebookId: string, userId: string) 
 
   if (!nb?.completed_at) return { skipped: true, reason: "not_completed" }
 
-  const report = await generateNotebookReport(notebookId, userId)
+  const { enqueueNotebookPipeline } = await import("./jobs/queue")
+  const { runJobWorker } = await import("./jobs/worker")
 
-  const { data: row, error } = await supabaseServer
-    .from("subject_notebook_reports")
-    .insert({
-      user_id: userId,
-      subject_id: nb.subject_id,
-      notebook_id: notebookId,
-      summary_md: report.summaryMd,
-      structured: report.structured,
-      input_snapshot: report.snapshot,
-      model_used: report.modelUsed,
-      tokens_in: report.tokensIn,
-      tokens_out: report.tokensOut,
-      cost_usd_estimate: report.costUsd,
-    })
-    .select("id")
-    .single()
+  await enqueueNotebookPipeline(userId, notebookId, nb.subject_id)
 
-  if (error) throw new Error(error.message)
-
-  await supabaseServer
-    .from("notebooks")
-    .update({ report_pending: false })
-    .eq("id", notebookId)
-
-  await supabaseServer.from("ai_runs").insert({
-    user_id: userId,
-    agent_type: "notebook_report",
-    tokens_in: report.tokensIn,
-    tokens_out: report.tokensOut,
-    cost_estimate: report.costUsd,
-    status: "ok",
-    metadata: { notebook_id: notebookId, report_id: row?.id },
-  })
-
-  if (nb.subject_id) {
-    await generateRemediationDrafts({
-      userId,
-      subjectId: nb.subject_id,
-      notebookId,
-      structured: report.structured,
-      snapshot: report.snapshot,
-    })
+  const allResults: { id: string; status: string; error?: string }[] = []
+  for (let round = 0; round < 12; round++) {
+    const batch = await runJobWorker(3)
+    allResults.push(...batch)
+    if (!batch.length) break
   }
 
-  for (const action of report.structured.executable_actions ?? []) {
-    if (action.type !== "create_remediation_notebook") continue
-    await supabaseServer.from("ai_action_drafts").insert({
-      user_id: userId,
-      subject_id: nb.subject_id,
-      type: "notebook_create",
-      label: action.label,
-      payload: {
-        ...action.params,
-        subject_id: nb.subject_id,
-        suggested_name: action.params.suggested_name ?? action.label,
-        report_model_used: report.modelUsed,
-      },
-      source_agent: "notebook_report",
-      status: "pending",
-    })
-  }
-
-  return { report_id: row?.id, skipped: false }
+  return { skipped: false, jobs: allResults }
 }

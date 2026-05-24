@@ -1,0 +1,282 @@
+import { supabaseServer } from "../supabase-server"
+import type { ErrorTaxonomy, PerQuestionError, SubjectBrainState } from "../coach-types"
+import { loadSubjectBrain, getReportPreferences } from "./context-builder"
+import { runTeacherAgent } from "./agents/teacher"
+import { runAgent } from "./run-agent"
+
+export type WrongAttemptRow = {
+  attempt_id: string
+  question_id: string
+  duration_ms: number | null
+  outcome_category: string | null
+  confidence_level: string | null
+  tec_id: number
+  tec_topic: string
+  statement: string
+  notes: string[]
+  prior_correct_count: number
+  priority_score: number
+}
+
+const TAXONOMY_SEVERITY: Record<ErrorTaxonomy, number> = {
+  falta_compreensao: 4,
+  calculo_procedimento: 4,
+  falta_memorizacao: 3,
+  pegadinha_interpretacao: 2,
+  desatencao: 1,
+  nao_aplicavel: 0,
+}
+
+export function heuristicClassify(row: WrongAttemptRow): {
+  taxonomy: ErrorTaxonomy
+  evidence: string[]
+  specific_mistake?: string
+} {
+  const evidence: string[] = []
+  const dur = row.duration_ms ?? 0
+
+  if (dur < 25_000 && row.confidence_level === "seguro") {
+    evidence.push("Resposta rápida com confiança alta")
+    return { taxonomy: "desatencao", evidence }
+  }
+
+  if (row.outcome_category === "falso_positivo" || row.confidence_level === "chute") {
+    evidence.push("Padrão de chute ou falso positivo")
+    return { taxonomy: "pegadinha_interpretacao", evidence }
+  }
+
+  if (row.prior_correct_count >= 2) {
+    evidence.push("Já acertou esta questão antes")
+    return { taxonomy: "desatencao", evidence }
+  }
+
+  if (dur > 120_000) {
+    evidence.push("Tempo elevado na questão")
+    return { taxonomy: "falta_compreensao", evidence }
+  }
+
+  if (
+    row.outcome_category === "lacuna_critica" ||
+    row.outcome_category === "conteudo_desconhecido"
+  ) {
+    evidence.push("Lacuna de conteúdo registrada")
+    return { taxonomy: "falta_memorizacao", evidence }
+  }
+
+  if (row.outcome_category === "lacuna_consciente") {
+    return { taxonomy: "falta_compreensao", evidence: ["Lacuna consciente"] }
+  }
+
+  return { taxonomy: "pegadinha_interpretacao", evidence: ["Padrão interpretativo"] }
+}
+
+export function computeErrorPriorityScore(params: {
+  wrongCount: number
+  incidenceWeight: number
+  brainGap: number
+  taxonomy: ErrorTaxonomy
+}): number {
+  return (
+    params.wrongCount * 10 +
+    params.incidenceWeight * 20 +
+    params.brainGap * 15 +
+    TAXONOMY_SEVERITY[params.taxonomy] * 5
+  )
+}
+
+export async function fetchWrongAttemptsForNotebook(
+  userId: string,
+  notebookId: string,
+  subjectId: string | null
+): Promise<WrongAttemptRow[]> {
+  const { data: attempts } = await supabaseServer
+    .from("question_attempts")
+    .select(
+      `
+      id, question_id, duration_ms, outcome_category, confidence_level, is_correct,
+      questions ( tec_id, tec_topic, statement )
+    `
+    )
+    .eq("user_id", userId)
+    .eq("notebook_id", notebookId)
+    .eq("is_correct", false)
+    .order("created_at", { ascending: false })
+
+  const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
+
+  const rows: WrongAttemptRow[] = []
+  const seenQ = new Set<string>()
+
+  for (const a of attempts ?? []) {
+    if (seenQ.has(a.question_id)) continue
+    seenQ.add(a.question_id)
+
+    const q = a.questions as
+      | { tec_id: number; tec_topic: string; statement: string }
+      | { tec_id: number; tec_topic: string; statement: string }[]
+    const qu = Array.isArray(q) ? q[0] : q
+    if (!qu) continue
+
+    const { count: priorCorrect } = await supabaseServer
+      .from("question_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("question_id", a.question_id)
+      .eq("is_correct", true)
+      .neq("notebook_id", notebookId)
+
+    const topic = qu.tec_topic?.trim() || "Sem tópico"
+    const entry = brain?.topic_map?.[topic]
+    const brainGap = entry ? 1 - entry.dominio : 0.5
+
+    const { taxonomy } = heuristicClassify({
+      attempt_id: a.id,
+      question_id: a.question_id,
+      duration_ms: a.duration_ms,
+      outcome_category: a.outcome_category,
+      confidence_level: a.confidence_level,
+      tec_id: qu.tec_id,
+      tec_topic: topic,
+      statement: qu.statement ?? "",
+      notes: [],
+      prior_correct_count: priorCorrect ?? 0,
+      priority_score: 0,
+    })
+
+    const priority_score = computeErrorPriorityScore({
+      wrongCount: 1,
+      incidenceWeight: 1,
+      brainGap,
+      taxonomy,
+    })
+
+    rows.push({
+      attempt_id: a.id,
+      question_id: a.question_id,
+      duration_ms: a.duration_ms,
+      outcome_category: a.outcome_category,
+      confidence_level: a.confidence_level,
+      tec_id: qu.tec_id,
+      tec_topic: topic,
+      statement: (qu.statement ?? "").slice(0, 500),
+      notes: [],
+      prior_correct_count: priorCorrect ?? 0,
+      priority_score,
+    })
+  }
+
+  return rows.sort((a, b) => b.priority_score - a.priority_score)
+}
+
+export async function classifyWrongAttempts(
+  userId: string,
+  notebookId: string,
+  subjectId: string | null,
+  options?: { explain?: boolean }
+): Promise<PerQuestionError[]> {
+  const prefs = await getReportPreferences(userId)
+  const rows = await fetchWrongAttemptsForNotebook(userId, notebookId, subjectId)
+  const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
+
+  const results: PerQuestionError[] = []
+  let llmExplains = 0
+  const maxExplains = prefs.max_llm_explanations_per_day
+
+  for (const row of rows) {
+    const { taxonomy, evidence, specific_mistake } = heuristicClassify(row)
+    const brainEntry = brain?.topic_map?.[row.tec_topic]
+
+    await supabaseServer
+      .from("question_attempts")
+      .update({
+        error_taxonomy: taxonomy,
+        error_detail: {
+          specific_mistake,
+          evidence,
+          source: "heuristic",
+          priority_score: row.priority_score,
+          brain_topic_status: brainEntry?.status,
+        },
+      })
+      .eq("id", row.attempt_id)
+
+    const item: PerQuestionError = {
+      question_id: row.question_id,
+      attempt_id: row.attempt_id,
+      tec_id: row.tec_id,
+      tec_topic: row.tec_topic,
+      error_taxonomy: taxonomy,
+      priority_score: row.priority_score,
+      specific_mistake,
+      evidence,
+      brain_topic_status: brainEntry?.status,
+    }
+
+    const shouldExplain =
+      (options?.explain ?? prefs.explain_wrong) && llmExplains < maxExplains
+
+    if (shouldExplain && subjectId) {
+      const teacher = await runTeacherAgent({
+        userId,
+        subjectId,
+        query: `Explique o erro nesta questão de forma objetiva:\n${row.statement.slice(0, 800)}`,
+        questionContext: {
+          taxonomy,
+          topic: row.tec_topic,
+          evidence,
+        },
+      })
+      item.explanation = teacher.answer
+      item.explanation_source = teacher.source
+      llmExplains++
+
+      await supabaseServer
+        .from("question_attempts")
+        .update({
+          error_detail: {
+            specific_mistake,
+            evidence,
+            source: "heuristic",
+            explanation: teacher.answer,
+            explanation_source: teacher.source,
+            priority_score: row.priority_score,
+          },
+        })
+        .eq("id", row.attempt_id)
+    }
+
+    results.push(item)
+  }
+
+  return results
+}
+
+export async function refineTaxonomyWithLlm(
+  userId: string,
+  rows: WrongAttemptRow[]
+): Promise<Map<string, ErrorTaxonomy>> {
+  const result = await runAgent({
+    agentType: "report",
+    userId,
+    systemPrompt: `Classifique cada erro em UMA categoria: desatencao, pegadinha_interpretacao, falta_compreensao, calculo_procedimento, falta_memorizacao.
+Responda JSON: { "items": [{"question_id":"","error_taxonomy":"","specific_mistake":""}] }`,
+    userContent: JSON.stringify(rows.slice(0, 20)),
+    jsonMode: true,
+    maxTokens: 1500,
+  })
+
+  const map = new Map<string, ErrorTaxonomy>()
+  if (!result.usedLlm) return map
+
+  try {
+    const parsed = JSON.parse(result.text) as {
+      items?: { question_id: string; error_taxonomy: ErrorTaxonomy; specific_mistake?: string }[]
+    }
+    for (const item of parsed.items ?? []) {
+      map.set(item.question_id, item.error_taxonomy)
+    }
+  } catch {
+    /* keep heuristics */
+  }
+  return map
+}

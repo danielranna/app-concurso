@@ -3,6 +3,7 @@
 import Link from "next/link"
 import ReportSourceBadge from "@/components/coach/ReportSourceBadge"
 import type { NotebookReportStructured } from "@/lib/coach-types"
+import { ERROR_TAXONOMY_LABELS } from "@/lib/coach-labels"
 import { ArrowLeft } from "lucide-react"
 
 type Report = {
@@ -116,6 +117,52 @@ export default function NotebookReportDetail({
               </li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {s?.per_question_errors && s.per_question_errors.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Erros por questão (classificados)
+          </h2>
+          <ul className="space-y-4">
+            {[...s.per_question_errors]
+              .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0))
+              .map((eq, i) => (
+                <li
+                  key={eq.question_id ?? i}
+                  className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                      {ERROR_TAXONOMY_LABELS[eq.error_taxonomy] ??
+                        eq.error_taxonomy}
+                    </span>
+                    {eq.tec_topic && (
+                      <span className="text-slate-600">{eq.tec_topic}</span>
+                    )}
+                    {eq.priority_score != null && (
+                      <span className="text-xs text-slate-400">
+                        prioridade {Math.round(eq.priority_score)}
+                      </span>
+                    )}
+                  </div>
+                  {eq.specific_mistake && (
+                    <p className="mt-2 text-slate-800">{eq.specific_mistake}</p>
+                  )}
+                  {eq.explanation && (
+                    <div className="mt-2 rounded border border-slate-200 bg-white p-2">
+                      <p className="text-xs font-medium text-slate-500">
+                        {eq.explanation_source === "material"
+                          ? "Professor (material)"
+                          : "Explicação IA"}
+                      </p>
+                      <p className="mt-1 text-slate-700">{eq.explanation}</p>
+                    </div>
+                  )}
+                </li>
+              ))}
+          </ul>
         </section>
       )}
 

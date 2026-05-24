@@ -3,9 +3,10 @@ import { computeLearningSignals } from "../learning-signals"
 import type { ExecutableAction } from "../coach-types"
 import { aiComplete } from "./client"
 import { getUserAiCredentials } from "./user-credentials"
+import { recomputeStrategicQueue } from "./strategic-queue"
 
-const SYSTEM = `Você é o Orquestrador de Prioridades. Unifique questões, flashcards e erros em até 5 prioridades para 7 dias.
-Use APENAS os dados JSON. Responda:
+const SYSTEM = `Você complementa a fila estratégica já calculada. Use os dados JSON.
+Responda:
 {
   "top_priorities": [{"rank":1,"title":"","why":"","domain":"questoes|flashcards|erros","time_minutes":45}],
   "executable_actions": [{"type":"create_remediation_notebook|review_flashcards|review_errors|notebook_create","label":"","params":{},"priority":1,"estimated_minutes":45}],
@@ -16,6 +17,16 @@ export async function generatePriorityVerdict(
   userId: string,
   subjectId: string
 ) {
+  await recomputeStrategicQueue(userId, subjectId, { withLlmNarrative: false })
+
+  const { data: queue } = await supabaseServer
+    .from("strategic_queue_items")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+    .order("priority_score", { ascending: false })
+    .limit(15)
+
   const credentials = await getUserAiCredentials(userId)
 
   const { data: subject } = await supabaseServer
@@ -26,13 +37,11 @@ export async function generatePriorityVerdict(
 
   const signals = await computeLearningSignals(userId, subjectId)
 
-  const { data: latestReport } = await supabaseServer
-    .from("subject_notebook_reports")
-    .select("structured, summary_md, created_at")
+  const { data: brain } = await supabaseServer
+    .from("subject_brain_state")
+    .select("state, summary_md")
     .eq("user_id", userId)
     .eq("subject_id", subjectId)
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle()
 
   const { data: openErrors } = await supabaseServer
@@ -51,33 +60,31 @@ export async function generatePriorityVerdict(
 
   const input = {
     subject_name: subject?.name,
-    learning_signals: signals.slice(0, 15),
-    latest_notebook_report: latestReport?.structured ?? null,
+    strategic_queue: queue ?? [],
+    subject_brain: brain?.state ?? null,
+    learning_signals: signals.slice(0, 10),
     open_errors_count: openErrors?.length ?? 0,
-    top_errors: (openErrors ?? []).slice(0, 8).map((e) => {
-      const t = e.topics as { name: string } | { name: string }[]
-      const name = Array.isArray(t) ? t[0]?.name : t?.name
-      return { topic: name, review_count: e.review_count }
-    }),
     flashcards_due_estimate: dueCards ?? 0,
   }
 
   let structured: Record<string, unknown> = {
-    top_priorities: signals.slice(0, 5).map((s, i) => ({
+    top_priorities: (queue ?? []).slice(0, 5).map((q, i) => ({
       rank: i + 1,
-      title: `${s.signal_type} — ${s.entity_id}`,
-      why: JSON.stringify(s.metadata),
+      title: q.topic_key,
+      why: q.reason ?? `Score ${q.priority_score}`,
       domain: "questoes",
       time_minutes: 40,
     })),
-    narrative_summary: `Foco em ${subject?.name ?? "matéria"} com base nos sinais SQL.`,
+    narrative_summary:
+      brain?.summary_md?.slice(0, 300) ||
+      `Fila estratégica com ${queue?.length ?? 0} tópicos para ${subject?.name ?? "matéria"}.`,
     executable_actions: [] as ExecutableAction[],
   }
 
   let tokensIn = 0
   let tokensOut = 0
 
-  if (credentials) {
+  if (credentials && (queue?.length ?? 0) > 0) {
     try {
       const result = await aiComplete(
         {
@@ -90,11 +97,11 @@ export async function generatePriorityVerdict(
         },
         credentials
       )
-      structured = JSON.parse(result.text || "{}")
+      structured = { ...structured, ...JSON.parse(result.text || "{}") }
       tokensIn = result.tokensIn
       tokensOut = result.tokensOut
     } catch {
-      /* keep rule-based */
+      /* keep queue-based */
     }
   }
 
@@ -104,8 +111,8 @@ export async function generatePriorityVerdict(
     tokens_in: tokensIn,
     tokens_out: tokensOut,
     status: "ok",
-    metadata: { subject_id: subjectId },
+    metadata: { subject_id: subjectId, queue_size: queue?.length ?? 0 },
   })
 
-  return { structured, input }
+  return { structured, input, queue: queue ?? [] }
 }

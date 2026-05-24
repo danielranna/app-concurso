@@ -56,6 +56,19 @@ export async function POST(req: Request) {
       examTargetId: exam_target_id,
     })
 
+    if (doc_type === "study_material" && doc.id) {
+      const { enqueueJob } = await import("@/lib/ai/jobs/queue")
+      const { runJobWorker } = await import("@/lib/ai/jobs/worker")
+      await enqueueJob({
+        userId: user_id,
+        jobType: "document_ingest",
+        idempotencyKey: `ingest:${doc.id}`,
+        payload: { document_id: doc.id },
+        priority: 5,
+      })
+      runJobWorker(1).catch(() => {})
+    }
+
     return NextResponse.json(doc)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
