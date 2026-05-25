@@ -363,6 +363,25 @@ export async function generateNotebookReport(
   const reportsToday = await countReportLlmRunsToday(userId)
   const skipLlm = reportsToday >= prefs.max_llm_explanations_per_day
 
+  const materialHints: { topic: string; document_title: string; excerpt: string }[] =
+    []
+  if (subjectId) {
+    const { retrieveForTeacher } = await import("./teacher-retrieval")
+    for (const w of ruleBased.weaknesses?.slice(0, 3) ?? []) {
+      const topic = w.topic?.trim()
+      if (!topic) continue
+      const chunks = await retrieveForTeacher(userId, subjectId, topic, 1)
+      const c = chunks[0]
+      if (c) {
+        materialHints.push({
+          topic,
+          document_title: c.title,
+          excerpt: c.content.slice(0, 350),
+        })
+      }
+    }
+  }
+
   const result = await runReportAgent({
     userId,
     subjectId,
@@ -372,6 +391,7 @@ export async function generateNotebookReport(
     ruleBased,
     skipLlm,
     notebookName: String(snapshot.notebook_name ?? nb?.name ?? "Caderno"),
+    materialHints,
   })
 
   return {

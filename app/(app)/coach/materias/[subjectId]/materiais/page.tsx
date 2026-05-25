@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
   ArrowLeft,
@@ -37,9 +37,11 @@ const STAGE_LABELS: Record<string, string> = {
 
 export default function CoachMateriaisBibliotecaPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const subjectId = params.subjectId as string
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
+  const chatSectionRef = useRef<HTMLElement>(null)
 
   const [userId, setUserId] = useState<string | null>(null)
   const [subjectName, setSubjectName] = useState("")
@@ -64,6 +66,14 @@ export default function CoachMateriaisBibliotecaPage() {
     },
     [subjectId]
   )
+
+  useEffect(() => {
+    const ask = searchParams.get("ask")
+    if (ask) {
+      setQuery(ask)
+      setTimeout(() => chatSectionRef.current?.scrollIntoView({ behavior: "smooth" }), 400)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -295,7 +305,10 @@ export default function CoachMateriaisBibliotecaPage() {
         )}
       </section>
 
-      <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
+      <section
+        ref={chatSectionRef}
+        className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4"
+      >
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-emerald-800">
           Pergunte ao professor
         </h3>

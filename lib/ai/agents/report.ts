@@ -47,6 +47,7 @@ export async function runReportAgent(params: {
   ruleBased: NotebookReportStructured
   skipLlm?: boolean
   notebookName: string
+  materialHints?: { topic: string; document_title: string; excerpt: string }[]
 }): Promise<RunReportAgentResult> {
   const base: NotebookReportStructured = {
     ...params.ruleBased,
@@ -74,10 +75,12 @@ export async function runReportAgent(params: {
       taxonomy: e.error_taxonomy,
       priority: e.priority_score,
       mistake: e.specific_mistake,
+      has_teacher_explanation: Boolean(e.explanation),
     })),
     learning_signals: params.snapshot.learning_signals,
     incidence_top_topics: params.snapshot.incidence_top_topics,
     prior_report_headline: params.snapshot.prior_report_headline,
+    material_hints: params.materialHints ?? [],
   }
 
   const jsonResult = await runAgent({

@@ -1,10 +1,19 @@
 import { supabaseServer } from "../../supabase-server"
+import { getTeacherDailyCap } from "../context-builder"
 import { retrieveForTeacher } from "../teacher-retrieval"
 import { runAgent } from "../run-agent"
 
-const SYSTEM = `Você é tutor de concursos (Professor). Responda com base nos trechos fornecidos quando existirem.
+const SYSTEM_CHAT = `Você é tutor de concursos (Professor). Responda com base nos trechos fornecidos quando existirem.
 Se os trechos não cobrirem a dúvida, responda com conhecimento geral mas indique limitação.
 Cite páginas ou materiais quando possível.
+Responda JSON: {
+  "answer": "",
+  "citations": [{"document_title":"","excerpt":"","page":null}],
+  "source": "material" | "ai_generated"
+}`
+
+const SYSTEM_REPORT = `Você é o Professor no relatório de caderno. Explique o padrão de erro no tópico indicado.
+Use os trechos dos PDFs quando existirem. Seja objetivo e didático para concurso.
 Responda JSON: {
   "answer": "",
   "citations": [{"document_title":"","excerpt":"","page":null}],
@@ -16,8 +25,6 @@ export type TeacherAnswer = {
   citations: { document_title: string; excerpt: string; page?: number | null }[]
   source: "material" | "ai_generated"
 }
-
-const DEFAULT_DAILY_CAP = 30
 
 export async function countTeacherQueriesToday(userId: string): Promise<number> {
   const start = new Date()
@@ -35,13 +42,17 @@ export async function runTeacherAgent(params: {
   userId: string
   subjectId: string
   query: string
+  retrievalQuery?: string
   questionContext?: Record<string, unknown>
   skipDailyCap?: boolean
+  purpose?: "report_explain" | "chat"
+  mode?: "report" | "chat"
 }): Promise<TeacherAnswer> {
+  const searchQuery = params.retrievalQuery?.trim() || params.query
   const chunks = await retrieveForTeacher(
     params.userId,
     params.subjectId,
-    params.query,
+    searchQuery,
     6
   )
 
@@ -56,8 +67,9 @@ export async function runTeacherAgent(params: {
     : "Nenhum trecho de material encontrado."
 
   if (!params.skipDailyCap) {
+    const cap = await getTeacherDailyCap(params.userId)
     const used = await countTeacherQueriesToday(params.userId)
-    if (used >= DEFAULT_DAILY_CAP) {
+    if (used >= cap) {
       return {
         answer:
           "Limite diário de consultas ao professor atingido. Tente amanhã ou ajuste em Configurações.",
@@ -67,11 +79,13 @@ export async function runTeacherAgent(params: {
     }
   }
 
+  const systemPrompt = params.mode === "report" ? SYSTEM_REPORT : SYSTEM_CHAT
+
   const result = await runAgent({
     agentType: "teacher",
     userId: params.userId,
     subjectId: params.subjectId,
-    systemPrompt: SYSTEM,
+    systemPrompt,
     userContent: JSON.stringify({
       query: params.query,
       question: params.questionContext,
@@ -79,6 +93,9 @@ export async function runTeacherAgent(params: {
     }),
     jsonMode: true,
     maxTokens: 1200,
+    metadata: {
+      purpose: params.purpose ?? params.mode ?? "chat",
+    },
   })
 
   if (!result.usedLlm || !result.text) {
@@ -95,13 +112,13 @@ export async function runTeacherAgent(params: {
     const parsed = JSON.parse(result.text) as TeacherAnswer
     if (hasMaterial && parsed.source !== "material") {
       parsed.source = "material"
-      if (!parsed.citations?.length) {
-        parsed.citations = chunks.slice(0, 3).map((c) => ({
-          document_title: c.title,
-          excerpt: c.content.slice(0, 200),
-          page: c.page ?? null,
-        }))
-      }
+    }
+    if (hasMaterial && !parsed.citations?.length) {
+      parsed.citations = chunks.slice(0, 3).map((c) => ({
+        document_title: c.title,
+        excerpt: c.content.slice(0, 200),
+        page: c.page ?? null,
+      }))
     }
     return parsed
   } catch {

@@ -1,3 +1,5 @@
+import type { ErrorTaxonomy } from "../coach-types"
+import { ERROR_TAXONOMY_LABELS } from "../coach-labels"
 import { supabaseServer } from "../supabase-server"
 import { listCoachDocuments } from "../coach-documents"
 import { embedTexts } from "./embeddings"
@@ -128,11 +130,25 @@ function rerankHybrid(
     .map(({ _score: _s, ...rest }) => rest)
 }
 
-export async function retrieveForTeacher(
+export function buildTeacherQueryForError(params: {
+  tec_topic: string
+  error_taxonomy?: ErrorTaxonomy
+  statementSnippet?: string
+}): string {
+  const topic = params.tec_topic?.trim() || "conteúdo"
+  const taxLabel = params.error_taxonomy
+    ? ERROR_TAXONOMY_LABELS[params.error_taxonomy] ?? params.error_taxonomy
+    : ""
+  const stmt = (params.statementSnippet ?? "").replace(/\s+/g, " ").slice(0, 200)
+  const parts = [topic, taxLabel, stmt].filter(Boolean)
+  return parts.join(" ")
+}
+
+async function retrieveInternal(
   userId: string,
   subjectId: string,
   query: string,
-  limit = 6
+  limit: number
 ): Promise<RetrievedChunk[]> {
   const docIds = await listReadyMaterialDocIds(userId, subjectId)
   if (!docIds.length) {
@@ -154,4 +170,28 @@ export async function retrieveForTeacher(
     return rerankHybrid(vectorHits, lexicalHits, limit)
   }
   return lexicalHits.slice(0, limit)
+}
+
+export async function retrieveForTeacher(
+  userId: string,
+  subjectId: string,
+  query: string,
+  limit = 6
+): Promise<RetrievedChunk[]> {
+  let hits = await retrieveInternal(userId, subjectId, query, limit)
+  if (hits.length >= 2) return hits
+
+  const topicOnly = query.split(/\s+/).slice(0, 6).join(" ")
+  if (topicOnly && topicOnly !== query) {
+    const extra = await retrieveInternal(userId, subjectId, topicOnly, limit)
+    const seen = new Set(hits.map((h) => `${h.document_id}:${h.content.slice(0, 60)}`))
+    for (const h of extra) {
+      const k = `${h.document_id}:${h.content.slice(0, 60)}`
+      if (!seen.has(k)) {
+        hits.push(h)
+        seen.add(k)
+      }
+    }
+  }
+  return hits.slice(0, limit)
 }

@@ -37,7 +37,7 @@ export default function CoachConfiguracoesPage() {
   const [summaries, setSummaries] = useState(2)
   const [errorReviews, setErrorReviews] = useState(10)
   const [explainWrong, setExplainWrong] = useState(true)
-  const [maxExplanations, setMaxExplanations] = useState(15)
+  const [teacherDailyCap, setTeacherDailyCap] = useState(30)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -59,7 +59,13 @@ export default function CoachConfiguracoesPage() {
           setSummaries(Number(lim.summaries ?? 2))
           setErrorReviews(Number(lim.error_reviews ?? 10))
           setExplainWrong(rp.explain_wrong ?? true)
-          setMaxExplanations(Number(rp.max_llm_explanations_per_day ?? 15))
+          setTeacherDailyCap(
+            Number(
+              rp.max_teacher_queries_per_day ??
+                rp.max_llm_explanations_per_day ??
+                30
+            )
+          )
         })
         .finally(() => setLoading(false))
     })
@@ -86,7 +92,8 @@ export default function CoachConfiguracoesPage() {
         },
         report: {
           explain_wrong: explainWrong,
-          max_llm_explanations_per_day: maxExplanations,
+          max_teacher_queries_per_day: teacherDailyCap,
+          max_llm_explanations_per_day: teacherDailyCap,
         },
       }),
     })
@@ -229,17 +236,21 @@ export default function CoachConfiguracoesPage() {
         </label>
         <label className="block text-sm">
           <span className="font-medium text-slate-700">
-            Máx. explicações com IA por dia
+            Consultas Professor por dia
           </span>
           <input
             type="number"
             min={0}
-            max={50}
-            value={maxExplanations}
-            onChange={(e) => setMaxExplanations(Number(e.target.value))}
+            max={80}
+            value={teacherDailyCap}
+            onChange={(e) => setTeacherDailyCap(Number(e.target.value))}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
           />
         </label>
+        <p className="text-xs text-slate-500">
+          Vale para explicações no relatório (por tópico) e para o chat em
+          Materiais.
+        </p>
       </section>
 
       <button

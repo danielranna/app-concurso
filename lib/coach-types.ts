@@ -62,6 +62,12 @@ export type ErrorTaxonomy =
   | "falta_memorizacao"
   | "nao_aplicavel"
 
+export type TeacherCitation = {
+  document_title: string
+  excerpt: string
+  page?: number | null
+}
+
 export type PerQuestionError = {
   question_id: string
   attempt_id?: string
@@ -72,6 +78,9 @@ export type PerQuestionError = {
   specific_mistake?: string
   explanation?: string
   explanation_source?: "material" | "ai_generated"
+  explanation_citations?: TeacherCitation[]
+  topic_explanation_key?: string
+  topic_group_size?: number
   brain_topic_status?: string
   evidence?: string[]
 }

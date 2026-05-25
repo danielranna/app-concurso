@@ -1,7 +1,8 @@
 import { supabaseServer } from "../supabase-server"
 import type { ErrorTaxonomy, PerQuestionError, SubjectBrainState } from "../coach-types"
+import { findTopicEntry } from "./brain-helpers"
 import { loadSubjectBrain, getReportPreferences } from "./context-builder"
-import { runTeacherAgent } from "./agents/teacher"
+import { applyGroupedTeacherExplanations } from "./teacher-report-explain"
 import { runAgent } from "./run-agent"
 import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
 import {
@@ -215,13 +216,18 @@ export async function classifyWrongAttempts(
   const rows = await fetchWrongAttemptsForNotebook(userId, notebookId, subjectId)
   const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
 
-  const results: PerQuestionError[] = []
-  let llmExplains = 0
-  const maxExplains = prefs.max_llm_explanations_per_day
+  const prepared: {
+    row: WrongAttemptRow
+    item: PerQuestionError
+    errorDetail: Record<string, unknown>
+  }[] = []
 
   for (const row of rows) {
     const { taxonomy, evidence, specific_mistake } = heuristicClassify(row)
-    const brainEntry = brain?.topic_map?.[row.tec_topic]
+    const brainFound = brain?.topic_map
+      ? findTopicEntry(brain.topic_map, row.tec_topic)
+      : null
+    const brainEntry = brainFound?.[1]
 
     const errorDetail = {
       specific_mistake,
@@ -254,40 +260,16 @@ export async function classifyWrongAttempts(
       brain_topic_status: brainEntry?.status,
     }
 
-    const shouldExplain =
-      (options?.explain ?? prefs.explain_wrong) && llmExplains < maxExplains
-
-    if (shouldExplain && subjectId) {
-      const teacher = await runTeacherAgent({
-        userId,
-        subjectId,
-        query: `Explique o erro nesta questão de forma objetiva:\n${row.statement.slice(0, 800)}`,
-        questionContext: {
-          taxonomy,
-          topic: row.tec_topic,
-          evidence,
-        },
-      })
-      item.explanation = teacher.answer
-      item.explanation_source = teacher.source
-      llmExplains++
-
-      await supabaseServer
-        .from("question_attempts")
-        .update({
-          error_detail: {
-            ...errorDetail,
-            explanation: teacher.answer,
-            explanation_source: teacher.source,
-          },
-        })
-        .eq("id", row.attempt_id)
-    }
-
-    results.push(item)
+    prepared.push({ row, item, errorDetail })
   }
 
-  return results
+  if (subjectId && (options?.explain ?? prefs.explain_wrong)) {
+    await applyGroupedTeacherExplanations(userId, subjectId, prepared, {
+      explain: true,
+    })
+  }
+
+  return prepared.map((p) => p.item)
 }
 
 export async function refineTaxonomyWithLlm(

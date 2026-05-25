@@ -26,6 +26,7 @@ export async function GET(req: Request) {
       explain_wrong: true,
       classify_all_wrong: true,
       max_llm_explanations_per_day: 15,
+      max_teacher_queries_per_day: 30,
     },
     study: study ?? {
       study_mode: "pre_edital",

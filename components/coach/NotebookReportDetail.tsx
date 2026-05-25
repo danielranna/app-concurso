@@ -82,8 +82,20 @@ export default function NotebookReportDetail({
           </h2>
           <ul className="space-y-2 text-sm text-slate-700">
             {s.weaknesses.map((w, i) => (
-              <li key={i}>
-                <strong>{w.topic}</strong> ({w.severity}) — {w.evidence}
+              <li key={i} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  <strong>{w.topic}</strong> ({w.severity}) — {w.evidence}
+                </span>
+                {report.subject_id && (
+                  <Link
+                    href={`/coach/materias/${report.subject_id}/materiais?ask=${encodeURIComponent(
+                      `Como estudar ${w.topic}? Quais pontos revisar nos meus materiais?`
+                    )}`}
+                    className="shrink-0 text-xs font-medium text-violet-700 underline"
+                  >
+                    Perguntar ao Professor
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -131,40 +143,75 @@ export default function NotebookReportDetail({
           <ul className="space-y-4">
             {[...s.per_question_errors]
               .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0))
-              .map((eq, i) => (
-                <li
-                  key={eq.question_id ?? i}
-                  className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
-                      {ERROR_TAXONOMY_LABELS[eq.error_taxonomy] ??
-                        eq.error_taxonomy}
-                    </span>
-                    {eq.tec_topic && (
-                      <span className="text-slate-600">{eq.tec_topic}</span>
-                    )}
-                    {eq.priority_score != null && (
-                      <span className="text-xs text-slate-400">
-                        prioridade {Math.round(eq.priority_score)}
+              .map((eq, i) => {
+                const askTopic = eq.tec_topic ?? "este tópico"
+                const materiaisHref = report.subject_id
+                  ? `/coach/materias/${report.subject_id}/materiais?ask=${encodeURIComponent(
+                      `Explique com mais detalhe: ${askTopic}`
+                    )}`
+                  : null
+                return (
+                  <li
+                    key={eq.question_id ?? i}
+                    className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                        {ERROR_TAXONOMY_LABELS[eq.error_taxonomy] ??
+                          eq.error_taxonomy}
                       </span>
-                    )}
-                  </div>
-                  {eq.specific_mistake && (
-                    <p className="mt-2 text-slate-800">{eq.specific_mistake}</p>
-                  )}
-                  {eq.explanation && (
-                    <div className="mt-2 rounded border border-slate-200 bg-white p-2">
-                      <p className="text-xs font-medium text-slate-500">
-                        {eq.explanation_source === "material"
-                          ? "Professor (material)"
-                          : "Explicação IA"}
-                      </p>
-                      <p className="mt-1 text-slate-700">{eq.explanation}</p>
+                      {eq.tec_topic && (
+                        <span className="text-slate-600">{eq.tec_topic}</span>
+                      )}
+                      {eq.topic_group_size != null && eq.topic_group_size > 1 && (
+                        <span className="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">
+                          {eq.topic_group_size} questões no tópico
+                        </span>
+                      )}
+                      {eq.priority_score != null && (
+                        <span className="text-xs text-slate-400">
+                          prioridade {Math.round(eq.priority_score)}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </li>
-              ))}
+                    {eq.specific_mistake && (
+                      <p className="mt-2 text-slate-800">{eq.specific_mistake}</p>
+                    )}
+                    {eq.explanation && (
+                      <div className="mt-2 rounded border border-slate-200 bg-white p-2">
+                        <p className="text-xs font-medium text-slate-500">
+                          {eq.explanation_source === "material"
+                            ? "Professor (material)"
+                            : "Explicação IA"}
+                        </p>
+                        <p className="mt-1 text-slate-700">{eq.explanation}</p>
+                        {eq.explanation_citations &&
+                          eq.explanation_citations.length > 0 && (
+                            <ul className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                              {eq.explanation_citations.map((c, ci) => (
+                                <li key={ci} className="text-xs text-slate-600">
+                                  <span className="font-medium text-slate-800">
+                                    {c.document_title}
+                                    {c.page != null ? ` (p. ${c.page})` : ""}
+                                  </span>
+                                  : {c.excerpt}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        {materiaisHref && (
+                          <Link
+                            href={materiaisHref}
+                            className="mt-2 inline-block text-xs font-medium text-violet-700 underline"
+                          >
+                            Aprofundar no Professor
+                          </Link>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
           </ul>
         </section>
       )}
