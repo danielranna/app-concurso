@@ -107,18 +107,44 @@ function parseQuantity(raw: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-import { hierarchyDepth, parentCodeFromHierarchy } from "./incidence-hierarchy"
+import {
+  hierarchyDepth,
+  normalizeHierarchyCode,
+  parentCodeFromHierarchy,
+} from "./incidence-hierarchy"
 
-function isHierarchyCode(hierarquia: string) {
-  return /^\d{1,2}(\.\d+)*$/.test(hierarquia.trim())
+function cellHierarchy(raw: unknown): string {
+  if (raw == null || raw === "") return ""
+  return normalizeHierarchyCode(String(raw).trim())
 }
 
-function isSubjectHeaderRow(hierarquia: string, indice: string) {
-  if (!hierarquia.trim() && indice.trim().length > 2) return true
+function isHierarchyCode(hierarquia: string) {
+  const h = normalizeHierarchyCode(hierarquia)
+  return /^\d{2}(\.\d{2})*$/.test(h)
+}
+
+/** Cabeçalho de matéria (sem código hierárquico). Dentro de um bloco, linha vazia = tópico pai, não nova matéria. */
+function isSubjectHeaderRow(
+  hierarquia: string,
+  indice: string,
+  insideSubject: boolean
+) {
   const h = hierarquia.trim()
   const i = indice.trim()
+  if (!i) return false
+  if (insideSubject && !h) return false
+  if (!h && i.length > 2) return true
   if (/^[A-Z]{2,5}$/i.test(h) && i.length > 8) return true
   return false
+}
+
+function inferTopLevelCode(groups: IncidenceGroup[]): string {
+  const topNums = groups
+    .filter((g) => !g.parent_code)
+    .map((g) => parseInt(g.code.split(".")[0]!, 10))
+    .filter((n) => Number.isFinite(n))
+  const next = (topNums.length ? Math.max(...topNums) : 0) + 1
+  return String(next).padStart(2, "0")
 }
 
 function pushTopic(
@@ -130,9 +156,9 @@ function pushTopic(
   qty: number,
   pct: number
 ) {
-  const code =
-    hierarquia.trim() ||
-    String(current.groups.length + 1).padStart(2, "0")
+  const code = hierarquia.trim()
+    ? normalizeHierarchyCode(hierarquia)
+    : inferTopLevelCode(current.groups)
   const name = indice.trim()
   if (!name) return
 
@@ -170,7 +196,7 @@ function parseSheetRows(
   let current: IncidenceSubjectBlock | null = null
 
   for (const row of rows) {
-    const hierarquia = String(row[0] ?? "").trim()
+    const hierarquia = cellHierarchy(row[0])
     const indice = String(row[1] ?? "").trim()
     const qty = parseQuantity(row[2])
     const pct = parsePercent(row[3])
@@ -181,7 +207,7 @@ function parseSheetRows(
       continue
     }
 
-    if (isSubjectHeaderRow(hierarquia, indice)) {
+    if (isSubjectHeaderRow(hierarquia, indice, !!current)) {
       if (current && (current.groups.length || current.subject_label !== "Matéria")) {
         blocks.push(current)
       }
