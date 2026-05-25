@@ -48,6 +48,12 @@ export default function CoachMateriaisBibliotecaPage() {
   const [docs, setDocs] = useState<MaterialDoc[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{
+    current: number
+    total: number
+    name: string
+  } | null>(null)
+  const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [query, setQuery] = useState("")
   const [answer, setAnswer] = useState<{
     answer: string
@@ -105,33 +111,74 @@ export default function CoachMateriaisBibliotecaPage() {
     return () => clearInterval(t)
   }, [userId, docs, loadDocs])
 
+  const UPLOAD_MAX_BYTES = 4 * 1024 * 1024
+
   async function onUpload(files: FileList | null) {
     if (!userId || !files?.length) return
     setUploading(true)
-    const form = new FormData()
-    form.append("user_id", userId)
-    form.append("subject_id", subjectId)
-    form.append("doc_type", "study_material")
-    for (let i = 0; i < files.length; i++) {
-      form.append("files", files[i]!)
-    }
+    setUploadErrors([])
+    const list = Array.from(files)
+    let okCount = 0
+    const errs: string[] = []
+
     try {
-      const res = await fetch("/api/coach/documents/upload", {
-        method: "POST",
-        body: form,
-      })
-      const data = await res.json()
-      if (!res.ok) alert(data.error ?? "Erro no upload")
-      else {
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i]!
+        setUploadProgress({ current: i + 1, total: list.length, name: file.name })
+
+        if (file.size > UPLOAD_MAX_BYTES) {
+          errs.push(
+            `${file.name}: maior que 4 MB — comprima ou divida o PDF (limite da Vercel por envio).`
+          )
+          continue
+        }
+
+        const form = new FormData()
+        form.append("user_id", userId)
+        form.append("subject_id", subjectId)
+        form.append("doc_type", "study_material")
+        form.append("file", file)
+
+        const res = await fetch("/api/coach/documents/upload", {
+          method: "POST",
+          body: form,
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          errs.push(
+            `${file.name}: ${data.error ?? (res.status === 413 ? "arquivo grande demais (máx. 4 MB)" : "erro no upload")}`
+          )
+          continue
+        }
+        if (data.errors?.length) {
+          for (const e of data.errors as { file: string; error: string }[]) {
+            errs.push(`${e.file}: ${e.error}`)
+          }
+        }
+        okCount++
+      }
+
+      if (okCount > 0) {
         await fetch("/api/coach/jobs/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, limit: 3 }),
+          body: JSON.stringify({ user_id: userId, limit: 5 }),
         }).catch(() => {})
         await loadDocs(userId)
       }
+
+      setUploadErrors(errs)
+      if (errs.length && okCount === 0) {
+        alert(errs.slice(0, 5).join("\n") + (errs.length > 5 ? `\n… +${errs.length - 5}` : ""))
+      } else if (errs.length) {
+        alert(
+          `${okCount} PDF(s) enviado(s). ${errs.length} falha(s):\n` +
+            errs.slice(0, 4).join("\n")
+        )
+      }
     } finally {
       setUploading(false)
+      setUploadProgress(null)
       if (fileRef.current) fileRef.current.value = ""
     }
   }
@@ -225,8 +272,22 @@ export default function CoachMateriaisBibliotecaPage() {
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-slate-900">Enviar PDFs de estudo</h3>
             <p className="text-sm text-slate-600">
-              Selecione vários arquivos (até 20 MB cada). A indexação roda em segundo plano.
+              Selecione vários PDFs — cada um é enviado separadamente (máx. 4 MB por
+              arquivo na Vercel). A indexação roda em segundo plano.
             </p>
+            {uploadProgress && (
+              <p className="mt-2 text-xs font-medium text-violet-800">
+                Enviando {uploadProgress.current}/{uploadProgress.total}:{" "}
+                {uploadProgress.name}
+              </p>
+            )}
+            {uploadErrors.length > 0 && !uploading && (
+              <ul className="mt-2 list-inside list-disc text-xs text-red-700">
+                {uploadErrors.slice(0, 5).map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            )}
           </div>
           <input
             ref={fileRef}

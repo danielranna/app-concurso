@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
+import { COACH_UPLOAD_MAX_BYTES, COACH_UPLOAD_MAX_LABEL } from "@/lib/coach-upload-limits"
 import { supabaseServer } from "@/lib/supabase-server"
 import { enqueueJob } from "@/lib/ai/jobs/queue"
 
 export const runtime = "nodejs"
-export const maxDuration = 120
+export const maxDuration = 60
 
 function enqueueMaterialIngest(userId: string, documentId: string) {
   return enqueueJob({
@@ -78,24 +79,50 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 })
     }
 
+    if (doc_type === "study_material" && files.length > 1) {
+      return NextResponse.json(
+        {
+          error:
+            "Envie apenas um PDF por requisição (limite da Vercel). O app envia vários arquivos em sequência.",
+        },
+        { status: 400 }
+      )
+    }
+
     const uploaded: Record<string, unknown>[] = []
     const documentIds: string[] = []
+    const errors: { file: string; error: string }[] = []
 
     for (const file of files) {
+      if (file.size > COACH_UPLOAD_MAX_BYTES) {
+        errors.push({
+          file: file.name,
+          error: `Máximo ${COACH_UPLOAD_MAX_LABEL} por arquivo nesta hospedagem.`,
+        })
+        continue
+      }
       const title =
         (form.get(`title_${file.name}`) as string) ||
         (form.get("title") as string) ||
         file.name
 
-      const doc = await uploadCoachDocument({
-        userId: user_id,
-        file,
-        docType: doc_type,
-        title,
-        subjectId: subject_id,
-        subjectName,
-        examTargetId: exam_target_id,
-      })
+      let doc: Record<string, unknown>
+      try {
+        doc = (await uploadCoachDocument({
+          userId: user_id,
+          file,
+          docType: doc_type,
+          title,
+          subjectId: subject_id,
+          subjectName,
+          examTargetId: exam_target_id,
+        })) as Record<string, unknown>
+      } catch (uploadErr) {
+        const msg =
+          uploadErr instanceof Error ? uploadErr.message : "Falha no upload"
+        errors.push({ file: file.name, error: msg })
+        continue
+      }
 
       const docId = doc.id as string
       const row = doc as Record<string, unknown>
@@ -129,10 +156,19 @@ export async function POST(req: Request) {
       uploaded,
       count: uploaded.length,
       document_ids: documentIds,
+      errors: errors.length ? errors : undefined,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     console.error("[coach/documents/upload]", msg, e)
+    if (msg.includes("too large") || msg.includes("FUNCTION_PAYLOAD")) {
+      return NextResponse.json(
+        {
+          error: `Arquivo grande demais para o servidor (máx. ~${COACH_UPLOAD_MAX_LABEL} por PDF). Envie um arquivo por vez.`,
+        },
+        { status: 413 }
+      )
+    }
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

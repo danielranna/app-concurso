@@ -1,4 +1,5 @@
 import { createHash } from "crypto"
+import { COACH_UPLOAD_MAX_BYTES, COACH_UPLOAD_MAX_LABEL } from "./coach-upload-limits"
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
 import { buildTreesBySubject } from "./incidence-hierarchy"
@@ -286,8 +287,10 @@ export async function uploadCoachDocument(params: {
   subjectName?: string | null
   examTargetId?: string | null
 }) {
-  if (params.file.size > 20 * 1024 * 1024) {
-    throw new Error("Arquivo maior que 20 MB")
+  if (params.file.size > COACH_UPLOAD_MAX_BYTES) {
+    throw new Error(
+      `Arquivo maior que ${COACH_UPLOAD_MAX_LABEL}. Na hospedagem Vercel envie um PDF por vez (máx. ~4 MB).`
+    )
   }
 
   const buffer = Buffer.from(await params.file.arrayBuffer())
