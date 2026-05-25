@@ -16,14 +16,6 @@ export async function POST(
       return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
     }
 
-    const { getStrategicMdDocument } = await import("@/lib/strategic-md-import")
-    const md = await getStrategicMdDocument(user_id, id)
-    if (md) {
-      const { enrichStrategicAnalysis } = await import("@/lib/ai/strategic-enrichment")
-      const result = await enrichStrategicAnalysis(user_id, id)
-      return NextResponse.json(result)
-    }
-
     const result = await analyzeExamEdital(user_id, id)
     return NextResponse.json(result)
   } catch (e) {

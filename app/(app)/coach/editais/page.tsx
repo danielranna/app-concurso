@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
 import { FileUp, Loader2, Plus, Star } from "lucide-react"
 import IncidenceHierarchyPanel from "@/components/coach/IncidenceHierarchyPanel"
+import EditalPrioritiesPanel from "@/components/coach/EditalPrioritiesPanel"
 import type { ExamTarget } from "@/lib/coach-types"
 
 type IncidenceDocRow = {
@@ -171,8 +172,8 @@ export default function CoachEditaisPage() {
       <div>
         <h2 className="text-xl font-bold text-slate-900">Editais e incidência</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Cadastre a prova alvo e importe o Excel de incidência da banca. O edital em PDF será
-          tratado em outro fluxo.
+          Cadastre a prova alvo, importe o Excel de incidência da banca e envie o PDF do edital
+          para a IA gerar ranking de matérias, resumo e conclusões estratégicas.
         </p>
       </div>
 
@@ -289,6 +290,13 @@ export default function CoachEditaisPage() {
             userId={userId}
             examTargetId={active.id}
             reloadKey={hierarchyKey}
+          />
+
+          <EditalPrioritiesPanel
+            userId={userId}
+            examTargetId={active.id}
+            examName={active.name}
+            hasIncidenceExcel={!!incidenceDoc}
           />
         </section>
       )}

@@ -14,26 +14,65 @@ import {
   buildCoachEditalSummaryMd,
 } from "../coach-edital-format"
 
-const STRUCTURE_SYSTEM = `Você extrai a estrutura de um edital de concurso público.
-Liste APENAS matérias e assuntos que aparecem explicitamente no edital.
+const STRUCTURE_SYSTEM = `Você extrai a estrutura de um edital de concurso público (texto do PDF).
+Liste APENAS matérias e assuntos explicitamente no edital.
+Inclua peso, quantidade de questões/itens, prova (P1/P2) e critérios de pontuação quando existirem.
 Responda JSON válido:
 {
+  "exam_summary": "resumo em 2-4 frases",
+  "scoring_notes": ["critérios de pontuação ou desempate se houver"],
   "subjects": [
     {
       "name": "nome da matéria no edital",
-      "edital_weight": "alta|media|baixa",
+      "prova": "P1|P2|única",
+      "question_count": 0,
+      "percent_of_total": 0,
+      "edital_weight": "alta|media|baixa ou peso numérico",
       "topics": [{ "name": "assunto ou tópico", "weight_hint": "opcional" }]
     }
   ]
 }`
 
-const PRIORITIES_SYSTEM = `Você é coach de concursos. Cruza edital (pesos) com incidência histórica da banca.
-Use APENAS os dados JSON. Priorize matérias do edital com maior ROI (peso edital × incidência).
+const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise o edital (estrutura extraída do PDF) e cruze com a incidência histórica da banca (JSON), quando fornecida.
+
+Tarefas:
+1) Ranking de relevância das matérias do edital — ordene por impacto na nota final.
+2) Para cada matéria: peso no edital, quantidade de questões, % do total, prova, critérios de desempate (se existirem), impacto na nota, resumo da incidência da banca.
+3) Explique resumidamente o motivo da posição de cada matéria no ranking.
+4) Classifique matérias em: prioritárias, secundárias e possíveis "armadilha" (muito extensas no edital e pouco cobradas historicamente).
+5) Resumo do edital, conclusões estratégicas e notas sobre o mapa de incidência da banca.
+
+Use APENAS dados fornecidos. Se não houver incidência da banca, baseie-se só no edital e indique isso.
+
 Responda JSON válido:
 {
-  "headline": "",
+  "headline": "título curto da análise",
+  "edital_summary": "resumo do edital",
+  "strategic_conclusions": ["conclusão 1", "conclusão 2"],
+  "priority_subjects": [{ "name": "", "why": "" }],
+  "secondary_subjects": [{ "name": "", "why": "" }],
+  "trap_subjects": [{ "name": "", "why": "" }],
   "subject_priority_rank": [
-    { "subject_name": "", "priority": 1, "why": "", "edital_weight": "", "incidence_summary": "" }
+    {
+      "subject_name": "",
+      "priority": 1,
+      "why": "motivo da posição no ranking",
+      "edital_weight": "",
+      "question_count": 0,
+      "percent_of_total": 0,
+      "prova": "",
+      "tiebreaker_note": "",
+      "impact_on_final_score": "alto|medio|baixo",
+      "incidence_summary": ""
+    }
+  ],
+  "incidence_map_notes": [
+    {
+      "edital_subject": "",
+      "excel_subject": "",
+      "top_topics": ["tópico mais cobrado"],
+      "note": ""
+    }
   ],
   "topic_matrix": [
     {
@@ -43,7 +82,6 @@ Responda JSON válido:
       "incidence_hint": "",
       "incidence_percent": 0,
       "incidence_quantity": 0,
-      "your_gap": "",
       "action": ""
     }
   ],

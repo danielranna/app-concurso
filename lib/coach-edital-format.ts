@@ -58,12 +58,57 @@ export function buildCoachEditalSummaryMd(
     lines.push(structured.headline, "")
   }
 
+  if (structured.edital_summary) {
+    lines.push("## Resumo do edital", "", structured.edital_summary, "")
+  }
+
   if (structured.subject_priority_rank?.length) {
-    lines.push("## Prioridade das matérias", "")
+    lines.push("## Ranking de relevância das matérias", "")
     for (const row of structured.subject_priority_rank) {
+      const meta = [
+        row.edital_weight && `peso ${row.edital_weight}`,
+        row.question_count != null && `${row.question_count} quest.`,
+        row.percent_of_total != null && `${row.percent_of_total}%`,
+        row.prova && row.prova,
+      ]
+        .filter(Boolean)
+        .join(" · ")
       lines.push(
-        `${row.priority}. **${row.subject_name}** — ${row.why || "—"}`
+        `${row.priority}. **${row.subject_name}**${meta ? ` (${meta})` : ""}`,
+        `   ${row.why || "—"}`
       )
+    }
+    lines.push("")
+  }
+
+  if (structured.priority_subjects?.length) {
+    lines.push("## Matérias prioritárias", "")
+    for (const s of structured.priority_subjects) {
+      lines.push(`- **${s.name}** — ${s.why || ""}`)
+    }
+    lines.push("")
+  }
+
+  if (structured.secondary_subjects?.length) {
+    lines.push("## Matérias secundárias", "")
+    for (const s of structured.secondary_subjects) {
+      lines.push(`- **${s.name}** — ${s.why || ""}`)
+    }
+    lines.push("")
+  }
+
+  if (structured.trap_subjects?.length) {
+    lines.push("## Matérias armadilha", "")
+    for (const s of structured.trap_subjects) {
+      lines.push(`- **${s.name}** — ${s.why || ""}`)
+    }
+    lines.push("")
+  }
+
+  if (structured.strategic_conclusions?.length) {
+    lines.push("## Conclusões estratégicas", "")
+    for (const c of structured.strategic_conclusions) {
+      lines.push(`- ${c}`)
     }
     lines.push("")
   }

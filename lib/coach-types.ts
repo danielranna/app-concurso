@@ -158,15 +158,40 @@ export type NotebookReportStructured = {
   confidence_in_analysis: string
 }
 
+export type EditalSubjectRankRow = {
+  subject_name: string
+  priority: number
+  why?: string
+  edital_weight?: string
+  incidence_summary?: string
+  question_count?: number
+  percent_of_total?: number
+  prova?: string
+  tiebreaker_note?: string
+  impact_on_final_score?: string
+}
+
+export type EditalSubjectLabel = {
+  name: string
+  why?: string
+}
+
+export type EditalIncidenceMapNote = {
+  edital_subject?: string
+  excel_subject?: string
+  top_topics?: string[]
+  note?: string
+}
+
 export type ExamPlanStructured = {
   headline?: string
-  subject_priority_rank?: {
-    subject_name: string
-    priority: number
-    why?: string
-    edital_weight?: string
-    incidence_summary?: string
-  }[]
+  edital_summary?: string
+  strategic_conclusions?: string[]
+  priority_subjects?: EditalSubjectLabel[]
+  secondary_subjects?: EditalSubjectLabel[]
+  trap_subjects?: EditalSubjectLabel[]
+  incidence_map_notes?: EditalIncidenceMapNote[]
+  subject_priority_rank?: EditalSubjectRankRow[]
   topic_matrix?: {
     subject?: string
     topic?: string
