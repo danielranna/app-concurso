@@ -6,9 +6,10 @@ import { runAgent } from "./run-agent"
 import { getUserAiCredentials } from "./user-credentials"
 import type { EditalSubjectRankRow, ExamPlanStructured } from "../coach-types"
 import { isDiscursiveSubject, type DiscursiveSubjectNote } from "../edital-discursive"
+import { pickEditalCriteriaSnippet } from "../edital-criteria-snippet"
 import {
-  applyObjectivePercentToRank,
   computeObjectivePercentBreakdown,
+  fillMissingPercentFromQuestions,
 } from "../edital-percent-calc"
 import { persistEditalSubjectRank } from "../edital-subject-rank-db"
 import {
@@ -17,46 +18,92 @@ import {
   parseCoachEditalJson,
 } from "../coach-edital-format"
 
-const STRUCTURE_SYSTEM = `Você extrai a estrutura de um edital de concurso público (texto do PDF).
-Liste APENAS matérias e assuntos explicitamente no edital.
-Inclua peso, quantidade de questões/itens (só prova objetiva em question_count), prova (P1/P2) e critérios de pontuação.
-Marque is_discursive: true para provas/matérias discursivas, estudo de caso, peças, pareceres.
-NÃO some questões discursivas em percentuais — question_count e percent_of_total na extração referem-se só ao bloco objetivo daquela matéria (0 se for só discursiva).
+const PDF_SOURCE_RULE = `FONTE ÚNICA E EXCLUSIVA: use SOMENTE o texto do PDF enviado pelo usuário abaixo.
+É PROIBIDO usar conhecimento externo, outros editais, modelos de banca ou suposições.
+Se um dado não estiver no texto, deixe vazio/zero e não invente.`
+
+const STRUCTURE_SYSTEM = `${PDF_SOURCE_RULE}
+
+Você extrai a estrutura do edital para estudo da PROVA OBJETIVA.
+
+ONDE BUSCAR (nesta ordem):
+1) Critérios de avaliação / Da prova / Pontuação / Classificação — pesos, pontos, % na nota.
+2) Quadros ou tabelas de distribuição de questões ou pontos por disciplina (prova objetiva).
+3) Conteúdo programático / Anexo / Programa — lista de disciplinas com grafia EXATA do PDF.
+
+MATÉRIAS (subjects):
+- Copie o nome EXATAMENTE como no PDF (não renomeie, não una disciplinas separadas, não divida uma linha do edital).
+- Se o PDF traz "Direito Civil, Direito Empresarial e Direito Penal" em uma linha, uma entrada com esse nome integral.
+- is_discursive: true só se o PDF indicar prova/disciplina discursiva, peça, estudo de caso, parecer.
+- question_count: só quantidade explícita no PDF para prova objetiva (0 se discursiva ou não informado).
+- percent_of_total e edital_weight: só se constarem nos critérios de avaliação ou quadro de pontos do PDF.
+
+evaluation_criteria_text: transcreva ou resuma FIELMENTE o trecho dos critérios de avaliação sobre peso/pontos/prova objetiva (cite números do PDF).
+
 Responda JSON válido:
 {
-  "exam_summary": "resumo em 2-4 frases",
-  "scoring_notes": ["critérios de pontuação ou desempate se houver"],
+  "exam_summary": "2-4 frases só com base no PDF",
+  "evaluation_criteria_text": "trecho fiel dos critérios de avaliação sobre pontuação/pesos",
+  "scoring_notes": ["itens literais de pontuação, peso, desempate do PDF"],
   "total_objective_questions": 0,
   "subjects": [
     {
-      "name": "nome da matéria no edital",
+      "name": "grafia exata no PDF",
       "is_discursive": false,
       "prova": "P1|P2|única",
       "question_count": 0,
       "percent_of_total": 0,
-      "edital_weight": "alta|media|baixa ou peso numérico",
-      "topics": [{ "name": "assunto ou tópico", "weight_hint": "opcional" }]
+      "edital_weight": "como no PDF: pontos, peso ou percentual",
+      "criteria_quote": "frase curta do PDF que define peso/questões desta disciplina",
+      "topics": [{ "name": "tópico do programático", "weight_hint": "" }]
     }
   ]
 }`
 
-const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise edital_subjects (já sem discursivas na lista) e incidence_crosswalk quando existir.
+const CRITERIA_EXTRACT_SYSTEM = `${PDF_SOURCE_RULE}
 
-RANKING (subject_priority_rank):
-- Uma linha por CADA matéria objetiva de edital_subjects, sem omitir.
-- NUNCA incluir discursivas no ranking nem no cálculo de %.
-- priority 1 = maior impacto na nota da prova objetiva.
+Extraia SOMENTE dos critérios de avaliação / pontuação / da prova objetiva no texto:
+- Como se calcula a nota da prova objetiva
+- Peso, pontos ou percentual de cada disciplina na nota (se o PDF listar)
+- Total de pontos ou questões da prova objetiva se explícito
+Não invente disciplinas que não apareçam no trecho.
 
-CÁLCULO DA % (OBRIGATÓRIO — campo percent_calculation em cada matéria):
-1) Some apenas question_count das matérias OBJETIVAS do edital → total_objetivo.
-2) percent_of_total de cada matéria = (question_count da matéria ÷ total_objetivo) × 100, arredondado 2 casas.
-3) Em percent_calculation escreva a conta explícita, ex.: "25 questões ÷ 133 questões objetivas × 100 = 18,80% (discursivas excluídas do total)".
-4) Se o edital não tiver quantidades, estime pelo peso/pontuação e explique em percent_calculation (deixe claro que é estimativa).
-5) Preencha objective_percent_formula com a regra usada (1 frase + total_objetivo se houver).
+Responda JSON:
+{
+  "evaluation_criteria_text": "",
+  "objective_percent_formula": "regra em 1-2 frases citando o PDF",
+  "subject_weights": [
+    {
+      "subject_name": "nome exato no PDF",
+      "points_or_weight": "",
+      "percent_of_total": 0,
+      "question_count": 0,
+      "calculation_quote": "trecho do PDF"
+    }
+  ]
+}`
 
-Discursivas: só em discursive_subjects + discursive_note (sem % no ranking objetivo).
+const PRIORITIES_SYSTEM = `${PDF_SOURCE_RULE}
 
-Campos por matéria: why (≤120 chars), edital_weight, question_count, percent_of_total, percent_calculation, prova, tiebreaker_note, impact_on_final_score, incidence_summary (1 frase).
+Você monta o ranking estratégico da prova OBJETIVA usando:
+- evaluation_criteria_text e subject_weights (extraídos do PDF)
+- edital_subjects (nomes exatos do PDF)
+- incidence_crosswalk (dados históricos da banca — só para incidence_summary, não para peso do edital)
+
+MATÉRIAS NO RANKING:
+- Uma linha por cada matéria objetiva de edital_subjects; subject_name = grafia EXATA do PDF.
+- NUNCA incluir discursivas no ranking.
+- Não corrija nem “melhore” nomes de disciplinas.
+
+PESO E % (OBRIGATÓRIO — vem dos CRITÉRIOS DE AVALIAÇÃO do PDF):
+1) Leia evaluation_criteria_text, scoring_notes e subject_weights.
+2) percent_of_total e edital_weight devem refletir o que o PDF define (pontos, peso, % na nota final da objetiva).
+3) percent_calculation DEVE explicar a conta citando o critério do PDF, ex.: "Critérios de avaliação: 25 pontos em Legislação Tributária de 100 na P2 = 25%".
+4) Use divisão por quantidade de questões SOMENTE se o próprio PDF definir distribuição por número de questões nos critérios — e cite isso.
+5) objective_percent_formula: regra global copiada dos critérios de avaliação do PDF.
+6) Discursivas fora do denominador e do ranking.
+
+incidence_summary: 1 frase do cruzamento com incidência (se houver); não altere pesos do edital.
 
 Responda JSON válido:
 {
@@ -405,8 +452,18 @@ export async function analyzeExamEdital(
   }
 
   let structure: {
-    subjects: { name: string; edital_weight?: string; topics: { name: string }[] }[]
-  } = { subjects: [] }
+    subjects: {
+      name: string
+      is_discursive?: boolean
+      edital_weight?: string
+      question_count?: number
+      percent_of_total?: number
+      criteria_quote?: string
+      topics: { name: string }[]
+    }[]
+    scoring_notes?: string[]
+    evaluation_criteria_text?: string
+  } = { subjects: [], scoring_notes: [], evaluation_criteria_text: "" }
 
   const chunksToProcess = chunks.slice(0, 4)
   for (let i = 0; i < chunksToProcess.length; i++) {
@@ -417,7 +474,7 @@ export async function analyzeExamEdital(
       examTargetId,
       model: "gpt-4o-mini",
       systemPrompt: STRUCTURE_SYSTEM,
-      userContent: `Parte ${i + 1}/${chunksToProcess.length} do edital:\n\n${chunksToProcess[i]}`,
+      userContent: `${PDF_SOURCE_RULE}\n\nParte ${i + 1}/${chunksToProcess.length} do PDF do edital:\n\n${chunksToProcess[i]}`,
       jsonMode: true,
       maxTokens: 3500,
       metadata: { phase: "structure", chunk: i },
@@ -431,8 +488,62 @@ export async function analyzeExamEdital(
           names.add(normLabel(s.name))
         }
       }
+      if (parsed.evaluation_criteria_text?.trim()) {
+        structure.evaluation_criteria_text = [
+          structure.evaluation_criteria_text,
+          parsed.evaluation_criteria_text.trim(),
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      }
+      for (const note of parsed.scoring_notes ?? []) {
+        if (note?.trim() && !structure.scoring_notes?.includes(note.trim())) {
+          structure.scoring_notes = [...(structure.scoring_notes ?? []), note.trim()]
+        }
+      }
     } catch {
       /* merge partial */
+    }
+  }
+
+  const criteriaSnippet = pickEditalCriteriaSnippet(editalText)
+  let criteriaExtract: {
+    evaluation_criteria_text?: string
+    objective_percent_formula?: string
+    subject_weights?: {
+      subject_name: string
+      points_or_weight?: string
+      percent_of_total?: number
+      question_count?: number
+      calculation_quote?: string
+    }[]
+  } = {}
+
+  if (criteriaSnippet.length > 150) {
+    if (chunksToProcess.length > 0) await sleep(1200)
+    const critPart = await runAgent({
+      agentType: "edital",
+      userId,
+      examTargetId,
+      model: "gpt-4o-mini",
+      systemPrompt: CRITERIA_EXTRACT_SYSTEM,
+      userContent: `${PDF_SOURCE_RULE}\n\nTrechos do PDF (critérios de avaliação / pontuação / prova objetiva):\n\n${criteriaSnippet}`,
+      jsonMode: true,
+      maxTokens: 3500,
+      metadata: { phase: "criteria_extract" },
+    })
+    try {
+      criteriaExtract = JSON.parse(critPart.text || "{}") as typeof criteriaExtract
+      if (criteriaExtract.evaluation_criteria_text?.trim()) {
+        structure.evaluation_criteria_text = [
+          structure.evaluation_criteria_text,
+          criteriaExtract.evaluation_criteria_text.trim(),
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      }
+    } catch {
+      /* criteria optional */
     }
   }
 
@@ -464,10 +575,16 @@ export async function analyzeExamEdital(
 
   const prioritiesPayload = {
     exam_target: { name: exam.name, banca: exam.banca },
+    pdf_source_only: true,
     required_subject_count: compactSubjects.length,
     edital_subjects: compactSubjects,
-    total_objective_questions: percentHint.totalObjectiveQuestions,
-    percent_calculation_rule: percentHint.formulaNote,
+    evaluation_criteria_text: structure.evaluation_criteria_text ?? "",
+    scoring_notes: structure.scoring_notes ?? [],
+    subject_weights_from_pdf: criteriaExtract.subject_weights ?? [],
+    objective_percent_formula_from_pdf:
+      criteriaExtract.objective_percent_formula ?? "",
+    question_count_fallback_hint: percentHint.formulaNote,
+    total_objective_questions_in_pdf: percentHint.totalObjectiveQuestions,
     incidence_crosswalk: incidenceForLlm,
     incidence_rows_total: incidenceRows.length,
   }
@@ -483,7 +600,7 @@ export async function analyzeExamEdital(
       userId,
       examTargetId,
       systemPrompt: PRIORITIES_SYSTEM,
-      userContent: prioritiesUserContent,
+      userContent: `${PDF_SOURCE_RULE}\n\nDados extraídos exclusivamente do PDF:\n\n${prioritiesUserContent}`,
       jsonMode: true,
       maxTokens: 6000,
       metadata: { phase: "priorities" },
@@ -494,6 +611,8 @@ export async function analyzeExamEdital(
     const minimalContent = trimPayloadJson(
       {
         exam_target: prioritiesPayload.exam_target,
+        evaluation_criteria_text: structure.evaluation_criteria_text ?? "",
+        scoring_notes: structure.scoring_notes ?? [],
         edital_subjects: compactSubjects.map((s) => ({
           name: s.name,
           edital_weight: s.edital_weight,
@@ -541,12 +660,14 @@ export async function analyzeExamEdital(
     structured.subject_priority_rank ?? []
   )
 
-  const percentMeta = computeObjectivePercentBreakdown(objectiveSubjects)
-  fullRank = applyObjectivePercentToRank(fullRank, objectiveSubjects)
+  fullRank = fillMissingPercentFromQuestions(fullRank, objectiveSubjects)
   structured.subject_priority_rank = fullRank
-  structured.objective_percent_formula =
-    structured.objective_percent_formula?.trim() ||
-    percentMeta.formulaNote
+  if (!structured.objective_percent_formula?.trim()) {
+    structured.objective_percent_formula =
+      criteriaExtract.objective_percent_formula?.trim() ||
+      structure.evaluation_criteria_text?.slice(0, 500) ||
+      computeObjectivePercentBreakdown(objectiveSubjects).formulaNote
+  }
 
   const llmDiscursive = (structured.discursive_subjects ?? []).filter(
     (d) => d.name && isDiscursiveSubject(d.name)

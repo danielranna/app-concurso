@@ -5,7 +5,7 @@ export type PercentBreakdown = {
   percent_calculation: string
 }
 
-/** % só sobre matérias objetivas (discursivas fora do denominador). */
+/** Fallback só quando o edital não trouxe % nos critérios — por contagem de questões objetivas. */
 export function computeObjectivePercentBreakdown(
   subjects: { name: string; question_count?: number }[]
 ): {
@@ -21,8 +21,8 @@ export function computeObjectivePercentBreakdown(
 
   const formulaNote =
     total > 0
-      ? `Soma das questões objetivas: ${total}. Cada % = (questões da matéria ÷ ${total}) × 100. Provas/matérias discursivas não entram no total.`
-      : "O edital não informou quantidades de questões objetivas suficientes para calcular % pelo método questões/total."
+      ? `Referência alternativa (só se os critérios de avaliação do PDF não definirem %): soma ${total} questões objetivas; % = questões da matéria ÷ ${total} × 100. Discursivas fora.`
+      : "Sem quantidades objetivas no PDF para fallback por questões."
 
   const byName = new Map<string, PercentBreakdown>()
 
@@ -32,19 +32,13 @@ export function computeObjectivePercentBreakdown(
       const pct = Math.round((item.q / total) * 10000) / 100
       byName.set(key, {
         percent_of_total: pct,
-        percent_calculation: `${item.q} questões ÷ ${total} questões objetivas × 100 = ${pct.toFixed(2)}%`,
-      })
-    } else if (total > 0 && item.q === 0) {
-      byName.set(key, {
-        percent_of_total: 0,
-        percent_calculation:
-          "0 questões objetivas atribuídas no edital (matéria pode ser só discursiva ou sem quantitativo).",
+        percent_calculation: `[Fallback] ${item.q} ÷ ${total} × 100 = ${pct.toFixed(2)}% — use critérios de avaliação do PDF se houver peso explícito.`,
       })
     } else {
       byName.set(key, {
         percent_of_total: 0,
         percent_calculation:
-          "Sem total de questões objetivas no edital — % estimada pela IA por peso/pontuação, se houver.",
+          "Definir % apenas pelos critérios de avaliação do PDF (trecho não encontrado automaticamente).",
       })
     }
   }
@@ -52,7 +46,8 @@ export function computeObjectivePercentBreakdown(
   return { byName, totalObjectiveQuestions: total, formulaNote }
 }
 
-export function applyObjectivePercentToRank<
+/** Não sobrescreve % da IA; só preenche lacunas sem percent_calculation. */
+export function fillMissingPercentFromQuestions<
   T extends {
     subject_name: string
     question_count?: number
@@ -60,10 +55,13 @@ export function applyObjectivePercentToRank<
     percent_calculation?: string
   },
 >(rank: T[], objectiveSubjects: { name: string; question_count?: number }[]): T[] {
-  const { byName, totalObjectiveQuestions, formulaNote } =
+  const { byName, totalObjectiveQuestions } =
     computeObjectivePercentBreakdown(objectiveSubjects)
 
   return rank.map((row) => {
+    if (row.percent_calculation?.trim()) return row
+    if (row.percent_of_total != null && row.percent_of_total > 0) return row
+
     const key = normLabel(row.subject_name)
     const calc = byName.get(key)
     const q = Math.max(0, Number(row.question_count) || 0)
@@ -72,19 +70,7 @@ export function applyObjectivePercentToRank<
       return {
         ...row,
         percent_of_total: calc.percent_of_total,
-        percent_calculation:
-          row.percent_calculation?.trim() || calc.percent_calculation,
-      }
-    }
-
-    if (calc && !row.percent_calculation) {
-      return { ...row, percent_calculation: calc.percent_calculation }
-    }
-
-    if (!row.percent_calculation && totalObjectiveQuestions > 0) {
-      return {
-        ...row,
-        percent_calculation: formulaNote,
+        percent_calculation: calc.percent_calculation,
       }
     }
 

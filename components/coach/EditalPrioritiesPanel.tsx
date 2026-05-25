@@ -293,7 +293,8 @@ export default function EditalPrioritiesPanel({
                 {priorities.objective_percent_formula}
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                Discursivas não entram no total de questões nem no ranking objetivo.
+                Peso e % vêm dos critérios de avaliação do PDF (não de estimativa
+                externa). Discursivas ficam fora do ranking objetivo.
               </p>
             </div>
           )}
