@@ -106,12 +106,12 @@ export default function ExamStrategyBoardPanel({
     <section className="space-y-4">
       {board.merge_warnings?.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p className="font-medium">Vários blocos Excel → mesma matéria</p>
+          <p className="font-medium">Vários blocos do MD → mesma matéria</p>
           <ul className="mt-1 list-inside list-disc text-xs">
             {board.merge_warnings.map((w) => (
               <li key={w.subject_name}>
-                <strong>{w.subject_name}</strong>: blocos somados —{" "}
-                {w.excel_labels.join(", ")}
+                <strong>{w.subject_name}</strong>:{" "}
+                {(w.excel_labels ?? []).join(", ")}
               </li>
             ))}
           </ul>

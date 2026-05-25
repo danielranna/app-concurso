@@ -113,17 +113,24 @@ export async function resolveSubjectLabels(
     const pt = (mdDoc.parsed_tables ?? {}) as {
       bundle?: { edital_subjects: { slug: string; name: string }[] }
       subject_mappings?: {
-        by_slug?: { slug: string; subject_id: string | null; md_name: string }[]
+        by_slug?: {
+          slug: string
+          subject_id: string | null
+          subject_ids?: string[]
+          md_name: string
+        }[]
       }
     }
     const labels: string[] = []
     for (const row of pt.subject_mappings?.by_slug ?? []) {
-      if (row.subject_id === subjectId) {
-        const name =
-          pt.bundle?.edital_subjects.find((s) => s.slug === row.slug)?.name ??
-          row.md_name
-        if (!labels.includes(name)) labels.push(name)
-      }
+      const ids =
+        row.subject_ids ??
+        (row.subject_id ? [row.subject_id] : [])
+      if (!ids.includes(subjectId)) continue
+      const name =
+        pt.bundle?.edital_subjects.find((s) => s.slug === row.slug)?.name ??
+        row.md_name
+      if (!labels.includes(name)) labels.push(name)
     }
     if (labels.length) return labels
   }

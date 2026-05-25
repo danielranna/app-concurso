@@ -1,11 +1,25 @@
-import { matchScore, normLabel, type SubjectRow } from "./incidence-subject-map"
+import { matchScore, type SubjectRow } from "./incidence-subject-map"
 import type {
   SlugSubjectMapping,
   StrategicMdBundle,
   StrategicMdMappings,
 } from "./strategic-md-types"
 
-export type SlugManualOverrides = Record<string, string | null>
+/** slug → lista de subject_id (vazio = sem vínculo) */
+export type SlugManualOverrides = Record<string, string[]>
+
+export function normalizeSlugOverride(
+  value: string | string[] | null | undefined
+): string[] | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return value ? [value] : []
+}
+
+export function topicCountForSlug(bundle: StrategicMdBundle, slug: string): number {
+  return bundle.topics_by_slug[slug]?.length ?? 0
+}
 
 export function mapStrategicMdToSubjects(
   bundle: StrategicMdBundle,
@@ -16,21 +30,25 @@ export function mapStrategicMdToSubjects(
   for (const s of bundle.edital_subjects) slugToName.set(s.slug, s.name)
   for (const s of bundle.subject_ranking) slugToName.set(s.slug, s.name)
   for (const s of bundle.incidence_subjects) slugToName.set(s.slug, s.name)
+  for (const slug of Object.keys(bundle.topics_by_slug)) {
+    if (!slugToName.has(slug)) slugToName.set(slug, slug)
+  }
 
   const allSlugs = [...new Set(slugToName.keys())]
   const by_slug: SlugSubjectMapping[] = []
 
   for (const slug of allSlugs) {
     const md_name = slugToName.get(slug) ?? slug
-    const topic_count = bundle.topics_by_slug[slug]?.length ?? 0
+    const topic_count = topicCountForSlug(bundle, slug)
 
-    let subject_id: string | null = manualOverrides[slug] ?? null
+    const override = normalizeSlugOverride(manualOverrides[slug])
+    let subject_ids: string[] = []
     let match_score = 0
-    let manual = manualOverrides[slug] !== undefined
+    const manual = override !== undefined
 
-    if (subject_id) {
-      const sub = subjects.find((s) => s.id === subject_id)
-      match_score = sub ? 100 : 0
+    if (override !== undefined) {
+      subject_ids = override
+      match_score = override.length ? 100 : 0
     } else {
       let best: SubjectRow | null = null
       let bestScore = 0
@@ -42,16 +60,22 @@ export function mapStrategicMdToSubjects(
         }
       }
       if (best && bestScore >= 40) {
-        subject_id = best.id
+        subject_ids = [best.id]
         match_score = bestScore
       }
     }
 
+    const subject_names = subject_ids
+      .map((id) => subjects.find((s) => s.id === id)?.name)
+      .filter((n): n is string => !!n)
+
     by_slug.push({
       slug,
       md_name,
-      subject_id,
-      subject_name: subjects.find((s) => s.id === subject_id)?.name ?? null,
+      subject_ids,
+      subject_names,
+      subject_id: subject_ids[0] ?? null,
+      subject_name: subject_names[0] ?? null,
       match_score,
       topic_count,
       manual,
@@ -62,10 +86,11 @@ export function mapStrategicMdToSubjects(
 
   const bySubject = new Map<string, string[]>()
   for (const row of by_slug) {
-    if (!row.subject_id) continue
-    const list = bySubject.get(row.subject_id) ?? []
-    list.push(row.slug)
-    bySubject.set(row.subject_id, list)
+    for (const sid of row.subject_ids) {
+      const list = bySubject.get(sid) ?? []
+      if (!list.includes(row.slug)) list.push(row.slug)
+      bySubject.set(sid, list)
+    }
   }
 
   const merge_warnings: StrategicMdMappings["merge_warnings"] = []
@@ -91,7 +116,7 @@ export function resolveSlugsForSubject(
   subjectId: string
 ): string[] {
   return mappings.by_slug
-    .filter((r) => r.subject_id === subjectId)
+    .filter((r) => r.subject_ids.includes(subjectId))
     .map((r) => r.slug)
 }
 

@@ -15,6 +15,8 @@ type SubjectRow = { id: string; name: string }
 type SlugMapping = {
   slug: string
   md_name: string
+  subject_ids?: string[]
+  subject_names?: string[]
   subject_id: string | null
   subject_name: string | null
   match_score: number
@@ -62,7 +64,7 @@ export default function CoachEditaisPage() {
   const [banca, setBanca] = useState("")
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [planning, setPlanning] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
   const [enriching, setEnriching] = useState(false)
   const [savingMapping, setSavingMapping] = useState<string | null>(null)
   const [dashboardKey, setDashboardKey] = useState(0)
@@ -163,7 +165,7 @@ export default function CoachEditaisPage() {
       } else {
         const stats = data.parse_stats ?? {}
         const mapped = data.subject_mappings?.by_slug?.filter(
-          (r: SlugMapping) => r.subject_id
+          (r: SlugMapping) => (r.subject_ids?.length ?? (r.subject_id ? 1 : 0)) > 0
         ).length
         alert(
           `MD importado: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} tópicos, ${stats.rows_inserted_db ?? 0} linhas no banco. ${mapped ?? 0} matérias vinculadas automaticamente.`
@@ -178,7 +180,7 @@ export default function CoachEditaisPage() {
     }
   }
 
-  async function updateSlugMapping(slug: string, subjectId: string | null) {
+  async function updateSlugMapping(slug: string, subjectIds: string[]) {
     if (!userId || !strategicDoc) return
     setSavingMapping(slug)
     try {
@@ -190,7 +192,7 @@ export default function CoachEditaisPage() {
           body: JSON.stringify({
             user_id: userId,
             slug,
-            subject_id: subjectId,
+            subject_ids: subjectIds,
           }),
         }
       )
@@ -232,21 +234,54 @@ export default function CoachEditaisPage() {
     }
   }
 
-  async function generatePlan() {
-    if (!userId || !selectedId) return
-    setPlanning(true)
-    const res = await fetch(`/api/coach/exam-targets/${selectedId}/plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    })
-    const data = await res.json()
-    setPlanning(false)
-    if (data.error) alert(data.error)
-    else {
-      reloadDocs(userId, selectedId)
-      alert("Plano gerado! Veja abaixo.")
+  async function reparseTopics() {
+    if (!userId || !selectedId || !strategicDoc) return
+    setReprocessing(true)
+    try {
+      const res = await fetch(
+        `/api/coach/documents/${strategicDoc.id}/reparse-strategic`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            exam_target_id: selectedId,
+          }),
+        }
+      )
+      const data = await res.json()
+      if (data.error) alert(data.error)
+      else {
+        alert(
+          `Tópicos atualizados: ${data.topic_total ?? 0} linhas no banco.`
+        )
+        reloadDocs(userId, selectedId)
+        setDashboardKey((k) => k + 1)
+      }
+    } catch {
+      alert("Falha ao reprocessar o MD.")
+    } finally {
+      setReprocessing(false)
     }
+  }
+
+  function toggleExtraSubject(slug: string, row: SlugMapping, subjectId: string) {
+    const current = row.subject_ids ?? (row.subject_id ? [row.subject_id] : [])
+    const next = current.includes(subjectId)
+      ? current.filter((id) => id !== subjectId)
+      : [...current, subjectId]
+    updateSlugMapping(slug, next)
+  }
+
+  function setPrimarySubject(slug: string, subjectId: string | null) {
+    const row = slugMappings?.by_slug?.find((r) => r.slug === slug)
+    const current = row?.subject_ids ?? (row?.subject_id ? [row.subject_id] : [])
+    if (!subjectId) {
+      updateSlugMapping(slug, [])
+      return
+    }
+    const rest = current.filter((id) => id !== subjectId)
+    updateSlugMapping(slug, [subjectId, ...rest])
   }
 
   const strategicDoc = docs.find((d) => d.doc_type === "strategic_md")
@@ -339,8 +374,9 @@ export default function CoachEditaisPage() {
         <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4">
           <h3 className="font-semibold text-slate-900">Análise estratégica — {active.name}</h3>
           <p className="text-xs text-slate-600">
-            Envie o <code className="rounded bg-white px-1">analise_estrategica_*.md</code> gerado
-            com ranking, incidência da banca e prioridades. PDF e Excel não são mais necessários.
+            Importe o <code className="rounded bg-white px-1">analise_estrategica_*.md</code> com
+            edital, incidência e prioridades. O plano de estudo diário fica em Coach → Hoje (outros
+            agentes).
           </p>
 
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
@@ -364,13 +400,23 @@ export default function CoachEditaisPage() {
           </label>
 
           {strategicDoc && (
-            <div className="text-xs font-medium text-emerald-700 space-y-1">
-              <p>✓ {strategicDoc.title}</p>
-              <p className="font-normal text-slate-600">
-                {strategicDoc.parsed_tables?.parse_stats?.subjects ?? 0} matérias ·{" "}
-                {strategicDoc.parsed_tables?.parse_stats?.topics ?? 0} tópicos ·{" "}
-                {strategicDoc.parsed_tables?.parse_stats?.rows_inserted_db ?? 0} linhas no banco
-              </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-xs font-medium text-emerald-700 space-y-1">
+                <p>✓ {strategicDoc.title}</p>
+                <p className="font-normal text-slate-600">
+                  {strategicDoc.parsed_tables?.parse_stats?.subjects ?? 0} matérias ·{" "}
+                  {strategicDoc.parsed_tables?.parse_stats?.topics ?? 0} tópicos ·{" "}
+                  {strategicDoc.parsed_tables?.parse_stats?.rows_inserted_db ?? 0} linhas no banco
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={reparseTopics}
+                disabled={reprocessing}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {reprocessing ? "Atualizando…" : "Atualizar tópicos do MD"}
+              </button>
             </div>
           )}
 
@@ -391,7 +437,8 @@ export default function CoachEditaisPage() {
             <div className="space-y-2 border-t border-slate-200 pt-4">
               <p className="text-sm font-medium text-slate-800">Vínculo MD → suas matérias</p>
               <p className="text-xs text-slate-600">
-                Associe cada matéria do edital (slug) à sua matéria no app. Salva na hora.
+                Uma matéria do MD pode ir para <strong>várias</strong> matérias suas (ex. Contabilidade
+                Pública + Contabilidade Geral → Contabilidade). Marque as extras abaixo do select.
               </p>
               <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-white">
                 <table className="w-full text-xs">
@@ -399,65 +446,96 @@ export default function CoachEditaisPage() {
                     <tr className="text-left text-slate-500">
                       <th className="px-3 py-2">No MD</th>
                       <th className="px-3 py-2">slug</th>
-                      <th className="min-w-[200px] px-3 py-2">Sua matéria</th>
+                      <th className="min-w-[220px] px-3 py-2">Suas matérias</th>
                       <th className="px-3 py-2">Tópicos</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {slugMappings.by_slug.map((row) => (
-                      <tr
-                        key={row.slug}
-                        className={`border-t border-slate-100 ${
-                          row.subject_id ? "" : "bg-amber-50/80"
-                        }`}
-                      >
-                        <td className="px-3 py-1.5 align-top">
-                          <span className="line-clamp-2">{row.md_name}</span>
-                        </td>
-                        <td className="px-3 py-1.5 font-mono text-[10px] text-slate-500">
-                          {row.slug}
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <select
-                              value={row.subject_id ?? ""}
-                              disabled={savingMapping === row.slug || !subjects.length}
-                              onChange={(e) => {
-                                const v = e.target.value
-                                updateSlugMapping(row.slug, v === "" ? null : v)
-                              }}
-                              className="max-w-full min-w-[160px] flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-                            >
-                              <option value="">— sem vínculo —</option>
-                              {subjects.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name}
-                                </option>
-                              ))}
-                            </select>
-                            {savingMapping === row.slug && (
-                              <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
+                    {slugMappings.by_slug.map((row) => {
+                      const linked =
+                        row.subject_ids ?? (row.subject_id ? [row.subject_id] : [])
+                      const primary = linked[0] ?? ""
+                      return (
+                        <tr
+                          key={row.slug}
+                          className={`border-t border-slate-100 ${
+                            linked.length ? "" : "bg-amber-50/80"
+                          }`}
+                        >
+                          <td className="px-3 py-1.5 align-top">
+                            <span className="line-clamp-2">{row.md_name}</span>
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-[10px] text-slate-500">
+                            {row.slug}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <select
+                                  value={primary}
+                                  disabled={savingMapping === row.slug || !subjects.length}
+                                  onChange={(e) => {
+                                    const v = e.target.value
+                                    setPrimarySubject(row.slug, v === "" ? null : v)
+                                  }}
+                                  className="max-w-full min-w-[160px] flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                                >
+                                  <option value="">— sem vínculo —</option>
+                                  {subjects.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {savingMapping === row.slug && (
+                                  <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
+                                )}
+                              </div>
+                              {linked.length > 1 && (
+                                <p className="text-[10px] text-violet-700">
+                                  Também em: {row.subject_names?.slice(1).join(", ")}
+                                </p>
+                              )}
+                              <div className="flex flex-wrap gap-2 pt-0.5">
+                                {subjects
+                                  .filter((s) => s.id !== primary)
+                                  .map((s) => (
+                                    <label
+                                      key={s.id}
+                                      className="inline-flex items-center gap-1 text-[10px] text-slate-600"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={linked.includes(s.id)}
+                                        disabled={savingMapping === row.slug}
+                                        onChange={() =>
+                                          toggleExtraSubject(row.slug, row, s.id)
+                                        }
+                                      />
+                                      + {s.name}
+                                    </label>
+                                  ))}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5 align-top">
+                            {row.topic_count > 0 ? (
+                              <span className="text-emerald-700">{row.topic_count}</span>
+                            ) : (
+                              <span className="text-slate-400" title="Sem tabela no MD">
+                                0
+                              </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-1.5">{row.topic_count}</td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={generatePlan}
-            disabled={planning || !strategicDoc}
-            className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-          >
-            {planning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            Gerar plano semanal
-          </button>
         </div>
       ) : (
         targets.length > 0 && (
@@ -492,7 +570,9 @@ export default function CoachEditaisPage() {
 
       {reports.length > 0 && (
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">Planos gerados</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">
+            Relatórios antigos (legado)
+          </h3>
           <ul className="space-y-3">
             {reports.map((r) => (
               <li key={r.id} className="rounded-xl border border-slate-200 bg-white p-4">

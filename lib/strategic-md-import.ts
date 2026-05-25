@@ -3,7 +3,12 @@ import { COACH_DOCS_BUCKET } from "./coach-documents"
 import type { ExamPlanStructured } from "./coach-types"
 import type { IncidenceFlatRow, ParsedIncidenceWorkbook } from "./incidence-xlsx"
 import { persistIncidenceRows } from "./incidence-rows-db"
-import { mapStrategicMdToSubjects, mdNameForSlug } from "./strategic-md-map"
+import {
+  mapStrategicMdToSubjects,
+  mdNameForSlug,
+  normalizeSlugOverride,
+  type SlugManualOverrides,
+} from "./strategic-md-map"
 import { parseStrategicMd, validateStrategicMd } from "./strategic-md-parser"
 import type { StrategicMdBundle } from "./strategic-md-types"
 import type { SubjectRow } from "./incidence-subject-map"
@@ -283,11 +288,99 @@ export async function getStrategicMdDocument(userId: string, examTargetId: strin
   return data
 }
 
+/** Re-lê o texto salvo e atualiza bundle + incidence_rows (sem novo upload). */
+export async function reparseStrategicDocument(params: {
+  userId: string
+  documentId: string
+  examTargetId: string
+}) {
+  const { data: doc, error } = await supabaseServer
+    .from("subject_documents")
+    .select("*")
+    .eq("id", params.documentId)
+    .eq("user_id", params.userId)
+    .eq("doc_type", "strategic_md")
+    .single()
+
+  if (error || !doc) throw new Error("Documento MD não encontrado")
+
+  const pt = (doc.parsed_tables ?? {}) as {
+    full_text?: string
+    manual_overrides?: SlugManualOverrides | Record<string, string | null>
+  }
+
+  const markdown = pt.full_text ?? ""
+  if (!markdown.trim()) throw new Error("Texto do MD não encontrado no documento.")
+
+  const bundle = parseStrategicMd(markdown)
+  const legacyOverrides = pt.manual_overrides ?? {}
+  const manual_overrides: SlugManualOverrides = {}
+  for (const [slug, val] of Object.entries(legacyOverrides)) {
+    const norm = normalizeSlugOverride(val as string | string[] | null)
+    if (norm !== undefined) manual_overrides[slug] = norm
+  }
+
+  const { data: subjects } = await supabaseServer
+    .from("subjects")
+    .select("id, name")
+    .eq("user_id", params.userId)
+
+  const subject_mappings = mapStrategicMdToSubjects(
+    bundle,
+    (subjects ?? []) as SubjectRow[],
+    manual_overrides
+  )
+
+  const incidenceWorkbook = bundleToIncidenceWorkbook(bundle)
+  const persist = await persistIncidenceRows({
+    userId: params.userId,
+    examTargetId: params.examTargetId,
+    documentId: params.documentId,
+    parsed: incidenceWorkbook,
+  })
+
+  if (persist.error) throw new Error(persist.error)
+
+  const topicTotal = incidenceWorkbook.flat_rows.length
+  const parsed_tables = {
+    ...pt,
+    bundle,
+    subject_mappings,
+    manual_overrides,
+    merge_warnings: subject_mappings.merge_warnings,
+    parse_stats: {
+      subjects: bundle.edital_subjects.length,
+      topics: topicTotal,
+      rows_inserted_db: persist.inserted,
+      warnings: bundle.parse_warnings,
+    },
+  }
+
+  await supabaseServer
+    .from("subject_documents")
+    .update({ parsed_tables })
+    .eq("id", params.documentId)
+
+  const priorities = bundleToExamPriorities(bundle)
+  await supabaseServer.from("exam_edital_analysis").upsert(
+    {
+      exam_target_id: params.examTargetId,
+      user_id: params.userId,
+      structure: bundleToEditalStructure(bundle),
+      priorities,
+      analyzed_at: new Date().toISOString(),
+    },
+    { onConflict: "exam_target_id" }
+  )
+
+  return { rows_inserted: persist.inserted, topic_total: topicTotal, bundle }
+}
+
 export async function setStrategicSlugOverride(params: {
   userId: string
   documentId: string
   slug: string
-  subjectId: string | null
+  subjectIds: string[]
 }) {
   const { data: doc, error } = await supabaseServer
     .from("subject_documents")
@@ -301,14 +394,20 @@ export async function setStrategicSlugOverride(params: {
 
   const pt = (doc.parsed_tables ?? {}) as {
     bundle?: StrategicMdBundle
-    manual_overrides?: Record<string, string | null>
+    manual_overrides?: SlugManualOverrides | Record<string, string | null>
   }
 
   if (!pt.bundle) throw new Error("Bundle MD ausente no documento")
 
-  const manual_overrides = {
-    ...(pt.manual_overrides ?? {}),
-    [params.slug]: params.subjectId,
+  const prev: SlugManualOverrides = {}
+  for (const [slug, val] of Object.entries(pt.manual_overrides ?? {})) {
+    const norm = normalizeSlugOverride(val as string | string[] | null)
+    if (norm !== undefined) prev[slug] = norm
+  }
+
+  const manual_overrides: SlugManualOverrides = {
+    ...prev,
+    [params.slug]: params.subjectIds.filter(Boolean),
   }
 
   const { data: subjects } = await supabaseServer

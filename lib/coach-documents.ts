@@ -98,7 +98,10 @@ export async function buildIncidencePayloadForExam(
       .eq("user_id", userId)
     const mappings = pt.subject_mappings
     const by_subject = (subjects ?? []).map((sub) => {
-      const slugRows = mappings?.by_slug.filter((r) => r.subject_id === sub.id) ?? []
+      const slugRows =
+        mappings?.by_slug.filter((r) =>
+          (r.subject_ids ?? (r.subject_id ? [r.subject_id] : [])).includes(sub.id)
+        ) ?? []
       const topics: { name: string; percent: number; qty: number; code: string }[] = []
       for (const row of slugRows) {
         const list = pt.bundle?.topics_by_slug[row.slug] ?? []
@@ -124,13 +127,19 @@ export async function buildIncidencePayloadForExam(
       by_subject: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["by_subject"],
       by_block: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["by_block"],
       unmapped_subjects: (subjects ?? []).filter(
-        (sub) => !mappings?.by_slug.some((r) => r.subject_id === sub.id)
+        (sub) =>
+          !mappings?.by_slug.some((r) =>
+            (r.subject_ids ?? (r.subject_id ? [r.subject_id] : [])).includes(sub.id)
+          )
       ),
       unmapped_blocks: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["unmapped_blocks"],
       merge_warnings: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["merge_warnings"],
     }
     for (const sub of subjects ?? []) {
-      const slugRows = mappings?.by_slug.filter((r) => r.subject_id === sub.id) ?? []
+      const slugRows =
+        mappings?.by_slug.filter((r) =>
+          (r.subject_ids ?? (r.subject_id ? [r.subject_id] : [])).includes(sub.id)
+        ) ?? []
       if (!slugRows.length) continue
       const groups = slugRows.flatMap((row) => {
         const list = pt.bundle?.topics_by_slug[row.slug] ?? []

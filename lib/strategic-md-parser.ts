@@ -318,10 +318,20 @@ export function parseStrategicMd(text: string): StrategicMdBundle {
   const incidence_subjects = parseIncidenceSubjects(md)
   const topics_by_slug = parseTopicsBySlug(md)
 
+  const slugsWithTopics = Object.keys(topics_by_slug).filter(
+    (slug) => (topics_by_slug[slug]?.length ?? 0) > 0
+  )
   for (const s of edital_subjects) {
     if (!topics_by_slug[s.slug]?.length) {
-      warnings.push(`Sem tabela de tópicos: ${s.name} (${s.slug})`)
+      warnings.push(
+        `Sem tabela de tópicos no MD (só nota ou seção ausente): ${s.name} (${s.slug})`
+      )
     }
+  }
+  if (!slugsWithTopics.length) {
+    warnings.push(
+      "Nenhum tópico extraído — reenvie o .md ou use «Atualizar tópicos do MD» após atualizar o app."
+    )
   }
 
   if (!edital_subjects.length) warnings.push("Nenhuma matéria do edital (P1/P2) encontrada")

@@ -79,6 +79,10 @@ export type StrategicMdBundle = {
 export type SlugSubjectMapping = {
   slug: string
   md_name: string
+  /** Uma matéria do MD pode apontar para várias matérias suas */
+  subject_ids: string[]
+  subject_names: string[]
+  /** @deprecated use subject_ids[0] */
   subject_id: string | null
   subject_name: string | null
   match_score: number
@@ -88,7 +92,7 @@ export type SlugSubjectMapping = {
 
 export type StrategicMdMappings = {
   by_slug: SlugSubjectMapping[]
-  manual_overrides: Record<string, string | null>
+  manual_overrides: Record<string, string[]>
   merge_warnings: { subject_id: string; subject_name: string; slugs: string[] }[]
 }
 
