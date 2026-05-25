@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   fetchEditalSubjectRank,
-  listIncidenceLabelsForExam,
+  listIncidenceLabelsFromWorkbook,
   updateEditalSubjectRankMapping,
 } from "@/lib/edital-subject-rank-db"
 import { supabaseServer } from "@/lib/supabase-server"
@@ -21,7 +21,7 @@ export async function GET(
   try {
     const [rows, incidence_labels] = await Promise.all([
       fetchEditalSubjectRank(user_id, id),
-      listIncidenceLabelsForExam(user_id, id).catch(() => [] as string[]),
+      listIncidenceLabelsFromWorkbook(user_id, id).catch(() => [] as string[]),
     ])
 
     const { data: subjects } = await supabaseServer
@@ -77,7 +77,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       subject_ids,
     })
 
-    return NextResponse.json({ row })
+    return NextResponse.json({
+      row: {
+        id: row.id,
+        subject_name: row.subject_name,
+        priority: row.priority,
+        incidence_subject_labels: row.incidence_subject_labels,
+        subject_ids: row.subject_ids,
+      },
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })

@@ -13,6 +13,49 @@ type RankRow = {
 
 type SubjectOption = { id: string; name: string }
 
+function normalizeRankRow(
+  r: RankRow & {
+    incidence_subject_label?: string | null
+    subject_id?: string | null
+    incidence_subject_labels?: string[] | string
+    subject_ids?: string[] | string
+  }
+): RankRow {
+  let labels: string[] = []
+  let ids: string[] = []
+  if (Array.isArray(r.incidence_subject_labels)) {
+    labels = r.incidence_subject_labels
+  } else if (typeof r.incidence_subject_labels === "string") {
+    try {
+      labels = JSON.parse(r.incidence_subject_labels) as string[]
+    } catch {
+      labels = []
+    }
+  }
+  if (Array.isArray(r.subject_ids)) {
+    ids = r.subject_ids.map(String)
+  } else if (typeof r.subject_ids === "string") {
+    try {
+      ids = (JSON.parse(r.subject_ids) as string[]).map(String)
+    } catch {
+      ids = []
+    }
+  }
+  if (!labels.length && r.incidence_subject_label) {
+    labels = [r.incidence_subject_label]
+  }
+  if (!ids.length && r.subject_id) {
+    ids = [String(r.subject_id)]
+  }
+  return {
+    id: r.id,
+    subject_name: r.subject_name,
+    priority: r.priority,
+    incidence_subject_labels: labels,
+    subject_ids: ids,
+  }
+}
+
 function MultiLinkEditor({
   rowId,
   disabled,
@@ -111,33 +154,40 @@ export default function EditalSubjectMappingPanel({
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState<string | null>(null)
 
+  const applyRowPatch = useCallback((rankId: string, patch: Partial<RankRow>) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === rankId ? { ...r, ...patch } : r))
+    )
+  }, [])
+
   const load = useCallback(() => {
     setLoading(true)
-    return fetch(
-      `/api/coach/exam-targets/${examTargetId}/edital-subject-rank?user_id=${userId}`
-    )
-      .then((r) => r.json())
-      .then((d) => {
+    return Promise.all([
+      fetch(
+        `/api/coach/exam-targets/${examTargetId}/edital-subject-rank?user_id=${userId}`
+      ),
+      fetch(
+        `/api/coach/exam-targets/${examTargetId}/incidence-hierarchy?user_id=${userId}`
+      ),
+    ])
+      .then(async ([rankRes, hierRes]) => {
+        const d = await rankRes.json()
+        const hier = await hierRes.json()
+
         if (d.error) {
           setRows([])
-          return
+        } else {
+          setRows((d.rows ?? []).map(normalizeRankRow))
         }
-        setRows(
-          (d.rows ?? []).map(
-            (r: RankRow & {
-              incidence_subject_label?: string | null
-              subject_id?: string | null
-            }) => ({
-              ...r,
-              incidence_subject_labels:
-                r.incidence_subject_labels ??
-                (r.incidence_subject_label ? [r.incidence_subject_label] : []),
-              subject_ids:
-                r.subject_ids ?? (r.subject_id ? [r.subject_id] : []),
-            })
-          )
+
+        const fromApi = (d.incidence_labels ?? []) as string[]
+        const fromHierarchy = (hier.subjects ?? []).map(
+          (s: { label: string }) => s.label
         )
-        setIncidenceLabels(d.incidence_labels ?? [])
+        const merged = new Set<string>([...fromHierarchy, ...fromApi])
+        setIncidenceLabels(
+          [...merged].filter(Boolean).sort((a, b) => a.localeCompare(b, "pt-BR"))
+        )
         setSubjects(d.subjects ?? [])
       })
       .finally(() => setLoading(false))
@@ -147,7 +197,10 @@ export default function EditalSubjectMappingPanel({
     load()
   }, [load, reloadKey])
 
-  async function saveIncidenceLabels(rankId: string, labels: string[]) {
+  async function patchMapping(
+    rankId: string,
+    body: { incidence_subject_labels?: string[]; subject_ids?: string[] }
+  ) {
     setSavingId(rankId)
     try {
       const res = await fetch(
@@ -155,46 +208,42 @@ export default function EditalSubjectMappingPanel({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: userId,
-            rank_id: rankId,
-            incidence_subject_labels: labels,
-          }),
+          body: JSON.stringify({ user_id: userId, rank_id: rankId, ...body }),
         }
       )
       const data = await res.json()
-      if (data.error) alert(data.error)
-      else await load()
+      if (!res.ok || data.error) {
+        alert(data.error ?? `Erro ao salvar (${res.status})`)
+        await load()
+        return
+      }
+      if (data.row) {
+        applyRowPatch(rankId, normalizeRankRow(data.row))
+      } else {
+        await load()
+      }
     } catch {
-      alert("Falha ao salvar vínculo de incidência.")
+      alert("Falha ao salvar vínculo.")
+      await load()
     } finally {
       setSavingId(null)
     }
   }
 
-  async function saveSubjectIds(rankId: string, ids: string[]) {
-    setSavingId(rankId)
-    try {
-      const res = await fetch(
-        `/api/coach/exam-targets/${examTargetId}/edital-subject-rank`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: userId,
-            rank_id: rankId,
-            subject_ids: ids,
-          }),
-        }
-      )
-      const data = await res.json()
-      if (data.error) alert(data.error)
-      else await load()
-    } catch {
-      alert("Falha ao salvar vínculo da matéria.")
-    } finally {
-      setSavingId(null)
-    }
+  function saveIncidenceLabels(rankId: string, labels: string[]) {
+    const row = rows.find((r) => r.id === rankId)
+    return patchMapping(rankId, {
+      incidence_subject_labels: labels,
+      subject_ids: row?.subject_ids,
+    })
+  }
+
+  function saveSubjectIds(rankId: string, ids: string[]) {
+    const row = rows.find((r) => r.id === rankId)
+    return patchMapping(rankId, {
+      subject_ids: ids,
+      incidence_subject_labels: row?.incidence_subject_labels,
+    })
   }
 
   if (loading) {
@@ -210,7 +259,8 @@ export default function EditalSubjectMappingPanel({
     return (
       <p className="rounded-lg border border-dashed border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-600">
         Após analisar o edital, configure aqui o pareamento. Um item do edital pode
-        ligar a <strong>várias</strong> matérias do Excel e do app (use +).
+        ligar a <strong>várias</strong> matérias do mapa de incidência (Excel) e do
+        app (use +).
       </p>
     )
   }
@@ -226,20 +276,28 @@ export default function EditalSubjectMappingPanel({
             Pareamento de matérias
           </h4>
           <p className="text-xs text-slate-600">
-            Quando o edital agrupa várias matérias (ex. Civil + Empresarial + Penal),
-            use <strong>+</strong> para vincular cada uma no Excel e nas suas matérias.
+            Incidência: mesmas matérias do <strong>Mapa de incidência (Excel)</strong>{" "}
+            ({incidenceLabels.length} no mapa). Use <strong>+</strong> para vários
+            vínculos por linha do edital.
           </p>
         </div>
       </div>
+
+      {!subjects.length && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Nenhuma matéria sua cadastrada em Coach → Matérias. Crie matérias lá para
+          vincular aqui.
+        </p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-slate-50 text-left text-xs text-slate-600">
             <tr>
-              <th className="px-2 py-2 w-8">#</th>
-              <th className="px-2 py-2 min-w-[180px]">Edital</th>
-              <th className="px-2 py-2 min-w-[220px]">Incidência (Excel)</th>
-              <th className="px-2 py-2 min-w-[220px]">Minha matéria</th>
+              <th className="w-8 px-2 py-2">#</th>
+              <th className="min-w-[180px] px-2 py-2">Edital</th>
+              <th className="min-w-[220px] px-2 py-2">Incidência (Excel)</th>
+              <th className="min-w-[220px] px-2 py-2">Minha matéria</th>
             </tr>
           </thead>
           <tbody>
@@ -267,7 +325,7 @@ export default function EditalSubjectMappingPanel({
                 <td className="px-2 py-2">
                   <MultiLinkEditor
                     rowId={row.id}
-                    disabled={savingId === row.id}
+                    disabled={savingId === row.id || !subjects.length}
                     values={row.subject_ids}
                     options={subjects.map((s) => ({
                       value: s.id,

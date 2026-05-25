@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { getExamIncidenceHierarchy } from "./coach-documents"
 import { normLabel } from "./incidence-subject-map"
 import type { EditalSubjectRankRow } from "./coach-types"
 
@@ -29,14 +30,26 @@ function parseStringArray(val: unknown): string[] {
   return []
 }
 
-function uniqueStrings(items: string[]) {
+function uniqueLabels(items: string[]) {
   const seen = new Set<string>()
   const out: string[] = []
   for (const item of items) {
     const key = normLabel(item)
     if (!key || seen.has(key)) continue
     seen.add(key)
-    out.push(item)
+    out.push(item.trim())
+  }
+  return out
+}
+
+function uniqueIds(items: string[]) {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of items) {
+    const id = item.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
   }
   return out
 }
@@ -48,8 +61,8 @@ function rowFromDb(row: Record<string, unknown>): EditalSubjectRankDbRow {
   const legacySubjectId = row.subject_id as string | null | undefined
   if (!labels.length && legacyLabel) labels = [legacyLabel]
   if (!subjectIds.length && legacySubjectId) subjectIds = [String(legacySubjectId)]
-  labels = uniqueStrings(labels)
-  subjectIds = uniqueStrings(subjectIds)
+  labels = uniqueLabels(labels)
+  subjectIds = uniqueIds(subjectIds)
 
   return {
     id: String(row.id),
@@ -110,11 +123,11 @@ export async function persistEditalSubjectRank(
     const prev = savedLinks.get(key)
     const prevRow = existing.find((e) => normLabel(e.subject_name) === key)
     const suggested = suggestedIncidence[r.subject_name]
-    const labels = uniqueStrings([
+    const labels = uniqueLabels([
       ...(prev?.incidence_subject_labels ?? []),
       ...(suggested ? [suggested] : []),
     ])
-    const subjectIds = uniqueStrings(prev?.subject_ids ?? [])
+    const subjectIds = uniqueIds(prev?.subject_ids ?? [])
 
     return {
       user_id: userId,
@@ -170,19 +183,33 @@ export async function updateEditalSubjectRankMapping(
     subject_ids?: string[]
   }
 ) {
-  const updates: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
+  const { data: current, error: readErr } = await supabaseServer
+    .from("exam_edital_subject_rank")
+    .select("*")
+    .eq("id", rankId)
+    .eq("user_id", userId)
+    .single()
+
+  if (readErr || !current) {
+    throw new Error(readErr?.message ?? "Linha do ranking não encontrada")
   }
 
-  if (patch.incidence_subject_labels !== undefined) {
-    const labels = uniqueStrings(patch.incidence_subject_labels)
-    updates.incidence_subject_labels = labels
-    updates.incidence_subject_label = labels[0] ?? null
-  }
-  if (patch.subject_ids !== undefined) {
-    const ids = uniqueStrings(patch.subject_ids)
-    updates.subject_ids = ids
-    updates.subject_id = ids[0] ?? null
+  const cur = rowFromDb(current as Record<string, unknown>)
+  const labels =
+    patch.incidence_subject_labels !== undefined
+      ? uniqueLabels(patch.incidence_subject_labels)
+      : cur.incidence_subject_labels
+  const ids =
+    patch.subject_ids !== undefined
+      ? uniqueIds(patch.subject_ids)
+      : cur.subject_ids
+
+  const updates: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+    incidence_subject_labels: labels,
+    incidence_subject_label: labels[0] ?? null,
+    subject_ids: ids,
+    subject_id: ids[0] ?? null,
   }
 
   const { data, error } = await supabaseServer
@@ -197,10 +224,19 @@ export async function updateEditalSubjectRankMapping(
   return rowFromDb(data as Record<string, unknown>)
 }
 
-export async function listIncidenceLabelsForExam(
+/** Matérias do mapa de incidência (Excel importado) — mesma lista do painel hierárquico. */
+export async function listIncidenceLabelsFromWorkbook(
   userId: string,
   examTargetId: string
 ): Promise<string[]> {
+  const hierarchy = await getExamIncidenceHierarchy(userId, examTargetId)
+  if (hierarchy?.subjects?.length) {
+    return hierarchy.subjects
+      .map((s) => s.label)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+  }
+
   const { data, error } = await supabaseServer
     .from("incidence_rows")
     .select("subject_label")
@@ -213,4 +249,12 @@ export async function listIncidenceLabelsForExam(
     if (row.subject_label) labels.add(row.subject_label)
   }
   return [...labels].sort((a, b) => a.localeCompare(b, "pt-BR"))
+}
+
+/** @deprecated use listIncidenceLabelsFromWorkbook */
+export async function listIncidenceLabelsForExam(
+  userId: string,
+  examTargetId: string
+) {
+  return listIncidenceLabelsFromWorkbook(userId, examTargetId)
 }
