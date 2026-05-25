@@ -6,6 +6,10 @@ import { runAgent } from "./run-agent"
 import { getUserAiCredentials } from "./user-credentials"
 import type { EditalSubjectRankRow, ExamPlanStructured } from "../coach-types"
 import { isDiscursiveSubject, type DiscursiveSubjectNote } from "../edital-discursive"
+import {
+  applyObjectivePercentToRank,
+  computeObjectivePercentBreakdown,
+} from "../edital-percent-calc"
 import { persistEditalSubjectRank } from "../edital-subject-rank-db"
 import {
   asExamPlanStructured,
@@ -15,14 +19,18 @@ import {
 
 const STRUCTURE_SYSTEM = `Você extrai a estrutura de um edital de concurso público (texto do PDF).
 Liste APENAS matérias e assuntos explicitamente no edital.
-Inclua peso, quantidade de questões/itens, prova (P1/P2) e critérios de pontuação quando existirem.
+Inclua peso, quantidade de questões/itens (só prova objetiva em question_count), prova (P1/P2) e critérios de pontuação.
+Marque is_discursive: true para provas/matérias discursivas, estudo de caso, peças, pareceres.
+NÃO some questões discursivas em percentuais — question_count e percent_of_total na extração referem-se só ao bloco objetivo daquela matéria (0 se for só discursiva).
 Responda JSON válido:
 {
   "exam_summary": "resumo em 2-4 frases",
   "scoring_notes": ["critérios de pontuação ou desempate se houver"],
+  "total_objective_questions": 0,
   "subjects": [
     {
       "name": "nome da matéria no edital",
+      "is_discursive": false,
       "prova": "P1|P2|única",
       "question_count": 0,
       "percent_of_total": 0,
@@ -32,25 +40,34 @@ Responda JSON válido:
   ]
 }`
 
-const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise o edital (lista edital_subjects) e cruze com incidence_crosswalk quando existir.
+const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise edital_subjects (já sem discursivas na lista) e incidence_crosswalk quando existir.
 
-REGRA OBRIGATÓRIA: subject_priority_rank deve listar TODAS as matérias OBJETIVAS de edital_subjects (prova objetiva / múltipla escolha) — uma linha por matéria, sem omitir nenhuma. NÃO inclua provas ou matérias DISCURSIVAS no ranking.
-Matérias discursivas vão só em discursive_subjects (nome, question_count, percent_of_total, prova, note breve) e opcionalmente discursive_note (parágrafo resumindo o papel delas no concurso).
-Ordene o ranking por impacto na nota objetiva (peso, questões, %). priority começa em 1 (mais relevante).
+RANKING (subject_priority_rank):
+- Uma linha por CADA matéria objetiva de edital_subjects, sem omitir.
+- NUNCA incluir discursivas no ranking nem no cálculo de %.
+- priority 1 = maior impacto na nota da prova objetiva.
 
-Para cada matéria: why em até 120 caracteres, edital_weight, question_count, percent_of_total, prova, tiebreaker_note se houver, impact_on_final_score, incidence_summary em 1 frase curta.
+CÁLCULO DA % (OBRIGATÓRIO — campo percent_calculation em cada matéria):
+1) Some apenas question_count das matérias OBJETIVAS do edital → total_objetivo.
+2) percent_of_total de cada matéria = (question_count da matéria ÷ total_objetivo) × 100, arredondado 2 casas.
+3) Em percent_calculation escreva a conta explícita, ex.: "25 questões ÷ 133 questões objetivas × 100 = 18,80% (discursivas excluídas do total)".
+4) Se o edital não tiver quantidades, estime pelo peso/pontuação e explique em percent_calculation (deixe claro que é estimativa).
+5) Preencha objective_percent_formula com a regra usada (1 frase + total_objetivo se houver).
 
-Também: resumo do edital, conclusões estratégicas, listas priority_subjects / secondary_subjects / trap_subjects (subconjuntos do ranking, não substituem o ranking completo).
+Discursivas: só em discursive_subjects + discursive_note (sem % no ranking objetivo).
+
+Campos por matéria: why (≤120 chars), edital_weight, question_count, percent_of_total, percent_calculation, prova, tiebreaker_note, impact_on_final_score, incidence_summary (1 frase).
 
 Responda JSON válido:
 {
   "headline": "",
   "edital_summary": "",
+  "objective_percent_formula": "",
   "strategic_conclusions": [],
   "priority_subjects": [{ "name": "", "why": "" }],
   "secondary_subjects": [{ "name": "", "why": "" }],
   "trap_subjects": [{ "name": "", "why": "" }],
-  "discursive_subjects": [{ "name": "", "question_count": 0, "percent_of_total": 0, "prova": "", "note": "" }],
+  "discursive_subjects": [{ "name": "", "question_count": 0, "prova": "", "note": "" }],
   "discursive_note": "",
   "subject_priority_rank": [
     {
@@ -60,6 +77,7 @@ Responda JSON válido:
       "edital_weight": "",
       "question_count": 0,
       "percent_of_total": 0,
+      "percent_calculation": "",
       "prova": "",
       "tiebreaker_note": "",
       "impact_on_final_score": "alto|medio|baixo",
@@ -161,6 +179,7 @@ function findLlmRankForSubject(
 export function splitDiscursiveSubjects<
   T extends {
     name: string
+    is_discursive?: boolean
     question_count?: number
     percent_of_total?: number
     prova?: string
@@ -169,7 +188,7 @@ export function splitDiscursiveSubjects<
   const objective: T[] = []
   const discursive: DiscursiveSubjectNote[] = []
   for (const s of subjects) {
-    if (isDiscursiveSubject(s.name)) {
+    if (s.is_discursive === true || isDiscursiveSubject(s.name)) {
       discursive.push({
         name: s.name,
         question_count: s.question_count,
@@ -422,8 +441,11 @@ export async function analyzeExamEdital(
     examTargetId,
   })
 
+  const { objective: objectiveSubjectsEarly, discursive: discursiveEarly } =
+    splitDiscursiveSubjects(structure.subjects)
+
   const matched = matchIncidenceToEditalSubjects(
-    structure.subjects,
+    objectiveSubjectsEarly,
     incidenceRows.map((r) => ({
       subject_label: r.subject_label,
       topic_name: r.topic_name,
@@ -433,13 +455,19 @@ export async function analyzeExamEdital(
     }))
   )
 
-  const incidenceForLlm = buildIncidencePayloadForLlm(structure.subjects, matched)
-  const compactSubjects = compactEditalSubjects(structure.subjects)
+  const incidenceForLlm = buildIncidencePayloadForLlm(
+    objectiveSubjectsEarly,
+    matched
+  )
+  const compactSubjects = compactEditalSubjects(objectiveSubjectsEarly)
+  const percentHint = computeObjectivePercentBreakdown(objectiveSubjectsEarly)
 
   const prioritiesPayload = {
     exam_target: { name: exam.name, banca: exam.banca },
     required_subject_count: compactSubjects.length,
     edital_subjects: compactSubjects,
+    total_objective_questions: percentHint.totalObjectiveQuestions,
+    percent_calculation_rule: percentHint.formulaNote,
     incidence_crosswalk: incidenceForLlm,
     incidence_rows_total: incidenceRows.length,
   }
@@ -505,14 +533,20 @@ export async function analyzeExamEdital(
     )
   }
 
-  const { objective: objectiveSubjects, discursive: discursiveFromStructure } =
-    splitDiscursiveSubjects(structure.subjects)
+  const objectiveSubjects = objectiveSubjectsEarly
+  const discursiveFromStructure = discursiveEarly
 
-  const fullRank = ensureFullSubjectRanking(
+  let fullRank = ensureFullSubjectRanking(
     objectiveSubjects,
     structured.subject_priority_rank ?? []
   )
+
+  const percentMeta = computeObjectivePercentBreakdown(objectiveSubjects)
+  fullRank = applyObjectivePercentToRank(fullRank, objectiveSubjects)
   structured.subject_priority_rank = fullRank
+  structured.objective_percent_formula =
+    structured.objective_percent_formula?.trim() ||
+    percentMeta.formulaNote
 
   const llmDiscursive = (structured.discursive_subjects ?? []).filter(
     (d) => d.name && isDiscursiveSubject(d.name)

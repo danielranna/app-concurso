@@ -284,6 +284,20 @@ export default function EditalPrioritiesPanel({
             </div>
           )}
 
+          {priorities?.objective_percent_formula && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4">
+              <h4 className="mb-1 text-sm font-semibold text-slate-900">
+                Como a % é calculada
+              </h4>
+              <p className="text-sm text-slate-700">
+                {priorities.objective_percent_formula}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Discursivas não entram no total de questões nem no ranking objetivo.
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-3">
             <SubjectChipList
               title="Matérias prioritárias"
@@ -385,6 +399,11 @@ export default function EditalPrioritiesPanel({
                         {item.percent_of_total != null
                           ? `${item.percent_of_total}%`
                           : "—"}
+                        {item.percent_calculation && (
+                          <p className="mt-0.5 text-xs text-violet-800">
+                            {item.percent_calculation}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-slate-700">
                         {item.prova ?? "—"}

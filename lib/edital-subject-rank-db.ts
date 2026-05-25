@@ -65,6 +65,7 @@ function rowFromDb(row: Record<string, unknown>): EditalSubjectRankDbRow {
     impact_on_final_score: (row.impact_on_final_score as string) ?? undefined,
     incidence_summary: (row.incidence_summary as string) ?? undefined,
     why: (row.why as string) ?? undefined,
+    percent_calculation: (row.percent_calculation as string) ?? undefined,
     incidence_subject_labels: labels,
     subject_ids: subjectIds,
     incidence_subject_label: labels[0] ?? null,
@@ -107,6 +108,7 @@ export async function persistEditalSubjectRank(
   const payload = rows.map((r) => {
     const key = normLabel(r.subject_name)
     const prev = savedLinks.get(key)
+    const prevRow = existing.find((e) => normLabel(e.subject_name) === key)
     const suggested = suggestedIncidence[r.subject_name]
     const labels = uniqueStrings([
       ...(prev?.incidence_subject_labels ?? []),
@@ -127,6 +129,8 @@ export async function persistEditalSubjectRank(
       impact_on_final_score: r.impact_on_final_score ?? null,
       incidence_summary: r.incidence_summary ?? null,
       why: r.why ?? null,
+      percent_calculation:
+        r.percent_calculation ?? prevRow?.percent_calculation ?? null,
       incidence_subject_label: labels[0] ?? null,
       subject_id: subjectIds[0] ?? null,
       incidence_subject_labels: labels,

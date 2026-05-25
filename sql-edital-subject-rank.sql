@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS exam_edital_subject_rank (
   impact_on_final_score TEXT,
   incidence_summary TEXT,
   why TEXT,
+  percent_calculation TEXT,
   -- vínculos (vários por linha — edital composto ex. Civil + Empresarial + Penal)
   incidence_subject_label TEXT,
   subject_id UUID REFERENCES subjects(id) ON DELETE SET NULL,

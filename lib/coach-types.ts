@@ -169,6 +169,8 @@ export type EditalSubjectRankRow = {
   prova?: string
   tiebreaker_note?: string
   impact_on_final_score?: string
+  /** Como a % foi calculada (ex.: 25÷133×100). */
+  percent_calculation?: string
 }
 
 export type EditalSubjectLabel = {
@@ -200,6 +202,8 @@ export type ExamPlanStructured = {
   trap_subjects?: EditalSubjectLabel[]
   discursive_subjects?: DiscursiveSubjectNote[]
   discursive_note?: string
+  /** Regra global do % (só matérias objetivas no denominador). */
+  objective_percent_formula?: string
   incidence_map_notes?: EditalIncidenceMapNote[]
   subject_priority_rank?: EditalSubjectRankRow[]
   topic_matrix?: {

@@ -62,6 +62,10 @@ export function buildCoachEditalSummaryMd(
     lines.push("## Resumo do edital", "", structured.edital_summary, "")
   }
 
+  if (structured.objective_percent_formula) {
+    lines.push("## Regra do % (só prova objetiva)", "", structured.objective_percent_formula, "")
+  }
+
   if (structured.subject_priority_rank?.length) {
     lines.push("## Ranking de relevância das matérias", "")
     for (const row of structured.subject_priority_rank) {
@@ -75,7 +79,8 @@ export function buildCoachEditalSummaryMd(
         .join(" · ")
       lines.push(
         `${row.priority}. **${row.subject_name}**${meta ? ` (${meta})` : ""}`,
-        `   ${row.why || "—"}`
+        `   ${row.why || "—"}`,
+        row.percent_calculation ? `   Cálculo %: ${row.percent_calculation}` : ""
       )
     }
     lines.push("")
