@@ -55,13 +55,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       )
     }
 
+    const incidence_subject_labels = Array.isArray(body.incidence_subject_labels)
+      ? (body.incidence_subject_labels as string[])
+      : undefined
+    const subject_ids = Array.isArray(body.subject_ids)
+      ? (body.subject_ids as string[])
+      : undefined
+
+    if (
+      incidence_subject_labels === undefined &&
+      subject_ids === undefined
+    ) {
+      return NextResponse.json(
+        { error: "incidence_subject_labels ou subject_ids obrigatório" },
+        { status: 400 }
+      )
+    }
+
     const row = await updateEditalSubjectRankMapping(user_id, rank_id, {
-      incidence_subject_label:
-        body.incidence_subject_label === undefined
-          ? undefined
-          : body.incidence_subject_label || null,
-      subject_id:
-        body.subject_id === undefined ? undefined : body.subject_id || null,
+      incidence_subject_labels,
+      subject_ids,
     })
 
     return NextResponse.json({ row })

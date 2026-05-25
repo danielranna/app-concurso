@@ -4,8 +4,72 @@ import type { EditalSubjectRankRow } from "./coach-types"
 
 export type EditalSubjectRankDbRow = EditalSubjectRankRow & {
   id: string
+  incidence_subject_labels: string[]
+  subject_ids: string[]
+  /** @deprecated primeiro vínculo — compat */
   incidence_subject_label?: string | null
   subject_id?: string | null
+}
+
+function parseStringArray(val: unknown): string[] {
+  if (!val) return []
+  if (Array.isArray(val)) {
+    return val.map((x) => String(x).trim()).filter(Boolean)
+  }
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val) as unknown
+      if (Array.isArray(parsed)) {
+        return parsed.map((x) => String(x).trim()).filter(Boolean)
+      }
+    } catch {
+      return val.trim() ? [val.trim()] : []
+    }
+  }
+  return []
+}
+
+function uniqueStrings(items: string[]) {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of items) {
+    const key = normLabel(item)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function rowFromDb(row: Record<string, unknown>): EditalSubjectRankDbRow {
+  let labels = parseStringArray(row.incidence_subject_labels)
+  let subjectIds = parseStringArray(row.subject_ids)
+  const legacyLabel = row.incidence_subject_label as string | null | undefined
+  const legacySubjectId = row.subject_id as string | null | undefined
+  if (!labels.length && legacyLabel) labels = [legacyLabel]
+  if (!subjectIds.length && legacySubjectId) subjectIds = [String(legacySubjectId)]
+  labels = uniqueStrings(labels)
+  subjectIds = uniqueStrings(subjectIds)
+
+  return {
+    id: String(row.id),
+    subject_name: String(row.edital_subject_name),
+    priority: Number(row.priority),
+    edital_weight: (row.edital_weight as string) ?? undefined,
+    question_count:
+      row.question_count != null ? Number(row.question_count) : undefined,
+    percent_of_total:
+      row.percent_of_total != null ? Number(row.percent_of_total) : undefined,
+    prova: (row.prova as string) ?? undefined,
+    tiebreaker_note: (row.tiebreaker_note as string) ?? undefined,
+    impact_on_final_score: (row.impact_on_final_score as string) ?? undefined,
+    incidence_summary: (row.incidence_summary as string) ?? undefined,
+    why: (row.why as string) ?? undefined,
+    incidence_subject_labels: labels,
+    subject_ids: subjectIds,
+    incidence_subject_label: labels[0] ?? null,
+    subject_id: subjectIds[0] ?? null,
+  }
 }
 
 export async function persistEditalSubjectRank(
@@ -23,12 +87,12 @@ export async function persistEditalSubjectRank(
 
   const savedLinks = new Map<
     string,
-    { incidence_subject_label?: string | null; subject_id?: string | null }
+    { incidence_subject_labels: string[]; subject_ids: string[] }
   >()
   for (const row of existing) {
     savedLinks.set(normLabel(row.subject_name), {
-      incidence_subject_label: row.incidence_subject_label ?? null,
-      subject_id: row.subject_id ?? null,
+      incidence_subject_labels: row.incidence_subject_labels ?? [],
+      subject_ids: row.subject_ids ?? [],
     })
   }
 
@@ -44,6 +108,12 @@ export async function persistEditalSubjectRank(
     const key = normLabel(r.subject_name)
     const prev = savedLinks.get(key)
     const suggested = suggestedIncidence[r.subject_name]
+    const labels = uniqueStrings([
+      ...(prev?.incidence_subject_labels ?? []),
+      ...(suggested ? [suggested] : []),
+    ])
+    const subjectIds = uniqueStrings(prev?.subject_ids ?? [])
+
     return {
       user_id: userId,
       exam_target_id: examTargetId,
@@ -57,10 +127,10 @@ export async function persistEditalSubjectRank(
       impact_on_final_score: r.impact_on_final_score ?? null,
       incidence_summary: r.incidence_summary ?? null,
       why: r.why ?? null,
-      incidence_subject_label:
-        prev?.incidence_subject_label ??
-        (suggested || null),
-      subject_id: prev?.subject_id ?? null,
+      incidence_subject_label: labels[0] ?? null,
+      subject_id: subjectIds[0] ?? null,
+      incidence_subject_labels: labels,
+      subject_ids: subjectIds,
       updated_at: new Date().toISOString(),
     }
   })
@@ -85,40 +155,30 @@ export async function fetchEditalSubjectRank(
 
   if (error) throw new Error(error.message)
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    subject_name: row.edital_subject_name,
-    priority: row.priority,
-    edital_weight: row.edital_weight ?? undefined,
-    question_count: row.question_count ?? undefined,
-    percent_of_total:
-      row.percent_of_total != null ? Number(row.percent_of_total) : undefined,
-    prova: row.prova ?? undefined,
-    tiebreaker_note: row.tiebreaker_note ?? undefined,
-    impact_on_final_score: row.impact_on_final_score ?? undefined,
-    incidence_summary: row.incidence_summary ?? undefined,
-    why: row.why ?? undefined,
-    incidence_subject_label: row.incidence_subject_label ?? undefined,
-    subject_id: row.subject_id ?? undefined,
-  }))
+  return (data ?? []).map((row) => rowFromDb(row as Record<string, unknown>))
 }
 
 export async function updateEditalSubjectRankMapping(
   userId: string,
   rankId: string,
   patch: {
-    incidence_subject_label?: string | null
-    subject_id?: string | null
+    incidence_subject_labels?: string[]
+    subject_ids?: string[]
   }
 ) {
   const updates: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   }
-  if (patch.incidence_subject_label !== undefined) {
-    updates.incidence_subject_label = patch.incidence_subject_label
+
+  if (patch.incidence_subject_labels !== undefined) {
+    const labels = uniqueStrings(patch.incidence_subject_labels)
+    updates.incidence_subject_labels = labels
+    updates.incidence_subject_label = labels[0] ?? null
   }
-  if (patch.subject_id !== undefined) {
-    updates.subject_id = patch.subject_id
+  if (patch.subject_ids !== undefined) {
+    const ids = uniqueStrings(patch.subject_ids)
+    updates.subject_ids = ids
+    updates.subject_id = ids[0] ?? null
   }
 
   const { data, error } = await supabaseServer
@@ -130,7 +190,7 @@ export async function updateEditalSubjectRankMapping(
     .single()
 
   if (error) throw new Error(error.message)
-  return data
+  return rowFromDb(data as Record<string, unknown>)
 }
 
 export async function listIncidenceLabelsForExam(
