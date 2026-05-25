@@ -1,5 +1,9 @@
 import { supabaseServer } from "./supabase-server"
-import type { IncidenceFlatRow, ParsedIncidenceWorkbook } from "./incidence-xlsx"
+import {
+  flatRowsFromBlocks,
+  type IncidenceFlatRow,
+  type ParsedIncidenceWorkbook,
+} from "./incidence-xlsx"
 
 const BATCH = 500
 
@@ -15,8 +19,17 @@ export async function persistIncidenceRows(params: {
     .eq("user_id", params.userId)
     .eq("exam_target_id", params.examTargetId)
 
-  const rows = params.parsed.flat_rows
-  if (!rows.length) return { inserted: 0 }
+  const rows =
+    params.parsed.flat_rows.length > 0
+      ? params.parsed.flat_rows
+      : flatRowsFromBlocks(params.parsed.blocks, params.parsed.sheet_names[0] ?? "Planilha")
+
+  if (!rows.length) {
+    return {
+      inserted: 0,
+      error: "Nenhuma linha de assunto encontrada no Excel (verifique colunas Hierarquia / Índice).",
+    }
+  }
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH).map((r) => ({
@@ -33,10 +46,15 @@ export async function persistIncidenceRows(params: {
       percent: r.percent,
     }))
     const { error } = await supabaseServer.from("incidence_rows").insert(chunk)
-    if (error) throw new Error(error.message)
+    if (error) {
+      const hint = error.message.includes("incidence_rows")
+        ? ' Execute sql-incidence-rows.sql no Supabase (tabela incidence_rows).'
+        : ""
+      return { inserted: 0, error: error.message + hint }
+    }
   }
 
-  return { inserted: rows.length }
+  return { inserted: rows.length, error: null as string | null }
 }
 
 export async function fetchIncidenceRows(params: {

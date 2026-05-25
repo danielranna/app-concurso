@@ -1,6 +1,7 @@
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
 import {
+  displayParseStats,
   incidenceSummaryForLlm,
   parseIncidenceXlsx,
   type IncidenceSubjectBlock,
@@ -180,7 +181,7 @@ export async function uploadCoachDocument(params: {
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
       flat_row_count: parsed.flat_rows.length,
-      parse_stats: parsed.stats,
+      parse_stats: displayParseStats(parsed.stats),
       block_count: parsed.blocks.length,
       manual_overrides: isWorkbook ? manualOverrides : undefined,
       subject_mappings: isWorkbook ? subjectMappings : undefined,
@@ -252,12 +253,44 @@ export async function uploadCoachDocument(params: {
     !params.subjectId &&
     incidenceParsed
   ) {
-    await persistIncidenceRows({
+    const persist = await persistIncidenceRows({
       userId: params.userId,
       examTargetId: params.examTargetId,
       documentId: doc.id,
       parsed: incidenceParsed,
     })
+
+    const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+    const parse_stats = displayParseStats(
+      (pt.parse_stats ?? incidenceParsed.stats) as Parameters<typeof displayParseStats>[0],
+      {
+        rowsInsertedDb: persist.inserted,
+        persistError: persist.error,
+      }
+    )
+    const updated_tables = {
+      ...pt,
+      parse_stats,
+      flat_row_count: incidenceParsed.flat_rows.length || persist.inserted,
+    }
+
+    const { data: updated, error: statsErr } = await supabaseServer
+      .from("subject_documents")
+      .update({ parsed_tables: updated_tables })
+      .eq("id", doc.id)
+      .select("*")
+      .single()
+
+    if (statsErr) throw new Error(statsErr.message)
+    if (updated) {
+      Object.assign(doc, updated)
+    }
+
+    if (persist.error) {
+      throw new Error(
+        `Excel salvo, mas as linhas não entraram no banco: ${persist.error}`
+      )
+    }
   }
 
   if (params.docType === "edital" && params.examTargetId) {

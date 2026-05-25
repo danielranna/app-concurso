@@ -41,3 +41,15 @@ CREATE TABLE IF NOT EXISTS exam_edital_analysis (
 
 CREATE INDEX IF NOT EXISTS idx_exam_edital_analysis_user
   ON exam_edital_analysis(user_id);
+
+-- Service role ignora RLS; habilita se usar cliente autenticado no futuro
+ALTER TABLE incidence_rows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE exam_edital_analysis ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS incidence_rows_own ON incidence_rows;
+CREATE POLICY incidence_rows_own ON incidence_rows
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS exam_edital_analysis_own ON exam_edital_analysis;
+CREATE POLICY exam_edital_analysis_own ON exam_edital_analysis
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

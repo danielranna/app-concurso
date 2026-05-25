@@ -32,6 +32,55 @@ export type IncidenceParseStats = {
   subtopic_count: number
   ignored_count: number
   ignored_samples: string[]
+  /** Alias para UI */
+  subjects?: number
+  topics?: number
+  subtopics?: number
+  rows_imported?: number
+  rows_ignored?: number
+  rows_inserted_db?: number
+  persist_error?: string | null
+}
+
+/** Stats unificados para alertas e tela Editais */
+export function displayParseStats(
+  stats: IncidenceParseStats,
+  opts?: { rowsInsertedDb?: number; persistError?: string | null }
+): IncidenceParseStats {
+  const rows_imported = stats.rows_inserted_db ?? opts?.rowsInsertedDb ?? stats.rows_imported ?? stats.topic_count
+  return {
+    ...stats,
+    subjects: stats.subjects ?? stats.subject_count,
+    topics: stats.topics ?? stats.topic_count,
+    subtopics: stats.subtopics ?? stats.subtopic_count,
+    rows_imported,
+    rows_ignored: stats.rows_ignored ?? stats.ignored_count,
+    rows_inserted_db: opts?.rowsInsertedDb ?? stats.rows_inserted_db,
+    persist_error: opts?.persistError ?? stats.persist_error ?? null,
+  }
+}
+
+/** Gera flat_rows a partir dos blocos se o parser não preencheu (fallback). */
+export function flatRowsFromBlocks(
+  blocks: IncidenceSubjectBlock[],
+  sheetName = "Planilha"
+): IncidenceFlatRow[] {
+  const flat: IncidenceFlatRow[] = []
+  for (const block of blocks) {
+    for (const g of block.groups) {
+      flat.push({
+        sheet_name: sheetName,
+        subject_label: block.subject_label,
+        hierarchy_code: g.code,
+        topic_name: g.name,
+        is_subtopic: !!g.is_subtopic,
+        parent_code: g.parent_code ?? null,
+        quantity: g.quantity,
+        percent: g.percent,
+      })
+    }
+  }
+  return flat
 }
 
 export type ParsedIncidenceWorkbook = {

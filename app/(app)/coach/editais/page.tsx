@@ -59,10 +59,17 @@ type DocRow = {
       subjects?: number
       topics?: number
       subtopics?: number
+      subject_count?: number
+      topic_count?: number
+      subtopic_count?: number
       rows_imported?: number
+      rows_inserted_db?: number
       rows_ignored?: number
+      ignored_count?: number
+      persist_error?: string | null
       ignored_samples?: string[]
     }
+    flat_row_count?: number
     merge_warnings?: {
       subject_id: string
       subject_name: string
@@ -81,6 +88,22 @@ type PlanReport = {
   summary_md: string | null
   structured: ExamPlanStructured
   created_at: string
+}
+
+function incidenceStatsLine(
+  pt: DocRow["parsed_tables"] | undefined
+): string | null {
+  if (!pt?.parse_stats && pt?.flat_row_count == null) return null
+  const s = pt?.parse_stats ?? {}
+  const rows =
+    s.rows_inserted_db ??
+    s.rows_imported ??
+    s.topic_count ??
+    pt?.flat_row_count ??
+    0
+  const subtopics = s.subtopics ?? s.subtopic_count ?? 0
+  const ignored = s.rows_ignored ?? s.ignored_count ?? 0
+  return `${rows} linhas no banco · ${subtopics} subtópicos${ignored > 0 ? ` · ${ignored} ignoradas` : ""}`
 }
 
 export default function CoachEditaisPage() {
@@ -199,10 +222,20 @@ export default function CoachEditaisPage() {
           const n = data.parsed_tables?.block_count ?? 0
           const mapped =
             data.parsed_tables?.subject_mappings?.by_subject?.length ?? 0
+          const rows =
+            stats?.rows_inserted_db ??
+            stats?.rows_imported ??
+            stats?.topic_count ??
+            data.parsed_tables?.flat_row_count ??
+            0
           const msg = stats
-            ? `Importadas: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} assuntos, ${stats.subtopics ?? 0} subtópicos (${stats.rows_imported ?? 0} linhas${(stats.rows_ignored ?? 0) > 0 ? `, ${stats.rows_ignored} ignoradas` : ""}). ${mapped} matérias vinculadas automaticamente.`
+            ? `Importadas: ${stats.subjects ?? stats.subject_count ?? 0} matérias, ${stats.topics ?? stats.topic_count ?? 0} assuntos, ${stats.subtopics ?? stats.subtopic_count ?? 0} subtópicos (${rows} linhas no banco${(stats.rows_ignored ?? stats.ignored_count ?? 0) > 0 ? `, ${stats.rows_ignored ?? stats.ignored_count} ignoradas` : ""}). ${mapped} matérias vinculadas.`
             : `Excel importado: ${n} blocos. ${mapped} matérias vinculadas.`
-          alert(msg)
+          if (stats?.persist_error) {
+            alert(`${msg}\n\nErro no banco: ${stats.persist_error}`)
+          } else {
+            alert(msg)
+          }
         }
       }
     } catch {
@@ -432,13 +465,17 @@ export default function CoachEditaisPage() {
                   {incidenceWorkbook.parsed_tables?.block_count ?? 0} blocos,{" "}
                   {mappings?.by_subject?.length ?? 0} matérias vinculadas
                 </p>
-                {incidenceWorkbook.parsed_tables?.parse_stats && (
+                {incidenceStatsLine(incidenceWorkbook.parsed_tables) && (
                   <p className="text-slate-600 font-normal">
-                    {incidenceWorkbook.parsed_tables.parse_stats.rows_imported ?? 0}{" "}
-                    linhas no banco · {incidenceWorkbook.parsed_tables.parse_stats.subtopics ?? 0}{" "}
-                    subtópicos
-                    {(incidenceWorkbook.parsed_tables.parse_stats.rows_ignored ?? 0) > 0 &&
-                      ` · ${incidenceWorkbook.parsed_tables.parse_stats.rows_ignored} ignoradas`}
+                    {incidenceStatsLine(incidenceWorkbook.parsed_tables)}
+                  </p>
+                )}
+                {incidenceWorkbook.parsed_tables?.parse_stats?.persist_error && (
+                  <p className="text-amber-800 font-normal">
+                    Erro ao gravar no banco:{" "}
+                    {incidenceWorkbook.parsed_tables.parse_stats.persist_error}
+                    {" "}
+                    (execute sql-incidence-rows.sql no Supabase e envie de novo)
                   </p>
                 )}
               </div>
