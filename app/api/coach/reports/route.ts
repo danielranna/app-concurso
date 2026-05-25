@@ -34,7 +34,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, notebook_id } = body
+  const { user_id, notebook_id, force } = body
 
   if (!user_id || !notebook_id) {
     return NextResponse.json(
@@ -44,7 +44,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await enqueueNotebookReport(notebook_id, user_id)
+    const result = await enqueueNotebookReport(notebook_id, user_id, {
+      force: Boolean(force),
+    })
     return NextResponse.json(result)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

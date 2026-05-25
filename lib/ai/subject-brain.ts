@@ -1,12 +1,35 @@
 import { supabaseServer } from "../supabase-server"
 import type {
   ErrorTaxonomy,
+  LearningSignal,
+  NotebookReportStructured,
   SubjectBrainState,
   TopicBrainEntry,
 } from "../coach-types"
+import { loadMappings } from "../tec-mapping"
 import { buildBrainContext } from "./context-builder"
+import { loadSubjectBrain } from "./context-builder"
 import { runBrainNarrativeAgent } from "./agents/brain"
-import { getTopicStatsForSubject } from "../learning-signals"
+import {
+  computeLearningSignals,
+  getTopicStatsForSubject,
+} from "../learning-signals"
+import {
+  applyLearningSignalsToBrain,
+  applyPredominantErrors,
+  buildRuleBasedBrainSummary,
+  computeDominioDelta,
+  mergeBrainNarrative,
+  mergeReportIntoBrain,
+  topicBrainKey,
+} from "./brain-helpers"
+
+type AttemptRow = {
+  question_id: string
+  is_correct: boolean
+  created_at: string
+  tec_topic: string
+}
 
 function dominioFromStats(correct: number, wrong: number): number {
   const total = correct + wrong
@@ -14,7 +37,7 @@ function dominioFromStats(correct: number, wrong: number): number {
   return correct / total
 }
 
-function estabilidadeFromAttempts(
+export function estabilidadeFromAttempts(
   rows: { is_correct: boolean }[]
 ): number {
   if (rows.length < 2) return 0.3
@@ -39,12 +62,60 @@ function statusFromMetrics(
   return "em_evolucao"
 }
 
-export async function computeSubjectBrainState(
+async function fetchSubjectAttempts(
   userId: string,
-  subjectId: string,
-  reportId?: string
-): Promise<SubjectBrainState> {
-  const topicStats = await getTopicStatsForSubject(userId, subjectId)
+  subjectId: string
+): Promise<AttemptRow[]> {
+  const mappings = await loadMappings(userId)
+  const tecSubjects = new Set(
+    mappings
+      .filter((m) => m.subject_id === subjectId)
+      .map((m) => (m.tec_subject ?? "").trim())
+      .filter(Boolean)
+  )
+  if (!tecSubjects.size) return []
+
+  const { data: attempts, error } = await supabaseServer
+    .from("question_attempts")
+    .select(
+      `
+      question_id, is_correct, created_at,
+      questions ( tec_subject, tec_topic )
+    `
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+
+  if (error) throw new Error(error.message)
+
+  const rows: AttemptRow[] = []
+  for (const a of attempts ?? []) {
+    const q = a.questions as
+      | { tec_subject?: string; tec_topic?: string }
+      | { tec_subject?: string; tec_topic?: string }[]
+    const qu = Array.isArray(q) ? q[0] : q
+    if (!qu || !tecSubjects.has((qu.tec_subject ?? "").trim())) continue
+    rows.push({
+      question_id: a.question_id,
+      is_correct: a.is_correct,
+      created_at: a.created_at,
+      tec_topic: qu.tec_topic?.trim() || "Sem tópico",
+    })
+  }
+  return rows
+}
+
+async function fetchTaxonomyBySubject(
+  userId: string,
+  subjectId: string
+): Promise<Map<string, Map<string, number>>> {
+  const mappings = await loadMappings(userId)
+  const tecSubjects = new Set(
+    mappings
+      .filter((m) => m.subject_id === subjectId)
+      .map((m) => (m.tec_subject ?? "").trim())
+      .filter(Boolean)
+  )
 
   const { data: taxonomyRows } = await supabaseServer
     .from("question_attempts")
@@ -61,65 +132,131 @@ export async function computeSubjectBrainState(
 
   const errorByTopic = new Map<string, Map<string, number>>()
   for (const row of taxonomyRows ?? []) {
-    const q = row.questions as { tec_topic?: string } | { tec_topic?: string }[]
-    const topic = (Array.isArray(q) ? q[0]?.tec_topic : q?.tec_topic)?.trim() || "Sem tópico"
+    const q = row.questions as { tec_topic?: string; tec_subject?: string } | { tec_topic?: string; tec_subject?: string }[]
+    const qu = Array.isArray(q) ? q[0] : q
+    if (!qu || !tecSubjects.has((qu.tec_subject ?? "").trim())) continue
+    const topic = qu.tec_topic?.trim() || "Sem tópico"
     const tax = row.error_taxonomy as string
     const m = errorByTopic.get(topic) ?? new Map()
     m.set(tax, (m.get(tax) ?? 0) + 1)
     errorByTopic.set(topic, m)
   }
+  return errorByTopic
+}
+
+export type ComputeBrainOptions = {
+  reportId?: string
+  reportStructured?: NotebookReportStructured | null
+  previousBrain?: SubjectBrainState | null
+  learningSignals?: LearningSignal[]
+}
+
+export async function computeSubjectBrainState(
+  userId: string,
+  subjectId: string,
+  options?: ComputeBrainOptions
+): Promise<SubjectBrainState> {
+  const [topicStats, subjectAttempts, errorByTopic, signals] = await Promise.all([
+    getTopicStatsForSubject(userId, subjectId),
+    fetchSubjectAttempts(userId, subjectId),
+    fetchTaxonomyBySubject(userId, subjectId),
+    options?.learningSignals
+      ? Promise.resolve(options.learningSignals)
+      : computeLearningSignals(userId, subjectId),
+  ])
+
+  const attemptsByTopicKey = new Map<string, AttemptRow[]>()
+  const displayLabelByKey = new Map<string, string>()
+
+  for (const a of subjectAttempts) {
+    const key = topicBrainKey(a.tec_topic)
+    if (!displayLabelByKey.has(key)) displayLabelByKey.set(key, a.tec_topic)
+    const list = attemptsByTopicKey.get(key) ?? []
+    list.push(a)
+    attemptsByTopicKey.set(key, list)
+  }
 
   const topic_map: Record<string, TopicBrainEntry> = {}
   const danger_topics: string[] = []
 
-  for (const t of topicStats) {
-    const dominio = dominioFromStats(t.correct, t.wrong)
-    const estabilidade = Math.min(
-      1,
-      t.correct + t.wrong >= 4 ? 0.5 + dominio * 0.5 : 0.35
-    )
-    const retencao = dominio * 0.6 + estabilidade * 0.4
+  const statsByKey = new Map(
+    topicStats.map((t) => [topicBrainKey(t.topic), t])
+  )
 
-    const taxMap = errorByTopic.get(t.topic)
-    let predominant_error: ErrorTaxonomy | undefined
-    if (taxMap?.size) {
-      predominant_error = [...taxMap.entries()].sort(
-        (a, b) => b[1] - a[1]
-      )[0]![0] as ErrorTaxonomy
-    }
+  const allKeys = new Set([
+    ...statsByKey.keys(),
+    ...attemptsByTopicKey.keys(),
+    ...[...errorByTopic.keys()].map(topicBrainKey),
+  ])
 
-    const status = statusFromMetrics(dominio, estabilidade, t.wrong)
-    topic_map[t.topic] = {
+  for (const key of allKeys) {
+    const stat = statsByKey.get(key)
+    const attempts = attemptsByTopicKey.get(key) ?? []
+    const display =
+      displayLabelByKey.get(key) ?? stat?.topic ?? key
+
+    const dominio = stat
+      ? dominioFromStats(stat.correct, stat.wrong)
+      : attempts.length
+        ? dominioFromStats(
+            attempts.filter((x) => x.is_correct).length,
+            attempts.filter((x) => !x.is_correct).length
+          )
+        : 0.5
+
+    const estabilidade =
+      attempts.length >= 2
+        ? estabilidadeFromAttempts(attempts)
+        : stat && stat.correct + stat.wrong >= 2
+          ? 0.35 + dominio * 0.25
+          : 0.3
+
+    const wrong = stat?.wrong ?? attempts.filter((x) => !x.is_correct).length
+    const status = statusFromMetrics(dominio, estabilidade, wrong)
+
+    topic_map[key] = {
+      label: display,
       status,
       dominio: Math.round(dominio * 100) / 100,
       estabilidade: Math.round(estabilidade * 100) / 100,
-      retencao: Math.round(retencao * 100) / 100,
-      predominant_error,
+      retencao: Math.round((dominio * 0.6 + estabilidade * 0.4) * 100) / 100,
     }
 
     if (status === "critico" || status === "ilusao_dominio") {
-      danger_topics.push(t.topic)
+      danger_topics.push(key)
     }
   }
 
-  const sorted = topicStats.sort((a, b) => {
-    const da = dominioFromStats(a.correct, a.wrong)
-    const db = dominioFromStats(b.correct, b.wrong)
-    return da - db
+  applyPredominantErrors(errorByTopic, topic_map)
+
+  const reportMerged = mergeReportIntoBrain({
+    topic_map,
+    danger_topics,
+    structured: options?.reportStructured,
   })
-  const weak = sorted.slice(0, 3).map((t) => dominioFromStats(t.correct, t.wrong))
-  const strong = sorted.slice(-3).map((t) => dominioFromStats(t.correct, t.wrong))
-  const trend =
+
+  applyLearningSignalsToBrain({ topic_map, danger_topics, signals })
+
+  const sorted = [...statsByKey.entries()].sort(
+    (a, b) => dominioFromStats(a[1].correct, a[1].wrong) - dominioFromStats(b[1].correct, b[1].wrong)
+  )
+  const weak = sorted.slice(0, 3).map(([, t]) => dominioFromStats(t.correct, t.wrong))
+  const strong = sorted.slice(-3).map(([, t]) => dominioFromStats(t.correct, t.wrong))
+  let trend: SubjectBrainState["trend"] =
     weak.length && strong.length && strong[strong.length - 1]! > weak[0]! + 0.15
       ? "melhorando"
       : weak[0]! < 0.4
         ? "piorando"
         : "estagnado"
 
+  const dominio_delta = computeDominioDelta(options?.previousBrain, topic_map)
+  if (Object.values(dominio_delta).some((d) => d > 0.08)) trend = "melhorando"
+  if (Object.values(dominio_delta).some((d) => d < -0.08)) trend = "piorando"
+
   const error_profile_by_topic: Record<string, ErrorTaxonomy> = {}
-  for (const [topic, entry] of Object.entries(topic_map)) {
+  for (const [key, entry] of Object.entries(topic_map)) {
     if (entry.predominant_error) {
-      error_profile_by_topic[topic] = entry.predominant_error
+      error_profile_by_topic[key] = entry.predominant_error
     }
   }
 
@@ -127,8 +264,94 @@ export async function computeSubjectBrainState(
     topic_map,
     error_profile_by_topic,
     danger_topics: [...new Set(danger_topics)].slice(0, 12),
-    trend: trend as SubjectBrainState["trend"],
-    last_report_id: reportId,
+    trend,
+    last_report_id: options?.reportId,
+    dominio_delta,
+    report_merged: reportMerged,
+    computed_at: new Date().toISOString(),
+  }
+}
+
+export type PersistBrainResult = {
+  state: SubjectBrainState
+  summaryMd: string
+  usedLlm: boolean
+  reportMerged: boolean
+}
+
+export async function persistSubjectBrain(params: {
+  userId: string
+  subjectId: string
+  reportId?: string
+  reportStructured?: NotebookReportStructured | null
+  skipLlm?: boolean
+}): Promise<PersistBrainResult> {
+  const previousBrain = await loadSubjectBrain(params.userId, params.subjectId)
+
+  const { data: subject } = await supabaseServer
+    .from("subjects")
+    .select("name")
+    .eq("id", params.subjectId)
+    .maybeSingle()
+
+  let structured = params.reportStructured
+  if (params.reportId && !structured) {
+    const { data: reportRow } = await supabaseServer
+      .from("subject_notebook_reports")
+      .select("structured")
+      .eq("id", params.reportId)
+      .maybeSingle()
+    structured = (reportRow?.structured as NotebookReportStructured) ?? null
+  }
+
+  const baseState = await computeSubjectBrainState(params.userId, params.subjectId, {
+    reportId: params.reportId,
+    reportStructured: structured,
+    previousBrain,
+  })
+
+  const context = await buildBrainContext(params.userId, params.subjectId)
+
+  const narrativeResult = params.skipLlm
+    ? { summaryMd: "", usedLlm: false, danger_topics_add: [] as string[] }
+    : await runBrainNarrativeAgent({
+        userId: params.userId,
+        subjectId: params.subjectId,
+        state: baseState,
+        context: context as unknown as Record<string, unknown>,
+      }).catch(() => ({
+        summaryMd: "",
+        usedLlm: false,
+        danger_topics_add: [] as string[],
+      }))
+
+  const { state, summaryMd } = mergeBrainNarrative(
+    baseState,
+    {
+      summary_md: narrativeResult.summaryMd,
+      trend: narrativeResult.trend,
+      danger_topics_add: narrativeResult.danger_topics_add,
+    },
+    subject?.name
+  )
+
+  await supabaseServer.from("subject_brain_state").upsert(
+    {
+      user_id: params.userId,
+      subject_id: params.subjectId,
+      state,
+      summary_md: summaryMd,
+      last_report_id: params.reportId ?? state.last_report_id ?? null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,subject_id" }
+  )
+
+  return {
+    state,
+    summaryMd,
+    usedLlm: narrativeResult.usedLlm ?? false,
+    reportMerged: Boolean(baseState.report_merged),
   }
 }
 
@@ -137,30 +360,22 @@ export async function ingestBrainFromReport(
   subjectId: string,
   reportId: string
 ) {
-  const state = await computeSubjectBrainState(userId, subjectId, reportId)
-  const context = await buildBrainContext(userId, subjectId)
-
-  const narrativeResult = await runBrainNarrativeAgent({
+  const result = await persistSubjectBrain({
     userId,
     subjectId,
-    state,
-    context: context as unknown as Record<string, unknown>,
-  }).catch(() => ({ summaryMd: "", trend: undefined }))
+    reportId,
+  })
+  return result.state
+}
 
-  const finalTrend =
-    (narrativeResult.trend as SubjectBrainState["trend"]) ?? state.trend
-
-  await supabaseServer.from("subject_brain_state").upsert(
-    {
-      user_id: userId,
-      subject_id: subjectId,
-      state: { ...state, trend: finalTrend },
-      summary_md: narrativeResult.summaryMd || null,
-      last_report_id: reportId,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,subject_id" }
-  )
-
-  return state
+export async function recomputeSubjectBrain(
+  userId: string,
+  subjectId: string,
+  options?: { skipLlm?: boolean }
+) {
+  return persistSubjectBrain({
+    userId,
+    subjectId,
+    skipLlm: options?.skipLlm,
+  })
 }

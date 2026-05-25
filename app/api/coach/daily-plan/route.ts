@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { generateDailyStudyPlan } from "@/lib/ai/execution-plan"
+import { planRowToDailyStudyPlan } from "@/lib/ai/execution-helpers"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function GET(req: Request) {
@@ -19,30 +20,39 @@ export async function GET(req: Request) {
 
   if (!data) return NextResponse.json({ plan: null })
 
-  const limits = (data.limits ?? {}) as Record<string, unknown>
+  let completed_block_keys: string[] = []
+  if (data.id) {
+    const { data: completions } = await supabaseServer
+      .from("plan_block_completions")
+      .select("block_key")
+      .eq("plan_id", data.id)
+    completed_block_keys = (completions ?? []).map((c) => c.block_key)
+  }
+
+  const plan = planRowToDailyStudyPlan(data)
   return NextResponse.json({
     plan: {
       ...data,
-      combined_notebook_id:
-        (limits.combined_notebook_id as string) ??
-        (data.blocks as { params?: { notebook_id?: string } }[])?.find(
-          (b) => b.params?.notebook_id
-        )?.params?.notebook_id ??
-        null,
+      ...plan,
+      plan_date: plan.date,
+      completed_block_keys,
     },
   })
 }
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, force } = body
+  const { user_id, force, pin, refresh_queue } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
   try {
-    const plan = await generateDailyStudyPlan(user_id, Boolean(force))
+    const plan = await generateDailyStudyPlan(user_id, Boolean(force), {
+      pin: pin === true ? true : pin === false ? false : undefined,
+      refreshQueue: Boolean(refresh_queue),
+    })
     return NextResponse.json({
       plan: {
         ...plan,

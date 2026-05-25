@@ -89,6 +89,8 @@ export type TopicBrainEntry = {
   estabilidade: number
   retencao: number
   predominant_error?: ErrorTaxonomy
+  /** Nome exibível do tópico (tec_topic original) */
+  label?: string
 }
 
 export type SubjectBrainState = {
@@ -97,16 +99,21 @@ export type SubjectBrainState = {
   danger_topics: string[]
   trend: "melhorando" | "piorando" | "estagnado" | "desconhecido"
   last_report_id?: string
+  dominio_delta?: Record<string, number>
+  report_merged?: boolean
+  computed_at?: string
 }
 
 export type StrategicQueueItem = {
   id: string
   subject_id: string
   topic_key: string
+  topic_label?: string
   priority_score: number
   incidence_weight: number
   gap_score: number
   retention_penalty: number
+  subject_priority?: number
   reason: string | null
   source: "sql" | "llm"
   computed_at: string
@@ -142,6 +149,8 @@ export type DailyStudyPlan = {
   narrative_summary?: string
   combined_notebook_id?: string | null
   combined_question_count?: number
+  user_pinned?: boolean
+  completed_block_keys?: string[]
 }
 
 export type NotebookReportStructured = {

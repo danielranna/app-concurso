@@ -1,7 +1,8 @@
 import { runAgent } from "../run-agent"
 
 const SYSTEM = `Você humaniza a fila estratégica de estudo. A ordenação numérica já está definida.
-Para cada item do top 10, escreva um "why" curto em português.
+Cada item tem topic_key (chave normalizada) e topic_label (nome exibido). Use topic_key no JSON.
+Para cada item do top 10, escreva um "why" curto em português (1-2 frases).
 Responda JSON: { "items": [{"topic_key":"","why":""}], "narrative": "" }`
 
 export async function runStrategyNarrativeAgent(params: {

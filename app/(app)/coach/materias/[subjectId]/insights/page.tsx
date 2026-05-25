@@ -58,6 +58,8 @@ export default function CoachInsightsPage() {
   const [loadingPriorities, setLoadingPriorities] = useState(false)
   const [brain, setBrain] = useState<SubjectBrainState | null>(null)
   const [brainSummary, setBrainSummary] = useState<string | null>(null)
+  const [brainLastReportId, setBrainLastReportId] = useState<string | null>(null)
+  const [recomputingBrain, setRecomputingBrain] = useState(false)
   const [queueItems, setQueueItems] = useState<QueueItem[]>([])
   const [loadingQueue, setLoadingQueue] = useState(false)
 
@@ -86,11 +88,13 @@ export default function CoachInsightsPage() {
         setReports(reps ?? [])
         setBrain(brainRes.state ?? null)
         setBrainSummary(brainRes.summary_md ?? null)
+        setBrainLastReportId(brainRes.last_report_id ?? null)
         setQueueItems(
           (queueRes.items ?? []).map(
             (i: {
               id: string
               topic_key: string
+              topic_label?: string
               priority_score: number
               incidence_weight?: number
               edital_weight?: number
@@ -100,6 +104,7 @@ export default function CoachInsightsPage() {
             }) => ({
               id: i.id,
               topic_key: i.topic_key,
+              topic_label: i.topic_label,
               priority_score: Number(i.priority_score),
               incidence_weight: i.incidence_weight,
               edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
@@ -140,6 +145,7 @@ export default function CoachInsightsPage() {
           (i: {
             id: string
             topic_key: string
+            topic_label?: string
             priority_score: number
             incidence_weight?: number
             edital_weight?: number
@@ -149,6 +155,7 @@ export default function CoachInsightsPage() {
           }) => ({
             id: i.id,
             topic_key: i.topic_key,
+            topic_label: i.topic_label,
             priority_score: Number(i.priority_score),
             incidence_weight: i.incidence_weight,
             edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
@@ -234,7 +241,7 @@ export default function CoachInsightsPage() {
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
-          Veredito de prioridades
+          Ações a partir da fila
         </button>
       </div>
 
@@ -262,17 +269,67 @@ export default function CoachInsightsPage() {
 
       {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-emerald-800">
-            Cérebro da matéria
-          </h3>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-800">
+              Cérebro da matéria
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {brainLastReportId && (
+                <Link
+                  href={`/coach/relatorios/${brainLastReportId}`}
+                  className="text-xs font-medium text-emerald-800 underline"
+                >
+                  Último relatório
+                </Link>
+              )}
+              <button
+                type="button"
+                disabled={recomputingBrain || !userId}
+                onClick={async () => {
+                  if (!userId) return
+                  setRecomputingBrain(true)
+                  try {
+                    const res = await fetch("/api/coach/brain/recompute", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        user_id: userId,
+                        subject_id: subjectId,
+                      }),
+                    })
+                    const data = await res.json()
+                    if (!res.ok) alert(data.error ?? "Erro")
+                    else {
+                      setBrain(data.state ?? null)
+                      setBrainSummary(data.summary_md ?? null)
+                    }
+                  } finally {
+                    setRecomputingBrain(false)
+                  }
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                {recomputingBrain ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
+                Atualizar cérebro
+              </button>
+            </div>
+          </div>
           {brainSummary && (
             <p className="mb-3 text-sm text-slate-700">{brainSummary}</p>
           )}
           <p className="mb-2 text-xs text-slate-500">
             Tendência: {brain.trend}
             {brain.danger_topics?.length
-              ? ` · Alerta: ${brain.danger_topics.slice(0, 3).join(", ")}`
+              ? ` · Alerta: ${brain.danger_topics
+                  .slice(0, 3)
+                  .map((k) => brain.topic_map[k]?.label ?? k)
+                  .join(", ")}`
               : ""}
+            {brain.report_merged && " · Sincronizado com relatório recente"}
           </p>
           <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-sm">
@@ -290,9 +347,23 @@ export default function CoachInsightsPage() {
                 {Object.entries(brain.topic_map)
                   .sort((a, b) => a[1].dominio - b[1].dominio)
                   .slice(0, 12)
-                  .map(([topic, entry]) => (
-                    <tr key={topic} className="border-t border-slate-100">
-                      <td className="px-3 py-2 font-medium">{topic}</td>
+                  .map(([topicKey, entry]) => (
+                    <tr key={topicKey} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium">
+                        {entry.label ?? topicKey}
+                        {brain.dominio_delta?.[topicKey] != null && (
+                          <span
+                            className={`ml-1 text-xs ${
+                              brain.dominio_delta[topicKey]! > 0
+                                ? "text-emerald-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            ({brain.dominio_delta[topicKey]! > 0 ? "+" : ""}
+                            {Math.round(brain.dominio_delta[topicKey]! * 100)}%)
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         {BRAIN_STATUS_LABELS[entry.status] ?? entry.status}
                       </td>
@@ -318,6 +389,9 @@ export default function CoachInsightsPage() {
 
       {priorities && (
         <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-violet-700">
+            Mesma ordem da fila estratégica acima
+          </p>
           <p className="text-sm text-slate-800">
             {priorities.narrative_summary}
           </p>
@@ -333,12 +407,39 @@ export default function CoachInsightsPage() {
               </li>
             ))}
           </ol>
+          {(priorities.executable_actions ?? []).length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {priorities.executable_actions!.map((action, i) => (
+                <li key={`${action.type}-${i}`}>
+                  {typeof action.params?.href === "string" ? (
+                    <Link
+                      href={action.params.href as string}
+                      className="inline-flex rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-medium text-violet-900 hover:bg-violet-50"
+                    >
+                      {action.label}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={creatingNb}
+                      onClick={() =>
+                        createRemediationNotebook(action.params, action.label)
+                      }
+                      className="inline-flex rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm font-medium text-violet-900 hover:bg-violet-50 disabled:opacity-50"
+                    >
+                      {action.label}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
       <section>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Prioridades (SQL)
+          Sinais de aprendizado
         </h3>
         {!signals.length ? (
           <p className="text-sm text-slate-500">

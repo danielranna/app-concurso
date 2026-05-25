@@ -29,5 +29,6 @@ export async function GET(req: Request) {
     state: (data?.state as SubjectBrainState) ?? null,
     summary_md: data?.summary_md,
     updated_at: data?.updated_at,
+    last_report_id: data?.last_report_id,
   })
 }

@@ -58,6 +58,9 @@ export default function NotebookReportDetail({
         <p className="mt-2 text-xs text-slate-500">
           {new Date(report.created_at).toLocaleString("pt-BR")}
           {nb?.question_count != null && ` · ${nb.question_count} questões`}
+          {s?.confidence_in_analysis && (
+            <> · Confiança: {s.confidence_in_analysis}</>
+          )}
         </p>
       </header>
 
@@ -178,10 +181,24 @@ export default function NotebookReportDetail({
             </Link>{" "}
             ou use o botão na matéria (Insights).
           </p>
-          <ul className="space-y-1 text-sm text-amber-900">
-            {s.executable_actions.map((a, i) => (
-              <li key={i}>• {a.label}</li>
-            ))}
+          <ul className="space-y-2 text-sm text-amber-900">
+            {s.executable_actions.map((a, i) => {
+              const href = a.params?.href as string | undefined
+              return (
+                <li key={i}>
+                  {href ? (
+                    <Link href={href} className="font-medium underline hover:text-amber-950">
+                      {a.label}
+                    </Link>
+                  ) : (
+                    <>• {a.label}</>
+                  )}
+                  {a.estimated_minutes != null && (
+                    <span className="text-amber-700"> (~{a.estimated_minutes} min)</span>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}

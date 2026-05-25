@@ -1,86 +1,29 @@
 import { supabaseServer } from "../supabase-server"
-import type { NotebookReportStructured } from "../coach-types"
-import { aiComplete } from "./client"
-import { getUserAiCredentials } from "./user-credentials"
-import { generateRemediationDrafts } from "./remediation-drafts"
+import type { NotebookReportStructured, PerQuestionError } from "../coach-types"
+import { classifyWrongAttempts } from "./error-classifier"
+import { runReportAgent } from "./agents/report"
+import { loadSubjectBrain } from "./context-builder"
+import { getReportPreferences } from "./context-builder"
+import { computeLearningSignals } from "../learning-signals"
+import {
+  buildDeterministicMetacognition,
+  buildDeterministicTimeInsights,
+  buildRuleBasedExecutableActions,
+  countReportLlmRunsToday,
+} from "./report-helpers"
+import {
+  buildIncidenceTopicIndex,
+  getActiveExamTargetId,
+  getEditalWeightForSubject,
+  percentToIncidenceWeight,
+} from "../strategic-weights"
+import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
 ) {
   if (!q) return null
   return Array.isArray(q) ? q[0] ?? null : q
-}
-
-const NOTEBOOK_REPORT_SYSTEM = `Você é o Agente Relatório de Caderno. Analisa desempenho após conclusão de um caderno de questões.
-Priorize: (1) tópicos fracos, (2) padrões metacognitivos (6 categorias), (3) tempo por tópico e por questão,
-(4) reincidência de erros, (5) consolidação. Cite tec_topic exatamente como no JSON.
-Use APENAS os dados do JSON; não invente estatísticas. Responda em português (BR).`
-
-export function buildRuleBasedReport(
-  snapshot: Record<string, unknown>,
-  useLlm: boolean
-): NotebookReportStructured {
-  const byTopic = (snapshot.by_topic as { topic: string; wrong: number; correct: number }[]) ?? []
-  const weak = [...byTopic].sort((a, b) => b.wrong - a.wrong).slice(0, 5)
-  const strong = [...byTopic].filter((t) => t.wrong === 0 && t.correct > 0).slice(0, 3)
-  const recurring = (snapshot.recurring_failures as { tec_id: number; attempts: number }[]) ?? []
-
-  return {
-    headline: weak[0]
-      ? `Foco em ${weak[0].topic}: ${weak[0].wrong} erros registrados neste caderno.`
-      : "Caderno concluído — bom desempenho geral.",
-    strengths: strong.map((t) => ({
-      topic: t.topic,
-      evidence: `${t.correct} acertos sem erros no período analisado.`,
-    })),
-    weaknesses: weak
-      .filter((t) => t.wrong > 0)
-      .map((t) => ({
-        topic: t.topic,
-        evidence: `${t.wrong} erros`,
-        severity: t.wrong >= 5 ? "alta" : t.wrong >= 2 ? "media" : "baixa",
-      })),
-    time_insights: [],
-    metacognition_patterns: (
-      (snapshot.outcome_breakdown as { outcome: string; count: number }[]) ?? []
-    )
-      .filter((o) => o.count > 0)
-      .map((o) => ({
-        pattern: o.outcome,
-        count: o.count,
-        advice: "Revise com caderno de reforço ou mapa de erros.",
-      })),
-    recurring_failures: recurring.map((r) => ({
-      tec_id: r.tec_id,
-      attempts: r.attempts,
-      advice: "Incluir no caderno de reforço.",
-    })),
-    consolidated_topics: strong.map((t) => t.topic),
-    actions_next_7_days: [
-      {
-        action: weak[0] ? `Reforçar ${weak[0].topic}` : "Manter ritmo de estudo",
-        priority: 1,
-        minutes_estimate: 45,
-      },
-    ],
-    executable_actions: weak[0]
-      ? [
-          {
-            type: "create_remediation_notebook",
-            label: `Criar caderno de reforço (${weak[0].topic})`,
-            params: {
-              source_notebook_id: snapshot.notebook_id,
-              tec_topics: [weak[0].topic],
-              min_wrong_attempts: 1,
-              suggested_name: `Reforço - ${weak[0].topic}`,
-            },
-            priority: 1,
-            estimated_minutes: 45,
-          },
-        ]
-      : [],
-    confidence_in_analysis: useLlm ? "media" : "alta",
-  }
 }
 
 export async function buildNotebookReportSnapshot(
@@ -100,7 +43,7 @@ export async function buildNotebookReportSnapshot(
     .from("question_attempts")
     .select(
       `
-      question_id, is_correct, duration_ms, outcome_category, confidence_level, created_at,
+      question_id, is_correct, duration_ms, outcome_category, confidence_level, created_at, error_taxonomy,
       questions ( tec_id, tec_subject, tec_topic, statement )
     `
     )
@@ -110,7 +53,9 @@ export async function buildNotebookReportSnapshot(
 
   type AttemptRow = NonNullable<typeof attempts>[number]
   const byQuestion = new Map<string, AttemptRow[]>()
+  const questionIds = new Set<string>()
   for (const a of attempts ?? []) {
+    questionIds.add(a.question_id)
     const list = byQuestion.get(a.question_id) ?? []
     list.push(a)
     byQuestion.set(a.question_id, list)
@@ -169,13 +114,21 @@ export async function buildNotebookReportSnapshot(
     subjectName = sub?.name ?? ""
   }
 
-  const { data: notes } = await supabaseServer
-    .from("question_notes")
-    .select("content, questions!inner(tec_id)")
-    .eq("user_id", userId)
-    .limit(10)
+  const qIds = [...questionIds]
+  let notes_sample: { content: string }[] = []
+  if (qIds.length) {
+    const { data: notes } = await supabaseServer
+      .from("question_notes")
+      .select("content, question_id")
+      .eq("user_id", userId)
+      .in("question_id", qIds.slice(0, 50))
+      .limit(10)
+    notes_sample = (notes ?? []).map((n) => ({
+      content: String(n.content ?? "").slice(0, 200),
+    }))
+  }
 
-  return {
+  const base = {
     notebook_id: notebookId,
     notebook_name: nb.name,
     subject_id: nb.subject_id,
@@ -197,15 +150,172 @@ export async function buildNotebookReportSnapshot(
     })),
     recurring_failures: recurring.sort((a, b) => b.attempts - a.attempts).slice(0, 15),
     multi_attempt_questions: timelines.slice(0, 15),
-    notes_sample: (notes ?? []).map((n) => ({
-      content: String(n.content ?? "").slice(0, 200),
+    notes_sample,
+  }
+
+  return enrichNotebookSnapshot(userId, nb.subject_id, base)
+}
+
+async function enrichNotebookSnapshot(
+  userId: string,
+  subjectId: string | null,
+  base: Record<string, unknown>
+) {
+  const enriched = { ...base } as Record<string, unknown>
+
+  if (subjectId) {
+    const brain = await loadSubjectBrain(userId, subjectId)
+    enriched.subject_brain = brain
+
+    const signals = await computeLearningSignals(userId, subjectId)
+    enriched.learning_signals = signals.slice(0, 12).map((s) => ({
+      type: s.signal_type,
+      entity: s.entity_id,
+      score: s.score,
+    }))
+
+    const { data: priorReport } = await supabaseServer
+      .from("subject_notebook_reports")
+      .select("structured, created_at")
+      .eq("user_id", userId)
+      .eq("subject_id", subjectId)
+      .neq("notebook_id", base.notebook_id as string)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const priorStructured = priorReport?.structured as
+      | { headline?: string }
+      | undefined
+    enriched.prior_report_headline = priorStructured?.headline ?? null
+
+    try {
+      const examId = await getActiveExamTargetId(userId)
+      if (examId) {
+        const labels = await resolveSubjectLabels(userId, examId, subjectId).catch(
+          () => [] as string[]
+        )
+        const editalWeight = await getEditalWeightForSubject(userId, examId, subjectId)
+        enriched.edital_weight = editalWeight
+
+        if (labels.length) {
+          const rows = await fetchIncidenceRows({
+            userId,
+            examTargetId: examId,
+            subjectLabels: labels,
+          })
+          const topicIndex = buildIncidenceTopicIndex(
+            (rows ?? []).map((r) => ({
+              topic_name: String(r.topic_name),
+              percent: Number(r.percent),
+              is_subtopic: Boolean(r.is_subtopic),
+            }))
+          )
+          enriched.incidence_top_topics = [...topicIndex.entries()]
+            .map(([name, entry]) => ({
+              topic: name,
+              percent: entry.percent,
+              weight: percentToIncidenceWeight(entry.percent),
+            }))
+            .sort((a, b) => b.weight - a.weight)
+            .slice(0, 10)
+        }
+      }
+    } catch {
+      enriched.incidence_top_topics = []
+    }
+  }
+
+  return enriched
+}
+
+export function buildRuleBasedReport(
+  snapshot: Record<string, unknown>,
+  options: {
+    useLlm: boolean
+    perQuestionErrors: PerQuestionError[]
+    learningSignals?: { type: string; entity: string; score: number }[]
+  }
+): NotebookReportStructured {
+  const byTopic =
+    (snapshot.by_topic as {
+      topic: string
+      wrong: number
+      correct: number
+      avg_duration_ms?: number
+    }[]) ?? []
+  const weak = [...byTopic].sort((a, b) => b.wrong - a.wrong).slice(0, 5)
+  const strong = [...byTopic].filter((t) => t.wrong === 0 && t.correct > 0).slice(0, 3)
+  const recurring = (snapshot.recurring_failures as { tec_id: number; attempts: number }[]) ?? []
+
+  const signals = (options.learningSignals ?? []).map((s) => ({
+    signal_type: s.type as import("../coach-types").LearningSignalType,
+    entity_type: "tec_topic" as const,
+    entity_id: s.entity,
+    score: s.score,
+    metadata: {},
+  }))
+
+  const subjectId = snapshot.subject_id as string | null
+
+  const topError = options.perQuestionErrors[0]
+  const headline = topError?.tec_topic
+    ? `Foco em ${topError.tec_topic}: erro ${topError.error_taxonomy ?? "classificado"} (prioridade ${Math.round(topError.priority_score ?? 0)}).`
+    : weak[0]
+      ? `Foco em ${weak[0].topic}: ${weak[0].wrong} erros neste caderno.`
+      : "Caderno concluído — bom desempenho geral."
+
+  return {
+    headline,
+    strengths: strong.map((t) => ({
+      topic: t.topic,
+      evidence: `${t.correct} acertos sem erros no período analisado.`,
     })),
+    weaknesses: weak
+      .filter((t) => t.wrong > 0)
+      .map((t) => ({
+        topic: t.topic,
+        evidence: `${t.wrong} erros`,
+        severity: t.wrong >= 5 ? "alta" : t.wrong >= 2 ? "media" : "baixa",
+      })),
+    time_insights: buildDeterministicTimeInsights(byTopic),
+    metacognition_patterns: buildDeterministicMetacognition(snapshot, signals),
+    recurring_failures: recurring.map((r) => ({
+      tec_id: r.tec_id,
+      attempts: r.attempts,
+      advice: "Incluir no caderno de reforço.",
+    })),
+    consolidated_topics: strong.map((t) => t.topic),
+    actions_next_7_days: [
+      {
+        action: weak[0] ? `Reforçar ${weak[0].topic}` : "Manter ritmo de estudo",
+        priority: 1,
+        minutes_estimate: 45,
+      },
+      ...(weak[1]
+        ? [
+            {
+              action: `Revisar ${weak[1].topic}`,
+              priority: 2,
+              minutes_estimate: 30,
+            },
+          ]
+        : []),
+    ],
+    executable_actions: buildRuleBasedExecutableActions(
+      snapshot,
+      options.perQuestionErrors,
+      subjectId
+    ),
+    per_question_errors: options.perQuestionErrors,
+    confidence_in_analysis: options.useLlm ? "media" : "alta",
   }
 }
 
 export async function generateNotebookReport(
   notebookId: string,
-  userId: string
+  userId: string,
+  options?: { force?: boolean }
 ): Promise<{
   structured: NotebookReportStructured
   summaryMd: string
@@ -214,92 +324,83 @@ export async function generateNotebookReport(
   tokensIn: number
   tokensOut: number
   costUsd: number
+  perQuestionCount: number
+  usedLlm: boolean
 }> {
+  const { data: nb } = await supabaseServer
+    .from("notebooks")
+    .select("subject_id, name")
+    .eq("id", notebookId)
+    .single()
+
+  const subjectId = nb?.subject_id ?? null
+  const prefs = await getReportPreferences(userId)
+
+  const perQuestionErrors = await classifyWrongAttempts(
+    userId,
+    notebookId,
+    subjectId,
+    { explain: prefs.explain_wrong }
+  )
+
   const snapshot = await buildNotebookReportSnapshot(notebookId, userId)
-  const credentials = await getUserAiCredentials(userId)
+  const learningSignals = (snapshot.learning_signals ?? []) as {
+    type: string
+    entity: string
+    score: number
+  }[]
 
-  let structured = buildRuleBasedReport(snapshot, !!credentials)
+  const ruleBased = buildRuleBasedReport(snapshot, {
+    useLlm: true,
+    perQuestionErrors,
+    learningSignals,
+  })
 
-  let summaryMd = `## ${snapshot.notebook_name}\n\n${structured.headline}\n\n`
-  let modelUsed = "rule-based"
-  let tokensIn = 0
-  let tokensOut = 0
-  let costUsd = 0
+  const brain = subjectId
+    ? ((snapshot.subject_brain as Record<string, unknown> | null) ?? null)
+    : null
 
-  if (credentials) {
-    try {
-      const jsonResult = await aiComplete(
-        {
-          jsonMode: true,
-          maxTokens: 2500,
-          messages: [
-            { role: "system", content: NOTEBOOK_REPORT_SYSTEM },
-            {
-              role: "user",
-              content: `Gere análise JSON do caderno:\n${JSON.stringify(snapshot)}`,
-            },
-          ],
-        },
-        credentials
-      )
-      const parsed = JSON.parse(jsonResult.text) as NotebookReportStructured
-      if (parsed.headline) structured = parsed
-      modelUsed = jsonResult.model
-      tokensIn = jsonResult.tokensIn
-      tokensOut = jsonResult.tokensOut
-      costUsd = jsonResult.costUsdEstimate
+  const reportsToday = await countReportLlmRunsToday(userId)
+  const skipLlm = reportsToday >= prefs.max_llm_explanations_per_day
 
-      const mdResult = await aiComplete(
-        {
-          maxTokens: 1500,
-          messages: [
-            {
-              role: "system",
-              content:
-                "Escreva relatório em markdown (600-900 palavras) em português BR com seções: Resumo, Pontos fortes, Pontos fracos, Tempo, Plano 7 dias.",
-            },
-            {
-              role: "user",
-              content: JSON.stringify(structured),
-            },
-          ],
-        },
-        credentials
-      )
-      if (mdResult.text) summaryMd = mdResult.text
-      tokensIn += mdResult.tokensIn
-      tokensOut += mdResult.tokensOut
-      costUsd += mdResult.costUsdEstimate
-    } catch {
-      summaryMd += structured.weaknesses
-        .map((w) => `- **${w.topic}**: ${w.evidence}`)
-        .join("\n")
-    }
-  } else {
-    summaryMd += structured.weaknesses
-      .map((w) => `- **${w.topic}**: ${w.evidence}`)
-      .join("\n")
-  }
+  const result = await runReportAgent({
+    userId,
+    subjectId,
+    snapshot,
+    brain,
+    perQuestionErrors,
+    ruleBased,
+    skipLlm,
+    notebookName: String(snapshot.notebook_name ?? nb?.name ?? "Caderno"),
+  })
 
   return {
-    structured,
-    summaryMd,
+    structured: result.structured,
+    summaryMd: result.summaryMd,
     snapshot: snapshot as Record<string, unknown>,
-    modelUsed,
-    tokensIn,
-    tokensOut,
-    costUsd,
+    modelUsed: result.modelUsed,
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
+    costUsd: result.costUsd,
+    perQuestionCount: perQuestionErrors.length,
+    usedLlm: result.usedLlm,
   }
 }
 
-export async function enqueueNotebookReport(notebookId: string, userId: string) {
+export async function enqueueNotebookReport(
+  notebookId: string,
+  userId: string,
+  options?: { force?: boolean }
+) {
   const { data: existing } = await supabaseServer
     .from("subject_notebook_reports")
     .select("id")
     .eq("notebook_id", notebookId)
     .maybeSingle()
 
-  if (existing) return { skipped: true, reason: "already_exists" }
+  if (existing && !options?.force) {
+    return { skipped: true, reason: "already_exists", report_id: existing.id }
+  }
 
   const { data: nb } = await supabaseServer
     .from("notebooks")
@@ -310,16 +411,9 @@ export async function enqueueNotebookReport(notebookId: string, userId: string) 
   if (!nb?.completed_at) return { skipped: true, reason: "not_completed" }
 
   const { enqueueNotebookPipeline } = await import("./jobs/queue")
-  const { runJobWorker } = await import("./jobs/worker")
+  await enqueueNotebookPipeline(userId, notebookId, nb.subject_id, {
+    force: options?.force,
+  })
 
-  await enqueueNotebookPipeline(userId, notebookId, nb.subject_id)
-
-  const allResults: { id: string; status: string; error?: string }[] = []
-  for (let round = 0; round < 12; round++) {
-    const batch = await runJobWorker(3)
-    allResults.push(...batch)
-    if (!batch.length) break
-  }
-
-  return { skipped: false, jobs: allResults }
+  return { skipped: false, queued: true }
 }

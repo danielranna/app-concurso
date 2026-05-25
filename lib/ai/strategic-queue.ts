@@ -1,4 +1,5 @@
 import { supabaseServer } from "../supabase-server"
+import { computeLearningSignals } from "../learning-signals"
 import { loadSubjectBrain } from "./context-builder"
 import { getTopicStatsForSubject } from "../learning-signals"
 import { buildIncidencePayloadForExam } from "../coach-documents"
@@ -14,13 +15,38 @@ import {
   matchTopicToIncidence,
   percentToIncidenceWeight,
 } from "../strategic-weights"
+import { topicBrainKey } from "./brain-helpers"
 import { runStrategyNarrativeAgent } from "./agents/strategy"
+import {
+  applyLearningSignalsToScore,
+  computeSubjectPriorityAggregate,
+  findBrainEntryForTopic,
+  formatHumanPriorityReason,
+  mergeReasonWithLlm,
+  resolveLlmWhyForRow,
+  shouldUseStrategyLlm,
+  type StrategicQueueRow,
+} from "./strategy-helpers"
+
+export type RecomputeQueueResult = {
+  rows: StrategicQueueRow[]
+  subject_priority: number
+  llm_used: boolean
+  narrative?: string
+  recent_boost_count: number
+  top_topic?: string
+  top_topic_label?: string
+}
 
 export async function recomputeStrategicQueue(
   userId: string,
   subjectId: string,
-  options?: { withLlmNarrative?: boolean; recentWrongTopics?: string[] }
-) {
+  options?: {
+    withLlmNarrative?: boolean
+    recentWrongTopics?: string[]
+    autoLlm?: boolean
+  }
+): Promise<RecomputeQueueResult> {
   const { data: subject } = await supabaseServer
     .from("subjects")
     .select("name")
@@ -29,6 +55,7 @@ export async function recomputeStrategicQueue(
 
   const topicStats = await getTopicStatsForSubject(userId, subjectId)
   const brain = await loadSubjectBrain(userId, subjectId)
+  const learningSignals = await computeLearningSignals(userId, subjectId)
 
   const examId = await getActiveExamTargetId(userId)
   const editalWeight = examId
@@ -115,62 +142,64 @@ export async function recomputeStrategicQueue(
   }
 
   const recentWrong = new Set(
-    (options?.recentWrongTopics ?? []).map((t) => normLabel(t))
+    (options?.recentWrongTopics ?? []).map((t) => topicBrainKey(t))
   )
 
   const topicKeys = new Map<
     string,
-    { wrong: number; correct: number; fromIncidence: boolean }
+    { displayLabel: string; wrong: number; correct: number; fromIncidence: boolean }
   >()
 
   for (const t of topicStats) {
-    topicKeys.set(t.topic, {
-      wrong: t.wrong,
-      correct: t.correct,
-      fromIncidence: false,
+    const key = topicBrainKey(t.topic)
+    const existing = topicKeys.get(key)
+    topicKeys.set(key, {
+      displayLabel: existing?.displayLabel ?? t.topic,
+      wrong: (existing?.wrong ?? 0) + t.wrong,
+      correct: (existing?.correct ?? 0) + t.correct,
+      fromIncidence: existing?.fromIncidence ?? false,
     })
   }
 
   for (const [name] of topicIndex) {
-    const existing = topicKeys.get(name)
+    const key = topicBrainKey(name)
+    const existing = topicKeys.get(key)
     if (existing) {
       existing.fromIncidence = true
     } else {
-      topicKeys.set(name, { wrong: 0, correct: 0, fromIncidence: true })
+      topicKeys.set(key, {
+        displayLabel: name,
+        wrong: 0,
+        correct: 0,
+        fromIncidence: true,
+      })
     }
   }
 
-  const rows: {
-    user_id: string
-    subject_id: string
-    topic_key: string
-    priority_score: number
-    incidence_weight: number
-    edital_weight: number
-    gap_score: number
-    retention_penalty: number
-    reason: string
-    source: string
-    computed_at: string
-  }[] = []
+  const rows: StrategicQueueRow[] = []
+  let recentBoostCount = 0
 
-  for (const [topic, t] of topicKeys) {
-    const dominio = t.correct + t.wrong > 0 ? t.correct / (t.correct + t.wrong) : 0.5
-    const brainEntry =
-      brain?.topic_map?.[topic] ??
-      Object.entries(brain?.topic_map ?? {}).find(
-        ([k]) => normLabel(k) === normLabel(topic)
-      )?.[1]
+  for (const [topicNorm, t] of topicKeys) {
+    const topicLabel = t.displayLabel
+    const dominio =
+      t.correct + t.wrong > 0 ? t.correct / (t.correct + t.wrong) : 0.5
+    const brainEntry = findBrainEntryForTopic(brain, topicLabel, topicNorm)
     const gap_score = brainEntry ? 1 - brainEntry.dominio : 1 - dominio
     const estabilidade = brainEntry?.estabilidade ?? 0.5
     const retention_penalty =
       estabilidade < 0.4 ? 1.4 : estabilidade < 0.6 ? 1.15 : 1
 
-    const match = matchTopicToIncidence(topic, topicIndex)
+    const match = matchTopicToIncidence(topicLabel, topicIndex)
     let incidence_weight =
       match.weight > 1 || match.matchedTopic
         ? match.weight
-        : incidenceByExactKey.get(topic) ?? 1
+        : incidenceByExactKey.get(topicLabel) ??
+          incidenceByExactKey.get(
+            [...incidenceByExactKey.keys()].find(
+              (k) => normLabel(k) === topicNorm
+            ) ?? ""
+          ) ??
+          1
 
     let priority_score = computeTopicPriorityScore({
       editalWeight,
@@ -180,34 +209,57 @@ export async function recomputeStrategicQueue(
       wrongCount: t.wrong,
     })
 
-    if (recentWrong.has(normLabel(topic))) {
+    priority_score = applyLearningSignalsToScore(
+      priority_score,
+      topicNorm,
+      learningSignals
+    )
+
+    const recentBoost = recentWrong.has(topicNorm)
+    if (recentBoost) {
       priority_score = Math.round(priority_score * 1.2 * 1000) / 1000
+      recentBoostCount++
     }
 
     if (priority_score < 0.15 && dominio > 0.85) continue
 
+    const sqlReason = formatPriorityReason({
+      editalWeight,
+      incidenceWeight: incidence_weight,
+      gapScore: gap_score,
+      retentionPenalty: retention_penalty,
+      wrongCount: t.wrong,
+    })
+
+    const humanReason = formatHumanPriorityReason({
+      editalWeight,
+      incidenceWeight: incidence_weight,
+      gapScore: gap_score,
+      retentionPenalty: retention_penalty,
+      wrongCount: t.wrong,
+      recentBoost,
+      topicLabel,
+    })
+
     rows.push({
       user_id: userId,
       subject_id: subjectId,
-      topic_key: topic,
+      topic_key: topicNorm,
+      topic_label: topicLabel,
       priority_score,
       incidence_weight,
       edital_weight: editalWeight,
       gap_score: Math.round(gap_score * 100) / 100,
       retention_penalty,
-      reason: formatPriorityReason({
-        editalWeight,
-        incidenceWeight: incidence_weight,
-        gapScore: gap_score,
-        retentionPenalty: retention_penalty,
-        wrongCount: t.wrong,
-      }),
+      reason: mergeReasonWithLlm(sqlReason, humanReason),
       source: "sql",
       computed_at: new Date().toISOString(),
+      recent_boost: recentBoost,
     })
   }
 
   rows.sort((a, b) => b.priority_score - a.priority_score)
+  const subject_priority = computeSubjectPriorityAggregate(rows)
 
   await supabaseServer
     .from("strategic_queue_items")
@@ -215,52 +267,107 @@ export async function recomputeStrategicQueue(
     .eq("user_id", userId)
     .eq("subject_id", subjectId)
 
-  if (rows.length) {
+  const toInsert = rows.slice(0, 40).map((r) => ({
+    ...r,
+    subject_priority,
+  }))
+
+  if (toInsert.length) {
     const { error } = await supabaseServer
       .from("strategic_queue_items")
-      .insert(rows.slice(0, 40))
+      .insert(toInsert)
     if (error) {
-      const withoutEdital = rows.slice(0, 40).map(
-        ({ edital_weight: _e, ...rest }) => rest
+      const fallback = toInsert.map(
+        ({
+          topic_label: _tl,
+          subject_priority: _sp,
+          recent_boost: _rb,
+          edital_weight: _e,
+          ...rest
+        }) => rest
       )
       const retry = await supabaseServer
         .from("strategic_queue_items")
-        .insert(withoutEdital)
+        .insert(fallback)
       if (retry.error) throw new Error(retry.error.message)
     }
   }
 
-  if (options?.withLlmNarrative && rows.length) {
-    const narrative = await runStrategyNarrativeAgent({
+  let llm_used = false
+  let narrative: string | undefined
+
+  const wantLlm =
+    options?.withLlmNarrative === true ||
+    (options?.autoLlm !== false && options?.withLlmNarrative !== false && (await shouldUseStrategyLlm(userId)))
+
+  if (wantLlm && rows.length) {
+    const narrativeResult = await runStrategyNarrativeAgent({
       userId,
       subjectId,
-      queue: rows.slice(0, 10),
+      queue: rows.slice(0, 10).map((r) => ({
+        topic_key: r.topic_key,
+        topic_label: r.topic_label,
+        priority_score: r.priority_score,
+        reason: r.reason,
+      })),
     })
-    for (const [topic_key, why] of Object.entries(narrative.whys)) {
+    narrative = narrativeResult.narrative || undefined
+    llm_used = Object.keys(narrativeResult.whys).length > 0 || Boolean(narrative)
+
+    for (const row of rows.slice(0, 10)) {
+      const llmWhy = resolveLlmWhyForRow(
+        narrativeResult.whys,
+        row.topic_key,
+        row.topic_label
+      )
+      if (!llmWhy) continue
+      const merged = mergeReasonWithLlm(row.reason, row.reason, llmWhy)
       await supabaseServer
         .from("strategic_queue_items")
-        .update({ reason: why, source: "llm" })
+        .update({ reason: merged, source: "llm" })
         .eq("user_id", userId)
         .eq("subject_id", subjectId)
-        .eq("topic_key", topic_key)
+        .eq("topic_key", row.topic_key)
+      row.reason = merged
+      row.source = "llm"
     }
   }
 
-  return rows
+  const top = rows[0]
+  return {
+    rows,
+    subject_priority,
+    llm_used,
+    narrative,
+    recent_boost_count: recentBoostCount,
+    top_topic: top?.topic_key,
+    top_topic_label: top?.topic_label,
+  }
 }
 
-export async function recomputeAllSubjectsQueue(userId: string) {
+export async function recomputeAllSubjectsQueue(
+  userId: string,
+  options?: {
+    withLlmNarrative?: boolean
+    excludeSubjectId?: string
+    autoLlm?: boolean
+  }
+) {
   const { data: subjects } = await supabaseServer
     .from("subjects")
     .select("id")
     .eq("user_id", userId)
 
-  const all = []
+  const results: RecomputeQueueResult[] = []
   for (const s of subjects ?? []) {
-    const rows = await recomputeStrategicQueue(userId, s.id)
-    all.push(...rows)
+    if (options?.excludeSubjectId && s.id === options.excludeSubjectId) continue
+    const result = await recomputeStrategicQueue(userId, s.id, {
+      withLlmNarrative: options?.withLlmNarrative,
+      autoLlm: options?.autoLlm ?? false,
+    })
+    results.push(result)
   }
-  return all
+  return results
 }
 
 export async function syncEditalWeightsToQueue(
@@ -290,6 +397,6 @@ export async function syncEditalWeightsToQueue(
     }
   }
   for (const subjectId of subjectIds) {
-    await recomputeStrategicQueue(userId, subjectId)
+    await recomputeStrategicQueue(userId, subjectId, { autoLlm: false })
   }
 }

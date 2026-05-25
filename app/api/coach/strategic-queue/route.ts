@@ -38,16 +38,28 @@ export async function POST(req: Request) {
 
   try {
     if (all_subjects) {
-      const rows = await recomputeAllSubjectsQueue(user_id)
-      return NextResponse.json({ recomputed: rows.length })
+      const results = await recomputeAllSubjectsQueue(user_id, {
+        withLlmNarrative: Boolean(body.with_llm),
+      })
+      return NextResponse.json({
+        recomputed: results.reduce((n, r) => n + r.rows.length, 0),
+        subjects: results.length,
+        llm_used_any: results.some((r) => r.llm_used),
+      })
     }
     if (!subject_id) {
       return NextResponse.json({ error: "subject_id obrigatório" }, { status: 400 })
     }
-    const rows = await recomputeStrategicQueue(user_id, subject_id, {
+    const result = await recomputeStrategicQueue(user_id, subject_id, {
       withLlmNarrative: Boolean(body.with_llm),
+      autoLlm: Boolean(body.with_llm) ? false : undefined,
     })
-    return NextResponse.json({ items: rows })
+    return NextResponse.json({
+      items: result.rows,
+      subject_priority: result.subject_priority,
+      llm_used: result.llm_used,
+      narrative: result.narrative,
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })

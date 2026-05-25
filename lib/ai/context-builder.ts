@@ -1,4 +1,5 @@
 import { supabaseServer } from "../supabase-server"
+import { buildSubjectPriorityMap } from "./strategy-helpers"
 import type { SubjectBrainState } from "../coach-types"
 import { buildNotebookReportSnapshot } from "./notebook-report"
 import { getTopicStatsForSubject } from "../learning-signals"
@@ -153,13 +154,33 @@ export async function buildExecutionContext(userId: string) {
       .filter(Boolean)
   )
 
+  let completed_block_keys: string[] = []
+  if (existingPlan?.id) {
+    const { data: completions } = await supabaseServer
+      .from("plan_block_completions")
+      .select("block_key")
+      .eq("plan_id", existingPlan.id)
+
+    completed_block_keys = (completions ?? []).map((c) => c.block_key)
+  }
+
+  const queueRows = queue ?? []
+  const subject_priority_map = buildSubjectPriorityMap(
+    queueRows.map((q) => ({
+      subject_id: q.subject_id,
+      priority_score: Number(q.priority_score),
+    }))
+  )
+
   return {
     prefs,
     today,
     existing_plan: existingPlan,
-    queue: queue ?? [],
+    queue: queueRows,
+    subject_priority_map,
     subjects: subjects ?? [],
     flashcards_due: dueCards ?? 0,
     yesterday_subject_ids: [...yesterdaySubjects],
+    completed_block_keys,
   }
 }

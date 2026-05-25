@@ -25,6 +25,8 @@ export default function CoachReportDetailPage() {
     } | null
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [regenerating, setRegenerating] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -32,6 +34,7 @@ export default function CoachReportDetailPage() {
         router.push("/login")
         return
       }
+      setUserId(user.id)
       const res = await fetch(
         `/api/coach/reports/${id}?user_id=${user.id}`
       )
@@ -54,7 +57,38 @@ export default function CoachReportDetailPage() {
     return <p className="text-sm text-slate-500">Carregando relatório…</p>
   }
 
+  async function regenerate() {
+    if (!userId) return
+    setRegenerating(true)
+    try {
+      const res = await fetch(`/api/coach/reports/${id}/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const data = await res.json()
+      if (!res.ok) alert(data.error ?? "Erro ao regenerar")
+      else {
+        const r = await fetch(`/api/coach/reports/${id}?user_id=${userId}`)
+        const refreshed = await r.json()
+        if (r.ok) setReport(refreshed)
+      }
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
   return (
-    <NotebookReportDetail report={report} backHref="/coach" />
+    <div className="space-y-4">
+      <button
+        type="button"
+        onClick={regenerate}
+        disabled={regenerating}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+      >
+        {regenerating ? "Regenerando…" : "Regenerar relatório"}
+      </button>
+      <NotebookReportDetail report={report} backHref="/coach" />
+    </div>
   )
 }

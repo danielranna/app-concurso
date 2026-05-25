@@ -1,8 +1,9 @@
 import { supabaseServer } from "../../supabase-server"
 import type { NotebookReportStructured } from "../../coach-types"
-import { buildRuleBasedReport, generateNotebookReport } from "../notebook-report"
+import { generateNotebookReport } from "../notebook-report"
 import { classifyWrongAttempts } from "../error-classifier"
-import { ingestBrainFromReport } from "../subject-brain"
+import { persistReportExecutableActions } from "../report-action-drafts"
+import { persistSubjectBrain } from "../subject-brain"
 import { recomputeStrategicQueue } from "../strategic-queue"
 import { generateDailyStudyPlan } from "../execution-plan"
 import { ingestDocumentChunks } from "../document-rag"
@@ -22,18 +23,27 @@ export async function processJob(job: {
     switch (job.job_type) {
       case "notebook_report_aggregate": {
         const notebookId = payload.notebook_id as string
+        const force = Boolean(payload.force)
+
         const { data: existing } = await supabaseServer
           .from("subject_notebook_reports")
           .select("id")
           .eq("notebook_id", notebookId)
           .maybeSingle()
 
-        if (existing) {
+        if (existing && !force) {
           await completeJob(job.id, { skipped: true, report_id: existing.id })
           return
         }
 
-        const report = await generateNotebookReport(notebookId, userId)
+        if (existing && force) {
+          await supabaseServer
+            .from("subject_notebook_reports")
+            .delete()
+            .eq("id", existing.id)
+        }
+
+        const report = await generateNotebookReport(notebookId, userId, { force })
         const { data: nb } = await supabaseServer
           .from("notebooks")
           .select("subject_id")
@@ -64,6 +74,7 @@ export async function processJob(job: {
           .update({ report_pending: false })
           .eq("id", notebookId)
 
+        let draftsCreated = 0
         if (nb?.subject_id) {
           await generateRemediationDrafts({
             userId,
@@ -73,48 +84,32 @@ export async function processJob(job: {
             snapshot: report.snapshot,
           })
 
-          for (const action of report.structured.executable_actions ?? []) {
-            if (action.type !== "create_remediation_notebook") continue
-            await supabaseServer.from("ai_action_drafts").insert({
-              user_id: userId,
-              subject_id: nb.subject_id,
-              type: "notebook_create",
-              label: action.label,
-              payload: {
-                ...action.params,
-                subject_id: nb.subject_id,
-                suggested_name: action.params.suggested_name ?? action.label,
-                report_model_used: report.modelUsed,
-              },
-              source_agent: "notebook_report",
-              status: "pending",
-            })
-          }
+          draftsCreated = await persistReportExecutableActions({
+            userId,
+            subjectId: nb.subject_id,
+            structured: report.structured,
+            reportModelUsed: report.modelUsed,
+          })
         }
 
-        await supabaseServer.from("ai_runs").insert({
-          user_id: userId,
-          agent_type: "notebook_report",
-          tokens_in: report.tokensIn,
-          tokens_out: report.tokensOut,
-          cost_estimate: report.costUsd,
-          status: "ok",
-          metadata: { notebook_id: notebookId, report_id: row!.id },
+        await completeJob(job.id, {
+          report_id: row!.id,
+          llm_used: report.usedLlm,
+          per_question_count: report.perQuestionCount,
+          actions_count: report.structured.executable_actions?.length ?? 0,
+          drafts_created: draftsCreated,
+          topics_weak: report.structured.weaknesses?.length ?? 0,
         })
 
-        await completeJob(job.id, { report_id: row!.id })
-
-        await enqueueJob({
-          userId,
-          jobType: "classify_wrong_attempts",
-          idempotencyKey: `classify:${notebookId}`,
-          payload: {
-            notebook_id: notebookId,
-            subject_id: nb?.subject_id,
-            report_id: row!.id,
-          },
-          priority: 9,
-        })
+        if (nb?.subject_id && row?.id) {
+          await enqueueJob({
+            userId,
+            jobType: "brain_ingest_report",
+            idempotencyKey: `brain:${row.id}`,
+            payload: { subject_id: nb.subject_id, report_id: row.id },
+            priority: 8,
+          })
+        }
         break
       }
 
@@ -161,8 +156,18 @@ export async function processJob(job: {
       case "brain_ingest_report": {
         const subjectId = payload.subject_id as string
         const reportId = payload.report_id as string
-        const state = await ingestBrainFromReport(userId, subjectId, reportId)
-        await completeJob(job.id, { topics: Object.keys(state.topic_map).length })
+        const brainResult = await persistSubjectBrain({
+          userId,
+          subjectId,
+          reportId,
+        })
+        const state = brainResult.state
+        await completeJob(job.id, {
+          topics: Object.keys(state.topic_map).length,
+          danger_count: state.danger_topics.length,
+          llm_used: brainResult.usedLlm,
+          report_merged: brainResult.reportMerged,
+        })
 
         const { data: reportRow } = await supabaseServer
           .from("subject_notebook_reports")
@@ -183,16 +188,9 @@ export async function processJob(job: {
           payload: {
             subject_id: subjectId,
             recent_wrong_topics: recentWrongTopics,
+            enqueue_execution: true,
           },
           priority: 7,
-        })
-
-        await enqueueJob({
-          userId,
-          jobType: "execution_plan_today",
-          idempotencyKey: `daily_plan:${userId}:${new Date().toISOString().slice(0, 10)}`,
-          payload: { force: true },
-          priority: 6,
         })
         break
       }
@@ -202,20 +200,85 @@ export async function processJob(job: {
         const recentWrongTopics = Array.isArray(payload.recent_wrong_topics)
           ? (payload.recent_wrong_topics as string[])
           : undefined
-        const rows = await recomputeStrategicQueue(userId, subjectId, {
-          withLlmNarrative: false,
+        const result = await recomputeStrategicQueue(userId, subjectId, {
+          autoLlm: true,
           recentWrongTopics,
         })
-        await completeJob(job.id, { items: rows.length })
+        await completeJob(job.id, {
+          items: result.rows.length,
+          llm_used: result.llm_used,
+          top_topic: result.top_topic,
+          top_topic_label: result.top_topic_label,
+          recent_boost_count: result.recent_boost_count,
+          subject_priority: result.subject_priority,
+          narrative: result.narrative ?? null,
+        })
+
+        await enqueueJob({
+          userId,
+          jobType: "strategy_recompute_all",
+          idempotencyKey: `strategy_all:${userId}:${new Date().toISOString().slice(0, 10)}`,
+          payload: {
+            exclude_subject_id: subjectId,
+            recent_wrong_topics: recentWrongTopics,
+          },
+          priority: 5,
+        })
+
+        if (payload.enqueue_execution) {
+          await enqueueJob({
+            userId,
+            jobType: "execution_plan_today",
+            idempotencyKey: `daily_plan:${userId}:${new Date().toISOString().slice(0, 10)}`,
+            payload: {
+              force: false,
+              subject_id: subjectId,
+              recent_wrong_topics: recentWrongTopics,
+            },
+            priority: 6,
+          })
+        }
+        break
+      }
+
+      case "strategy_recompute_all": {
+        const excludeSubjectId = payload.exclude_subject_id as string | undefined
+        const { recomputeAllSubjectsQueue } = await import("../strategic-queue")
+        const results = await recomputeAllSubjectsQueue(userId, {
+          excludeSubjectId,
+        })
+        const totalItems = results.reduce((n, r) => n + r.rows.length, 0)
+        await completeJob(job.id, {
+          subjects: results.length,
+          total_items: totalItems,
+          top_subjects: results
+            .slice(0, 5)
+            .map((r) => ({
+              subject_priority: r.subject_priority,
+              top_topic_label: r.top_topic_label,
+            })),
+        })
         break
       }
 
       case "execution_plan_today": {
         const plan = await generateDailyStudyPlan(
           userId,
-          Boolean(payload.force)
+          Boolean(payload.force ?? false),
+          {
+            refreshQueue: Boolean(payload.refresh_queue),
+            subjectId: payload.subject_id as string | undefined,
+            recentWrongTopics: Array.isArray(payload.recent_wrong_topics)
+              ? (payload.recent_wrong_topics as string[])
+              : undefined,
+            pin: payload.pin as boolean | undefined,
+          }
         )
-        await completeJob(job.id, { plan_id: plan.id, blocks: plan.blocks.length })
+        await completeJob(job.id, {
+          plan_id: plan.id,
+          blocks: plan.blocks.length,
+          user_pinned: plan.user_pinned ?? false,
+        })
         break
       }
 

@@ -13,6 +13,9 @@ import {
   Layers,
   AlertCircle,
   Settings,
+  Pin,
+  CheckCircle2,
+  FileText,
 } from "lucide-react"
 
 const MODE_LABELS: Record<string, string> = {
@@ -21,17 +24,41 @@ const MODE_LABELS: Record<string, string> = {
   reta_final: "Reta final",
 }
 
+function blockKey(block: DailyStudyBlock): string {
+  return (
+    (block.params?.block_key as string) ??
+    `${block.type}:${block.subject_id}:all`
+  )
+}
+
 function blockAction(
   block: DailyStudyBlock,
   combinedNotebookId: string | null | undefined
 ): { href: string; label: string } | null {
   if (block.type === "flashcards") {
-    return { href: "/flashcards/study", label: "Iniciar flashcards" }
+    const sid = block.subject_id
+    return {
+      href: sid
+        ? `/flashcards/study?subject_id=${sid}`
+        : "/flashcards/study",
+      label: "Iniciar flashcards",
+    }
   }
   if (block.type === "error_review" && block.params.subject_id) {
+    const sid = block.params.subject_id as string
+    const topic = block.params.topic_key as string | undefined
+    const q = topic
+      ? `?topic=${encodeURIComponent(topic)}`
+      : ""
     return {
-      href: `/erros?subject_id=${block.params.subject_id}`,
+      href: `/coach/materias/${sid}/insights${q}`,
       label: "Revisar erros",
+    }
+  }
+  if (block.type === "read_material" && block.params.subject_id) {
+    return {
+      href: `/coach/materias/${block.params.subject_id ?? block.subject_id}/insights`,
+      label: "Ver material",
     }
   }
   if (block.type === "questions") {
@@ -47,34 +74,39 @@ function blockAction(
   return null
 }
 
+function parsePlanFromApi(p: Record<string, unknown>): DailyStudyPlan {
+  const blocks = (p.blocks ?? []) as DailyStudyBlock[]
+  return {
+    id: p.id as string,
+    date: (p.plan_date ?? p.date) as string,
+    mode: p.mode as DailyStudyPlan["mode"],
+    limits: p.limits as DailyStudyPlan["limits"],
+    blocks,
+    rotation_note: p.rotation_note as string | undefined,
+    narrative_summary: p.narrative_summary as string | undefined,
+    combined_notebook_id: (p.combined_notebook_id as string) ?? null,
+    combined_question_count: blocks.find((b) => b.params?.is_combined)?.count,
+    user_pinned: Boolean(p.user_pinned),
+    completed_block_keys: (p.completed_block_keys as string[]) ?? [],
+  }
+}
+
 export default function CoachHojePage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [plan, setPlan] = useState<DailyStudyPlan | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [pinning, setPinning] = useState(false)
+  const [completingKey, setCompletingKey] = useState<string | null>(null)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
     fetch(`/api/coach/daily-plan?user_id=${uid}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.plan) {
-          const blocks = (d.plan.blocks ?? []) as DailyStudyBlock[]
-          setPlan({
-            id: d.plan.id,
-            date: d.plan.plan_date,
-            mode: d.plan.mode,
-            limits: d.plan.limits,
-            blocks,
-            rotation_note: d.plan.rotation_note,
-            narrative_summary: d.plan.narrative_summary,
-            combined_notebook_id: d.plan.combined_notebook_id ?? null,
-            combined_question_count: blocks.find(
-              (b) => b.params?.is_combined
-            )?.count,
-          })
-        } else setPlan(null)
+        if (d.plan) setPlan(parsePlanFromApi(d.plan))
+        else setPlan(null)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -97,27 +129,68 @@ export default function CoachHojePage() {
       const res = await fetch("/api/coach/daily-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, force: true }),
+        body: JSON.stringify({ user_id: userId, force: true, pin: false }),
       })
       const data = await res.json()
       if (data.error) alert(data.error)
-      else if (data.plan) {
-        const p = data.plan
-        const blocks = (p.blocks ?? []) as DailyStudyBlock[]
-        setPlan({
-          id: p.id,
-          date: p.plan_date ?? p.date,
-          mode: p.mode,
-          limits: p.limits,
-          blocks,
-          rotation_note: p.rotation_note,
-          narrative_summary: p.narrative_summary,
-          combined_notebook_id: p.combined_notebook_id ?? null,
-          combined_question_count: blocks.find((b) => b.params?.is_combined)?.count,
-        })
-      }
+      else if (data.plan) setPlan(parsePlanFromApi(data.plan))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function togglePin() {
+    if (!userId || !plan?.id) return
+    setPinning(true)
+    try {
+      const res = await fetch("/api/coach/daily-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          force: false,
+          pin: !plan.user_pinned,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) alert(data.error)
+      else if (data.plan) setPlan(parsePlanFromApi(data.plan))
+      else load(userId)
+    } finally {
+      setPinning(false)
+    }
+  }
+
+  async function markComplete(block: DailyStudyBlock) {
+    if (!userId || !plan?.id) return
+    const key = blockKey(block)
+    setCompletingKey(key)
+    try {
+      const res = await fetch("/api/coach/daily-plan/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          plan_id: plan.id,
+          block_key: key,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) alert(data.error)
+      else {
+        setPlan((prev) =>
+          prev
+            ? {
+                ...prev,
+                completed_block_keys: [
+                  ...new Set([...(prev.completed_block_keys ?? []), key]),
+                ],
+              }
+            : prev
+        )
+      }
+    } finally {
+      setCompletingKey(null)
     }
   }
 
@@ -130,6 +203,7 @@ export default function CoachHojePage() {
   }
 
   const combinedBlock = plan?.blocks.find((b) => b.params?.is_combined)
+  const completedSet = new Set(plan?.completed_block_keys ?? [])
 
   return (
     <div className="space-y-6">
@@ -137,7 +211,7 @@ export default function CoachHojePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Plano de hoje</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Questões reunidas em um caderno · limites em{" "}
+            Matérias ordenadas pela fila estratégica ·{" "}
             <Link
               href="/coach/configuracoes"
               className="font-medium text-violet-700 hover:underline"
@@ -154,6 +228,21 @@ export default function CoachHojePage() {
             <Settings className="h-4 w-4" />
             Limites e fase
           </Link>
+          {plan && (
+            <button
+              type="button"
+              onClick={togglePin}
+              disabled={pinning}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-60 ${
+                plan.user_pinned
+                  ? "border-amber-300 bg-amber-50 text-amber-900"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Pin className="h-4 w-4" />
+              {plan.user_pinned ? "Plano fixado" : "Fixar plano"}
+            </button>
+          )}
           <button
             type="button"
             onClick={generate}
@@ -193,6 +282,11 @@ export default function CoachHojePage() {
             </span>
             <span>Até {plan.limits.questions} questões</span>
             <span>Até {plan.limits.flashcards} flashcards</span>
+            {plan.user_pinned && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
+                Fixado — jobs não sobrescrevem
+              </span>
+            )}
             {plan.rotation_note && (
               <span className="text-slate-500">{plan.rotation_note}</span>
             )}
@@ -209,8 +303,13 @@ export default function CoachHojePage() {
                     {plan.combined_question_count ??
                       combinedBlock?.count ??
                       0}{" "}
-                    questões de várias matérias na ordem da fila estratégica
+                    questões na ordem da fila estratégica
                   </p>
+                  {typeof combinedBlock?.params?.queue_reason === "string" && (
+                    <p className="mt-1 text-xs text-violet-700">
+                      {combinedBlock.params.queue_reason}
+                    </p>
+                  )}
                 </div>
                 {plan.combined_notebook_id && (
                   <Link
@@ -230,43 +329,84 @@ export default function CoachHojePage() {
               .filter((b) => !b.params?.is_combined)
               .map((block, i) => {
                 const action = blockAction(block, plan.combined_notebook_id)
+                const key = blockKey(block)
+                const done = completedSet.has(key)
                 const Icon =
                   block.type === "flashcards"
                     ? Layers
                     : block.type === "error_review"
                       ? AlertCircle
-                      : BookOpen
+                      : block.type === "read_material"
+                        ? FileText
+                        : BookOpen
 
                 return (
                   <div
                     key={i}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4"
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
+                      done
+                        ? "border-emerald-200 bg-emerald-50/50"
+                        : "border-slate-200 bg-white"
+                    }`}
                   >
                     <div className="flex items-start gap-3">
                       <Icon className="mt-0.5 h-5 w-5 text-violet-600" />
                       <div>
                         <p className="font-medium text-slate-900">
                           {block.label}
+                          {done && (
+                            <span className="ml-2 text-xs font-normal text-emerald-700">
+                              Concluído
+                            </span>
+                          )}
                         </p>
                         {block.subject_name && (
                           <p className="text-xs text-slate-500">
                             {block.subject_name}
                           </p>
                         )}
+                        {typeof block.params?.queue_reason === "string" && (
+                          <p className="mt-1 text-xs text-violet-700">
+                            {block.params.queue_reason}
+                          </p>
+                        )}
+                        {block.type === "read_material" &&
+                          typeof block.params?.excerpt === "string" && (
+                            <p className="mt-1 line-clamp-2 text-xs text-slate-500">
+                              {block.params.excerpt}
+                            </p>
+                          )}
                         <p className="text-xs text-slate-400">
                           ~{block.minutes} min · {block.count} itens
                         </p>
                       </div>
                     </div>
-                    {action ? (
-                      <Link
-                        href={action.href}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        <Play className="h-4 w-4" />
-                        {action.label}
-                      </Link>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!done && (
+                        <button
+                          type="button"
+                          onClick={() => markComplete(block)}
+                          disabled={completingKey === key}
+                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                        >
+                          {completingKey === key ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="h-4 w-4" />
+                          )}
+                          Marcar feito
+                        </button>
+                      )}
+                      {action ? (
+                        <Link
+                          href={action.href}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          <Play className="h-4 w-4" />
+                          {action.label}
+                        </Link>
+                      ) : null}
+                    </div>
                   </div>
                 )
               })}

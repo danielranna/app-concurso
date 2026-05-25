@@ -1,24 +1,16 @@
 import { supabaseServer } from "../supabase-server"
 import { computeLearningSignals } from "../learning-signals"
 import type { ExecutableAction } from "../coach-types"
-import { aiComplete } from "./client"
-import { getUserAiCredentials } from "./user-credentials"
-import { recomputeStrategicQueue } from "./strategic-queue"
+import {
+  buildExecutableActionsFromQueue,
+  formatQueueNarrativeSummary,
+} from "./strategy-helpers"
 
-const SYSTEM = `Você complementa a fila estratégica já calculada. Use os dados JSON.
-Responda:
-{
-  "top_priorities": [{"rank":1,"title":"","why":"","domain":"questoes|flashcards|erros","time_minutes":45}],
-  "executable_actions": [{"type":"create_remediation_notebook|review_flashcards|review_errors|notebook_create","label":"","params":{},"priority":1,"estimated_minutes":45}],
-  "narrative_summary": ""
-}`
-
+/** Ações e narrativa derivadas da fila SQL — sem segundo ranking paralelo. */
 export async function generatePriorityVerdict(
   userId: string,
   subjectId: string
 ) {
-  await recomputeStrategicQueue(userId, subjectId, { withLlmNarrative: false })
-
   const { data: queue } = await supabaseServer
     .from("strategic_queue_items")
     .select("*")
@@ -26,8 +18,6 @@ export async function generatePriorityVerdict(
     .eq("subject_id", subjectId)
     .order("priority_score", { ascending: false })
     .limit(15)
-
-  const credentials = await getUserAiCredentials(userId)
 
   const { data: subject } = await supabaseServer
     .from("subjects")
@@ -44,75 +34,40 @@ export async function generatePriorityVerdict(
     .eq("subject_id", subjectId)
     .maybeSingle()
 
-  const { data: openErrors } = await supabaseServer
-    .from("errors")
-    .select("id, error_text, review_count, topics!inner(name, subject_id)")
-    .eq("user_id", userId)
-    .eq("topics.subject_id", subjectId)
-    .order("review_count", { ascending: false })
-    .limit(15)
+  const top = (queue ?? []).slice(0, 8)
+  const queueForActions = top.map((q) => ({
+    topic_key: q.topic_key,
+    topic_label:
+      (q as { topic_label?: string }).topic_label ?? q.topic_key,
+    priority_score: Number(q.priority_score),
+    reason: q.reason,
+  }))
 
-  const { count: dueCards } = await supabaseServer
-    .from("flashcard_states")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .lte("due_at", new Date().toISOString())
+  const executable_actions = buildExecutableActionsFromQueue(
+    queueForActions,
+    subjectId
+  ) as ExecutableAction[]
 
-  const input = {
-    subject_name: subject?.name,
-    strategic_queue: queue ?? [],
-    subject_brain: brain?.state ?? null,
-    learning_signals: signals.slice(0, 10),
-    open_errors_count: openErrors?.length ?? 0,
-    flashcards_due_estimate: dueCards ?? 0,
-  }
-
-  let structured: Record<string, unknown> = {
-    top_priorities: (queue ?? []).slice(0, 5).map((q, i) => ({
+  const structured: Record<string, unknown> = {
+    top_priorities: top.map((q, i) => ({
       rank: i + 1,
-      title: q.topic_key,
-      why: q.reason ?? `Score ${q.priority_score}`,
+      title:
+        (q as { topic_label?: string }).topic_label ?? q.topic_key,
+      why: q.reason ?? `Prioridade ${Number(q.priority_score).toFixed(2)}`,
       domain: "questoes",
       time_minutes: 40,
+      topic_key: q.topic_key,
+      priority_score: q.priority_score,
+      source: q.source ?? "sql",
     })),
     narrative_summary:
+      formatQueueNarrativeSummary(queueForActions, subject?.name) ||
       brain?.summary_md?.slice(0, 300) ||
-      `Fila estratégica com ${queue?.length ?? 0} tópicos para ${subject?.name ?? "matéria"}.`,
-    executable_actions: [] as ExecutableAction[],
+      `Fila estratégica com ${queue?.length ?? 0} tópicos.`,
+    executable_actions,
+    learning_signals_preview: signals.slice(0, 6),
+    source: "strategic_queue",
   }
 
-  let tokensIn = 0
-  let tokensOut = 0
-
-  if (credentials && (queue?.length ?? 0) > 0) {
-    try {
-      const result = await aiComplete(
-        {
-          jsonMode: true,
-          maxTokens: 2000,
-          messages: [
-            { role: "system", content: SYSTEM },
-            { role: "user", content: JSON.stringify(input) },
-          ],
-        },
-        credentials
-      )
-      structured = { ...structured, ...JSON.parse(result.text || "{}") }
-      tokensIn = result.tokensIn
-      tokensOut = result.tokensOut
-    } catch {
-      /* keep queue-based */
-    }
-  }
-
-  await supabaseServer.from("ai_runs").insert({
-    user_id: userId,
-    agent_type: "priority_verdict",
-    tokens_in: tokensIn,
-    tokens_out: tokensOut,
-    status: "ok",
-    metadata: { subject_id: subjectId, queue_size: queue?.length ?? 0 },
-  })
-
-  return { structured, input, queue: queue ?? [] }
+  return { structured, input: { strategic_queue: queue }, queue: queue ?? [] }
 }

@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react"
 export type QueueItem = {
   id?: string
   topic_key: string
+  topic_label?: string
   priority_score: number
   incidence_weight?: number
   edital_weight?: number
@@ -49,7 +50,9 @@ export default function StrategicQueueList({
               <span className="mr-2 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-800">
                 {idx + 1}
               </span>
-              <span className="font-medium text-slate-900">{item.topic_key}</span>
+              <span className="font-medium text-slate-900">
+                {item.topic_label ?? item.topic_key}
+              </span>
               {item.reason && (
                 <p className="mt-1 pl-7 text-xs text-slate-600">{item.reason}</p>
               )}

@@ -6,6 +6,7 @@ export type JobType =
   | "explain_wrong_attempt"
   | "brain_ingest_report"
   | "strategy_recompute"
+  | "strategy_recompute_all"
   | "execution_plan_today"
   | "document_ingest"
 
@@ -41,13 +42,14 @@ export async function enqueueJob(params: {
 export async function enqueueNotebookPipeline(
   userId: string,
   notebookId: string,
-  subjectId: string | null
+  subjectId: string | null,
+  options?: { force?: boolean }
 ) {
   await enqueueJob({
     userId,
     jobType: "notebook_report_aggregate",
     idempotencyKey: `notebook_report:${notebookId}`,
-    payload: { notebook_id: notebookId, subject_id: subjectId },
+    payload: { notebook_id: notebookId, subject_id: subjectId, force: options?.force },
     priority: 10,
   })
 }
