@@ -158,9 +158,12 @@ function parseTopicsBySlug(md: string): Record<string, StrategicTopicRow[]> {
   const parts = topicsSection.split(/(?=#### )/g)
 
   for (const part of parts) {
-    const header = part.match(/^####\s+([^\s-]+)\s*-\s*(.+)/m)
-    if (!header) continue
-    const slug = header[1]!.trim()
+    const headerLine = part.split("\n").find((l) => l.trim().startsWith("#### "))
+    if (!headerLine) continue
+    const headerBody = headerLine.replace(/^####\s+/, "").trim()
+    const dashSep = headerBody.indexOf(" - ")
+    if (dashSep < 0) continue
+    const slug = headerBody.slice(0, dashSep).trim()
     const rows: StrategicTopicRow[] = []
     let qtyCol = 1
     let nameCol = 0
@@ -171,9 +174,12 @@ function parseTopicsBySlug(md: string): Record<string, StrategicTopicRow[]> {
         .split("|")
         .slice(1, -1)
         .map((c) => c.trim())
-      if (cells[0]?.toLowerCase().includes("topico") || cells[0]?.toLowerCase().includes("subarea")) {
-        const h0 = cells[0]!.toLowerCase()
+      const h0 = (cells[0] ?? "").toLowerCase()
+      if (h0.includes("topico") || h0 === "topico" || h0.includes("subarea") || h0 === "subarea") {
         if (h0.includes("subarea")) {
+          nameCol = 0
+          qtyCol = 1
+        } else {
           nameCol = 0
           qtyCol = 1
         }

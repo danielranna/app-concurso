@@ -27,7 +27,8 @@ export async function persistIncidenceRows(params: {
   if (!rows.length) {
     return {
       inserted: 0,
-      error: "Nenhuma linha de assunto encontrada no Excel (verifique colunas Hierarquia / Índice).",
+      error:
+        "Nenhum tópico encontrado para gravar. No MD, confira se há tabelas em «Tópicos Mais Incidentes por Matéria» (#### slug - Nome).",
     }
   }
 

@@ -10,21 +10,42 @@ import type { SubjectRow } from "./incidence-subject-map"
 
 export function bundleToIncidenceWorkbook(bundle: StrategicMdBundle): ParsedIncidenceWorkbook {
   const flat_rows: IncidenceFlatRow[] = []
-  const blocks = bundle.edital_subjects.map((sub) => {
-    const topics = bundle.topics_by_slug[sub.slug] ?? []
-    const groups = topics.map((t, i) => ({
-      code: String(i + 1).padStart(2, "0"),
-      name: t.topic,
-      quantity: t.quantity,
-      percent: t.percent,
-      is_subtopic: false,
-      parent_code: null as string | null,
-    }))
+  const blocksByLabel = new Map<
+    string,
+    { subject_label: string; groups: ParsedIncidenceWorkbook["blocks"][0]["groups"] }
+  >()
+
+  const slugKeys = new Set([
+    ...Object.keys(bundle.topics_by_slug),
+    ...bundle.edital_subjects.map((s) => s.slug),
+    ...bundle.incidence_subjects.map((s) => s.slug),
+  ])
+
+  for (const slug of slugKeys) {
+    const topics = bundle.topics_by_slug[slug] ?? []
+    if (!topics.length) continue
+
+    const subject_label = mdNameForSlug(bundle, slug)
+    let block = blocksByLabel.get(subject_label)
+    if (!block) {
+      block = { subject_label, groups: [] }
+      blocksByLabel.set(subject_label, block)
+    }
+
     for (const t of topics) {
+      const code = String(block.groups.length + 1).padStart(2, "0")
+      block.groups.push({
+        code,
+        name: t.topic,
+        quantity: t.quantity,
+        percent: t.percent,
+        is_subtopic: false,
+        parent_code: null,
+      })
       flat_rows.push({
         sheet_name: "MD",
-        subject_label: sub.name,
-        hierarchy_code: String(topics.indexOf(t) + 1).padStart(2, "0"),
+        subject_label,
+        hierarchy_code: code,
         topic_name: t.topic,
         is_subtopic: false,
         parent_code: null,
@@ -32,12 +53,13 @@ export function bundleToIncidenceWorkbook(bundle: StrategicMdBundle): ParsedInci
         percent: t.percent,
       })
     }
-    return {
-      subject_label: sub.name,
-      total_quantity: topics.reduce((s, t) => s + t.quantity, 0),
-      groups,
-    }
-  })
+  }
+
+  const blocks = [...blocksByLabel.values()].map((b) => ({
+    subject_label: b.subject_label,
+    total_quantity: b.groups.reduce((s, g) => s + g.quantity, 0),
+    groups: b.groups,
+  }))
 
   const topic_count = flat_rows.length
   return {
