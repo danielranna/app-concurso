@@ -1,5 +1,6 @@
 import { supabaseServer } from "../supabase-server"
 import { buildIncidencePayloadForExam } from "../coach-documents"
+import { fetchIncidenceRows } from "../incidence-rows-db"
 import { recomputeAllSubjectsQueue } from "./strategic-queue"
 
 export type StrategyTopicRow = {
@@ -11,12 +12,15 @@ export type StrategyTopicRow = {
   retention_penalty: number | null
   reason: string | null
   in_queue: boolean
+  is_subtopic: boolean
+  hierarchy_code: string | null
 }
 
 export type StrategySubjectRow = {
   subject_id: string
   subject_name: string
   excel_label: string | null
+  excel_labels: string[]
   subject_rank: number
   avg_priority_score: number
   topics: StrategyTopicRow[]
@@ -26,6 +30,8 @@ export type ExamStrategyBoard = {
   exam_target_id: string
   exam_name: string
   subjects: StrategySubjectRow[]
+  merge_warnings: { subject_name: string; excel_labels: string[] }[]
+  parse_stats: Record<string, unknown> | null
   generated_at: string
 }
 
@@ -47,7 +53,11 @@ export async function buildExamStrategyBoard(
     await recomputeAllSubjectsQueue(userId)
   }
 
-  const incidence = await buildIncidencePayloadForExam(userId, examTargetId)
+  const incidencePayload = await buildIncidencePayloadForExam(userId, examTargetId)
+  const parse_stats =
+    (incidencePayload.workbook?.parsed_tables as { parse_stats?: Record<string, unknown> })
+      ?.parse_stats ?? null
+  const merge_warnings = incidencePayload.merge_warnings ?? []
 
   const { data: queue } = await supabaseServer
     .from("strategic_queue_items")
@@ -67,59 +77,72 @@ export async function buildExamStrategyBoard(
     .select("id, name")
     .eq("user_id", userId)
 
-  const subjectNameById = new Map(
-    (subjects ?? []).map((s) => [s.id, s.name])
-  )
-
-  const incidenceBySubjectId = new Map(
-    incidence.for_llm.map((row) => [row.subject_id, row])
-  )
-
-  const subjectIds = new Set<string>()
-  for (const s of subjects ?? []) subjectIds.add(s.id)
-  for (const row of incidence.for_llm) {
-    if (row.subject_id) subjectIds.add(row.subject_id)
-  }
-
   const rows: StrategySubjectRow[] = []
 
-  for (const subjectId of subjectIds) {
-    const inc = incidenceBySubjectId.get(subjectId)
-    const subjectName =
-      inc?.subject_name ?? subjectNameById.get(subjectId) ?? "Matéria"
-    const qItems = queueBySubject.get(subjectId) ?? []
+  for (const sub of subjects ?? []) {
+    const mapping = incidencePayload.for_llm.find((r) => r.subject_id === sub.id)
+    const excelLabels = mapping?.excel_labels ?? (mapping?.excel_label ? [mapping.excel_label] : [])
+
+    const incidenceRows = excelLabels.length
+      ? await fetchIncidenceRows({
+          userId,
+          examTargetId,
+          subjectLabels: excelLabels,
+        })
+      : await fetchIncidenceRows({
+          userId,
+          examTargetId,
+          subjectId: sub.id,
+        })
+
+    const qItems = queueBySubject.get(sub.id) ?? []
     const queueByTopic = new Map(qItems.map((q) => [q.topic_key, q]))
 
-    const topicKeys = new Set<string>()
-    for (const g of inc?.top_topics ?? []) {
-      const name = (g as { name?: string }).name?.trim()
-      if (name) topicKeys.add(name)
-    }
-    for (const q of qItems) topicKeys.add(q.topic_key)
+    const topicMap = new Map<string, StrategyTopicRow>()
 
-    const topics: StrategyTopicRow[] = [...topicKeys].map((topic_key) => {
-      const g = (inc?.top_topics ?? []).find(
-        (t) => (t as { name?: string }).name?.trim() === topic_key
-      ) as { name?: string; percent?: number; qty?: number } | undefined
-      const qi = queueByTopic.get(topic_key)
-      return {
-        topic_key,
-        incidence_percent: g?.percent ?? null,
-        incidence_quantity: g?.qty ?? null,
+    for (const r of incidenceRows) {
+      const key = r.topic_name.trim()
+      if (!key) continue
+      const qi = queueByTopic.get(key)
+      topicMap.set(key, {
+        topic_key: key,
+        incidence_percent: Number(r.percent),
+        incidence_quantity: r.quantity,
         priority_score: qi?.priority_score ?? null,
         gap_score: qi?.gap_score ?? null,
         retention_penalty: qi?.retention_penalty ?? null,
         reason: qi?.reason ?? null,
         in_queue: !!qi,
-      }
-    })
+        is_subtopic: r.is_subtopic,
+        hierarchy_code: r.hierarchy_code,
+      })
+    }
 
-    topics.sort((a, b) => {
+    for (const [topic_key, qi] of queueByTopic) {
+      if (!topicMap.has(topic_key)) {
+        topicMap.set(topic_key, {
+          topic_key,
+          incidence_percent: null,
+          incidence_quantity: null,
+          priority_score: qi.priority_score,
+          gap_score: qi.gap_score,
+          retention_penalty: qi.retention_penalty,
+          reason: qi.reason,
+          in_queue: true,
+          is_subtopic: false,
+          hierarchy_code: null,
+        })
+      }
+    }
+
+    const topics = [...topicMap.values()].sort((a, b) => {
       const pa = a.priority_score ?? 0
       const pb = b.priority_score ?? 0
       if (pb !== pa) return pb - pa
       return (b.incidence_percent ?? 0) - (a.incidence_percent ?? 0)
     })
+
+    if (!topics.length && !excelLabels.length) continue
 
     const avg =
       qItems.length > 0
@@ -127,9 +150,10 @@ export async function buildExamStrategyBoard(
         : 0
 
     rows.push({
-      subject_id: subjectId,
-      subject_name: subjectName,
-      excel_label: inc?.excel_label ?? null,
+      subject_id: sub.id,
+      subject_name: sub.name,
+      excel_label: mapping?.excel_label ?? (excelLabels.join(" + ") || null),
+      excel_labels: excelLabels,
       subject_rank: 0,
       avg_priority_score: Math.round(avg * 1000) / 1000,
       topics,
@@ -145,6 +169,11 @@ export async function buildExamStrategyBoard(
     exam_target_id: examTargetId,
     exam_name: exam.name,
     subjects: rows,
+    merge_warnings: merge_warnings.map((w) => ({
+      subject_name: w.subject_name,
+      excel_labels: w.excel_labels,
+    })),
+    parse_stats,
     generated_at: new Date().toISOString(),
   }
 }

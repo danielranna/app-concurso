@@ -2,9 +2,21 @@ import { supabaseServer } from "../supabase-server"
 import { loadSubjectBrain } from "./context-builder"
 import { getTopicStatsForSubject } from "../learning-signals"
 import { buildIncidencePayloadForExam } from "../coach-documents"
+import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
+import { normLabel } from "../incidence-subject-map"
 import { runStrategyNarrativeAgent } from "./agents/strategy"
 
 type IncidenceTopic = { topic: string; percent: number; quantity?: number }
+
+async function getActiveExamId(userId: string): Promise<string | null> {
+  const { data } = await supabaseServer
+    .from("exam_targets")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle()
+  return data?.id ?? null
+}
 
 async function getIncidenceWeights(
   userId: string,
@@ -22,6 +34,19 @@ async function getIncidenceWeights(
 
   if (activeExam?.id) {
     try {
+      const labels = await resolveSubjectLabels(userId, activeExam.id, subjectId)
+      if (labels.length) {
+        const rows = await fetchIncidenceRows({
+          userId,
+          examTargetId: activeExam.id,
+          subjectLabels: labels,
+        })
+        for (const r of rows) {
+          const key = r.topic_name.trim()
+          if (!key) continue
+          weights.set(key, Math.max(weights.get(key) ?? 0, Math.max(0.5, Number(r.percent) / 10)))
+        }
+      }
       const payload = await buildIncidencePayloadForExam(userId, activeExam.id)
       const block = payload.for_llm.find(
         (b) => b.subject_id === subjectId || b.subject_name === subjectName
@@ -30,7 +55,7 @@ async function getIncidenceWeights(
         for (const t of block.top_topics as { name?: string; topic?: string; percent?: number }[]) {
           const key = (t.name ?? t.topic ?? "").trim()
           if (!key) continue
-          weights.set(key, Math.max(0.5, (t.percent ?? 10) / 10))
+          weights.set(key, Math.max(weights.get(key) ?? 0, Math.max(0.5, (t.percent ?? 10) / 10)))
         }
       }
     } catch {
@@ -76,6 +101,47 @@ export async function recomputeStrategicQueue(
     subject?.name ?? ""
   )
 
+  const examId = await getActiveExamId(userId)
+  const labels = examId
+    ? await resolveSubjectLabels(userId, examId, subjectId).catch(() => [] as string[])
+    : []
+
+  const incidenceRows =
+    examId && labels.length
+      ? await fetchIncidenceRows({
+          userId,
+          examTargetId: examId,
+          subjectLabels: labels,
+        })
+      : []
+
+  const topicKeys = new Map<
+    string,
+    { wrong: number; correct: number; fromIncidence: boolean }
+  >()
+
+  for (const t of topicStats) {
+    topicKeys.set(t.topic, {
+      wrong: t.wrong,
+      correct: t.correct,
+      fromIncidence: false,
+    })
+  }
+
+  for (const r of incidenceRows) {
+    const key = r.topic_name.trim()
+    if (!key) continue
+    const existing = topicKeys.get(key)
+    if (existing) {
+      existing.fromIncidence = true
+    } else {
+      topicKeys.set(key, { wrong: 0, correct: 0, fromIncidence: true })
+    }
+    if (!incidence.has(key)) {
+      incidence.set(key, Math.max(0.5, Number(r.percent) / 10))
+    }
+  }
+
   const rows: {
     user_id: string
     subject_id: string
@@ -89,14 +155,18 @@ export async function recomputeStrategicQueue(
     computed_at: string
   }[] = []
 
-  for (const t of topicStats) {
+  for (const [topic, t] of topicKeys) {
     const dominio = t.correct + t.wrong > 0 ? t.correct / (t.correct + t.wrong) : 0.5
-    const brainEntry = brain?.topic_map?.[t.topic]
+    const brainEntry =
+      brain?.topic_map?.[topic] ??
+      Object.entries(brain?.topic_map ?? {}).find(
+        ([k]) => normLabel(k) === normLabel(topic)
+      )?.[1]
     const gap_score = brainEntry ? 1 - brainEntry.dominio : 1 - dominio
     const estabilidade = brainEntry?.estabilidade ?? 0.5
     const retention_penalty =
       estabilidade < 0.4 ? 1.4 : estabilidade < 0.6 ? 1.15 : 1
-    const incidence_weight = incidence.get(t.topic) ?? 1
+    const incidence_weight = incidence.get(topic) ?? 1
 
     const priority_score =
       incidence_weight * gap_score * retention_penalty * (1 + t.wrong * 0.1)
@@ -106,7 +176,7 @@ export async function recomputeStrategicQueue(
     rows.push({
       user_id: userId,
       subject_id: subjectId,
-      topic_key: t.topic,
+      topic_key: topic,
       priority_score: Math.round(priority_score * 1000) / 1000,
       incidence_weight,
       gap_score: Math.round(gap_score * 100) / 100,

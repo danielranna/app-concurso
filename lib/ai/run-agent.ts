@@ -19,6 +19,7 @@ export type RunAgentParams = {
   userContent: string
   jsonMode?: boolean
   maxTokens?: number
+  model?: string
   metadata?: Record<string, unknown>
   skipLlm?: boolean
 }
@@ -48,8 +49,15 @@ export async function runAgent(params: RunAgentParams): Promise<RunAgentResult> 
 
   let result: AiCompleteResult
   try {
+    const defaultModel =
+      params.model ??
+      (params.agentType === "edital" && credentials.provider === "openai"
+        ? "gpt-4o"
+        : undefined)
+
     result = await aiComplete(
       {
+        model: defaultModel,
         jsonMode: params.jsonMode,
         maxTokens: params.maxTokens ?? 2000,
         messages: [

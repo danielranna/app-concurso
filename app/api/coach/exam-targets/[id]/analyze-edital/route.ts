@@ -1,0 +1,42 @@
+import { NextResponse } from "next/server"
+import { analyzeExamEdital } from "@/lib/ai/edital-analysis"
+
+export const maxDuration = 120
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+    const body = await req.json()
+    const user_id = body.user_id as string
+
+    if (!user_id) {
+      return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
+    }
+
+    const result = await analyzeExamEdital(user_id, id)
+    return NextResponse.json(result)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const { searchParams } = new URL(req.url)
+  const user_id = searchParams.get("user_id")
+
+  if (!user_id) {
+    return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
+  }
+
+  const { getExamEditalAnalysis } = await import("@/lib/ai/edital-analysis")
+  const data = await getExamEditalAnalysis(user_id, id)
+  return NextResponse.json({ analysis: data })
+}

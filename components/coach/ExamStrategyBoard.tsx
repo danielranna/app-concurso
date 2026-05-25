@@ -66,9 +66,27 @@ export default function ExamStrategyBoardPanel({
     )
   }
 
+  const parseStats = board?.parse_stats as {
+    subjects?: number
+    topics?: number
+    subtopics?: number
+    rows_imported?: number
+    rows_ignored?: number
+  } | null
+
   if (!board?.subjects?.length) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-600">
+        {parseStats && (
+          <p className="mb-2 text-xs text-emerald-700">
+            Importadas: {parseStats.subjects ?? 0} matérias, {parseStats.topics ?? 0}{" "}
+            assuntos, {parseStats.subtopics ?? 0} subtópicos (
+            {parseStats.rows_imported ?? 0} linhas
+            {(parseStats.rows_ignored ?? 0) > 0 &&
+              `, ${parseStats.rows_ignored} ignoradas`}
+            ).
+          </p>
+        )}
         <p>
           Envie o Excel de incidência e resolva questões nas matérias para ver
           priorização de <strong>{examName}</strong>.
@@ -86,6 +104,28 @@ export default function ExamStrategyBoardPanel({
 
   return (
     <section className="space-y-4">
+      {board.merge_warnings?.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">Vários blocos Excel → mesma matéria</p>
+          <ul className="mt-1 list-inside list-disc text-xs">
+            {board.merge_warnings.map((w) => (
+              <li key={w.subject_name}>
+                <strong>{w.subject_name}</strong>: blocos somados —{" "}
+                {w.excel_labels.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {parseStats && (
+        <p className="text-xs text-slate-500">
+          Incidência: {parseStats.subjects ?? 0} matérias, {parseStats.topics ?? 0}{" "}
+          assuntos, {parseStats.subtopics ?? 0} subtópicos (
+          {parseStats.rows_imported ?? 0} linhas no banco).
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-slate-900">
@@ -93,7 +133,7 @@ export default function ExamStrategyBoardPanel({
           </h3>
           <p className="text-sm text-slate-600">
             Matérias ordenadas por urgência (fila × incidência × gap). Expanda
-            cada matéria para ver assuntos e % de incidência histórica.
+            cada matéria para ver assuntos, subtópicos e % de incidência histórica.
           </p>
         </div>
         <button
@@ -129,8 +169,13 @@ export default function ExamStrategyBoardPanel({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-slate-900">{sub.subject_name}</p>
-                  {sub.excel_label && sub.excel_label !== sub.subject_name && (
-                    <p className="text-xs text-slate-500">Excel: {sub.excel_label}</p>
+                  {(sub.excel_labels?.length > 1 || (sub.excel_label && sub.excel_label !== sub.subject_name)) && (
+                    <p className="text-xs text-slate-500">
+                      Excel:{" "}
+                      {sub.excel_labels?.length > 1
+                        ? sub.excel_labels.join(" + ")
+                        : sub.excel_label}
+                    </p>
                   )}
                 </div>
                 <span className="rounded-lg bg-violet-50 px-2 py-1 text-xs font-medium text-violet-800">
@@ -184,7 +229,17 @@ export default function ExamStrategyBoardPanel({
                             >
                               <td className="px-3 py-2 text-slate-400">{i + 1}</td>
                               <td className="px-3 py-2 font-medium text-slate-800">
+                                {t.hierarchy_code && (
+                                  <span className="mr-1 font-mono text-xs text-slate-400">
+                                    {t.hierarchy_code}
+                                  </span>
+                                )}
                                 {t.topic_key}
+                                {t.is_subtopic && (
+                                  <span className="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-600">
+                                    subtópico
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2">
                                 {t.incidence_percent != null ? (

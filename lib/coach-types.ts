@@ -164,12 +164,16 @@ export type ExamPlanStructured = {
     subject_name: string
     priority: number
     why?: string
+    edital_weight?: string
+    incidence_summary?: string
   }[]
   topic_matrix?: {
     subject?: string
     topic?: string
     edital_weight_hint?: string
     incidence_hint?: string
+    incidence_percent?: number
+    incidence_quantity?: number
     your_gap?: string
     action?: string
   }[]

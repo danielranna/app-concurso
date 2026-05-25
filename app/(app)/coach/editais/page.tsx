@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import ExamPlanReportCard from "@/components/coach/ExamPlanReportCard"
 import ExamStrategyBoardPanel from "@/components/coach/ExamStrategyBoard"
+import EditalPrioritiesPanel from "@/components/coach/EditalPrioritiesPanel"
 import type { ExamPlanStructured, ExamTarget } from "@/lib/coach-types"
 
 type SubjectRow = { id: string; name: string }
@@ -54,6 +55,19 @@ type DocRow = {
     group_count?: number
     groups?: IncidenceGroup[]
     matched_subject_label?: string
+    parse_stats?: {
+      subjects?: number
+      topics?: number
+      subtopics?: number
+      rows_imported?: number
+      rows_ignored?: number
+      ignored_samples?: string[]
+    }
+    merge_warnings?: {
+      subject_id: string
+      subject_name: string
+      excel_labels: string[]
+    }[]
     subject_mappings?: {
       by_block?: BlockMapping[]
       by_subject?: SubjectMapping[]
@@ -181,12 +195,14 @@ export default function CoachEditaisPage() {
       } else {
         reloadDocs(userId, selectedId)
         if (docType === "incidence") {
+          const stats = data.parsed_tables?.parse_stats
           const n = data.parsed_tables?.block_count ?? 0
           const mapped =
             data.parsed_tables?.subject_mappings?.by_subject?.length ?? 0
-          alert(
-            `Excel importado: ${n} blocos de matéria no arquivo. ${mapped} vinculados automaticamente às suas matérias.`
-          )
+          const msg = stats
+            ? `Importadas: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} assuntos, ${stats.subtopics ?? 0} subtópicos (${stats.rows_imported ?? 0} linhas${(stats.rows_ignored ?? 0) > 0 ? `, ${stats.rows_ignored} ignoradas` : ""}). ${mapped} matérias vinculadas automaticamente.`
+            : `Excel importado: ${n} blocos. ${mapped} matérias vinculadas.`
+          alert(msg)
         }
       }
     } catch {
@@ -349,8 +365,13 @@ export default function CoachEditaisPage() {
             Documentos — {active.name}
           </h3>
           <p className="text-xs text-slate-600">
-            Edital = PDF. Incidência = Excel (.xlsx) com agrupamentos (códigos
-            01, 02, 03…); subtópicos (02.01, etc.) são ignorados de propósito.
+            Edital = PDF. Incidência = Excel (.xlsx) com códigos 01, 02 e
+            subtópicos 02.01, 03.02 (alinhados aos tec_topic dos cadernos).
+            Limites diários e fase da prova em{" "}
+            <a href="/coach/configuracoes" className="text-violet-700 hover:underline">
+              Configurações
+            </a>
+            .
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -405,14 +426,38 @@ export default function CoachEditaisPage() {
               />
             </label>
             {incidenceWorkbook && (
-              <p className="text-xs font-medium text-emerald-700">
-                ✓ {incidenceWorkbook.title} —{" "}
-                {incidenceWorkbook.parsed_tables?.block_count ?? 0} blocos no
-                arquivo,{" "}
-                {mappings?.by_subject?.length ?? 0} matérias vinculadas
-              </p>
+              <div className="text-xs font-medium text-emerald-700 space-y-1">
+                <p>
+                  ✓ {incidenceWorkbook.title} —{" "}
+                  {incidenceWorkbook.parsed_tables?.block_count ?? 0} blocos,{" "}
+                  {mappings?.by_subject?.length ?? 0} matérias vinculadas
+                </p>
+                {incidenceWorkbook.parsed_tables?.parse_stats && (
+                  <p className="text-slate-600 font-normal">
+                    {incidenceWorkbook.parsed_tables.parse_stats.rows_imported ?? 0}{" "}
+                    linhas no banco · {incidenceWorkbook.parsed_tables.parse_stats.subtopics ?? 0}{" "}
+                    subtópicos
+                    {(incidenceWorkbook.parsed_tables.parse_stats.rows_ignored ?? 0) > 0 &&
+                      ` · ${incidenceWorkbook.parsed_tables.parse_stats.rows_ignored} ignoradas`}
+                  </p>
+                )}
+              </div>
             )}
           </div>
+
+          {(incidenceWorkbook?.parsed_tables?.merge_warnings?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <p className="font-medium">Blocos somados na mesma matéria</p>
+              <ul className="mt-1 list-inside list-disc">
+                {incidenceWorkbook!.parsed_tables!.merge_warnings!.map((w) => (
+                  <li key={w.subject_id}>
+                    <strong>{w.subject_name}</strong>: {w.excel_labels.length} blocos
+                    ({w.excel_labels.join(", ")}) — assuntos serão unidos.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {mappings?.by_block && mappings.by_block.length > 0 && (
             <div className="space-y-2 border-t border-slate-200 pt-4">
@@ -421,7 +466,7 @@ export default function CoachEditaisPage() {
               </p>
               <p className="text-xs text-slate-600">
                 Ajuste no menu da coluna &quot;Sua matéria&quot; quando o
-                automático errar. Salva na hora.
+                automático errar. Vários blocos na mesma matéria são somados.
               </p>
               <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-white">
                 <table className="w-full text-xs">
@@ -526,13 +571,22 @@ export default function CoachEditaisPage() {
       )}
 
       {active && userId && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
-          <ExamStrategyBoardPanel
+        <>
+          <EditalPrioritiesPanel
             userId={userId}
             examTargetId={active.id}
             examName={active.name}
+            hasEdital={!!editalDoc}
+            hasIncidence={!!incidenceWorkbook}
           />
-        </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
+            <ExamStrategyBoardPanel
+              userId={userId}
+              examTargetId={active.id}
+              examName={active.name}
+            />
+          </div>
+        </>
       )}
 
       {reports.length > 0 && (

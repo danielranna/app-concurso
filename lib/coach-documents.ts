@@ -5,6 +5,7 @@ import {
   parseIncidenceXlsx,
   type IncidenceSubjectBlock,
 } from "./incidence-xlsx"
+import { persistIncidenceRows } from "./incidence-rows-db"
 import {
   groupsForSubjectFromBlocks,
   mapIncidenceBlocksToSubjects,
@@ -97,11 +98,19 @@ export async function buildIncidencePayloadForExam(
       subject_id: row.subject_id,
       subject_name: row.subject_name,
       excel_label: row.excel_label,
+      excel_labels: row.excel_labels,
       top_topics: [...row.groups]
         .sort((a, b) => b.percent - a.percent)
-        .slice(0, 8)
-        .map((g) => ({ name: g.name, percent: g.percent, qty: g.quantity })),
+        .slice(0, 50)
+        .map((g) => ({
+          name: g.name,
+          percent: g.percent,
+          qty: g.quantity,
+          code: g.code,
+          is_subtopic: g.is_subtopic,
+        })),
     })),
+    merge_warnings: mapping.merge_warnings,
   }
 }
 
@@ -123,6 +132,7 @@ export async function uploadCoachDocument(params: {
 
   let parsed_tables: Record<string, unknown> = {}
   let contentType = params.file.type
+  let incidenceParsed: ReturnType<typeof parseIncidenceXlsx> | null = null
 
   if (params.docType === "incidence") {
     if (!["xlsx", "xls"].includes(ext)) {
@@ -132,7 +142,8 @@ export async function uploadCoachDocument(params: {
       throw new Error("exam_target_id obrigatório para incidência")
     }
 
-    const parsed = parseIncidenceXlsx(buffer)
+    incidenceParsed = parseIncidenceXlsx(buffer)
+    const parsed = incidenceParsed
 
     const { data: subjects } = await supabaseServer
       .from("subjects")
@@ -168,9 +179,12 @@ export async function uploadCoachDocument(params: {
       scope: isWorkbook ? "exam_workbook" : "single_subject",
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
+      flat_row_count: parsed.flat_rows.length,
+      parse_stats: parsed.stats,
       block_count: parsed.blocks.length,
       manual_overrides: isWorkbook ? manualOverrides : undefined,
       subject_mappings: isWorkbook ? subjectMappings : undefined,
+      merge_warnings: isWorkbook ? subjectMappings.merge_warnings : [],
       matched_subject_label: block?.subject_label ?? null,
       groups: block?.groups ?? [],
       group_count: block?.groups.length ?? 0,
@@ -188,7 +202,12 @@ export async function uploadCoachDocument(params: {
     }
     const text = await extractPdfText(buffer)
     const excerpt = truncateText(text, 120_000)
-    parsed_tables = { format: "pdf", text_excerpt: excerpt, char_count: text.length }
+    parsed_tables = {
+      format: "pdf",
+      text_excerpt: excerpt,
+      full_text: text,
+      char_count: text.length,
+    }
     contentType = "application/pdf"
   }
 
@@ -227,6 +246,20 @@ export async function uploadCoachDocument(params: {
 
   if (insErr) throw new Error(insErr.message)
 
+  if (
+    params.docType === "incidence" &&
+    params.examTargetId &&
+    !params.subjectId &&
+    incidenceParsed
+  ) {
+    await persistIncidenceRows({
+      userId: params.userId,
+      examTargetId: params.examTargetId,
+      documentId: doc.id,
+      parsed: incidenceParsed,
+    })
+  }
+
   if (params.docType === "edital" && params.examTargetId) {
     await supabaseServer
       .from("exam_targets")
@@ -263,6 +296,11 @@ export function documentTextExcerpt(doc: {
   const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
   if (pt.format === "xlsx_incidence") {
     return String(pt.text_excerpt ?? JSON.stringify(pt.summary_for_llm ?? []))
+  }
+  if (pt.format === "pdf") {
+    const full = String(pt.full_text ?? "")
+    if (full.length > 0) return full
+    return String(pt.text_excerpt ?? "")
   }
   return String(pt.text_excerpt ?? "")
 }

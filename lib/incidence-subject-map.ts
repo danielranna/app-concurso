@@ -1,4 +1,4 @@
-import type { IncidenceSubjectBlock } from "./incidence-xlsx"
+import type { IncidenceSubjectBlock, IncidenceGroup } from "./incidence-xlsx"
 
 export function normLabel(s: string) {
   return s
@@ -8,7 +8,6 @@ export function normLabel(s: string) {
     .trim()
 }
 
-/** Pontuação 0–100 entre rótulo do Excel e nome da sua matéria. */
 export function matchScore(excelLabel: string, subjectName: string): number {
   const a = normLabel(excelLabel)
   const b = normLabel(subjectName)
@@ -31,16 +30,28 @@ export type IncidenceBlockMapping = {
   subject_name: string | null
   match_score: number
   group_count: number
-  /** Vínculo definido manualmente pelo usuário. */
   manual?: boolean
 }
 
-/** excel_label → subject_id (null = sem vínculo explícito). */
 export type ManualOverrides = Record<string, string | null>
 
 function subjectById(subjects: SubjectRow[], id: string | null) {
   if (!id) return null
   return subjects.find((s) => s.id === id) ?? null
+}
+
+function mergeGroups(groupsList: IncidenceGroup[][]): IncidenceGroup[] {
+  const byKey = new Map<string, IncidenceGroup>()
+  for (const groups of groupsList) {
+    for (const g of groups) {
+      const key = `${g.code}::${normLabel(g.name)}`
+      const existing = byKey.get(key)
+      if (!existing || g.quantity > existing.quantity) {
+        byKey.set(key, { ...g })
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => b.percent - a.percent)
 }
 
 export function pickBlockForSubject(
@@ -66,10 +77,21 @@ export function blockForSubjectWithOverrides(
   subjectId: string,
   manualOverrides: ManualOverrides = {}
 ) {
-  const overrideBlock = blocks.find(
-    (b) => manualOverrides[b.subject_label] === subjectId
-  )
-  if (overrideBlock) return overrideBlock
+  const labelsForSubject = Object.entries(manualOverrides)
+    .filter(([, sid]) => sid === subjectId)
+    .map(([label]) => label)
+
+  if (labelsForSubject.length) {
+    const matched = blocks.filter((b) => labelsForSubject.includes(b.subject_label))
+    if (matched.length) {
+      return {
+        subject_label: matched.map((b) => b.subject_label).join(" + "),
+        total_quantity: matched.reduce((s, b) => s + b.total_quantity, 0),
+        groups: mergeGroups(matched.map((b) => b.groups)),
+      }
+    }
+  }
+
   const sub = subjects.find((s) => s.id === subjectId)
   if (!sub) return null
   const claimed = new Set(
@@ -81,7 +103,6 @@ export function blockForSubjectWithOverrides(
   return pickBlockForSubject(available, sub.name)
 }
 
-/** Uma linha por bloco do Excel; cada matéria sua recebe no máximo o melhor bloco (score ≥ 40). */
 export function mapIncidenceBlocksToSubjects(
   blocks: IncidenceSubjectBlock[],
   subjects: SubjectRow[],
@@ -91,12 +112,15 @@ export function mapIncidenceBlocksToSubjects(
     subject_id: string
     subject_name: string
     excel_label: string
+    excel_labels: string[]
     match_score: number
-    groups: IncidenceSubjectBlock["groups"]
+    groups: IncidenceGroup[]
+    manual?: boolean
   }[]
   by_block: IncidenceBlockMapping[]
   unmapped_subjects: SubjectRow[]
   unmapped_blocks: IncidenceSubjectBlock[]
+  merge_warnings: { subject_id: string; subject_name: string; excel_labels: string[] }[]
 } {
   const usedBlocks = new Set<string>()
   const mappedSubjectIds = new Set<string>()
@@ -104,28 +128,50 @@ export function mapIncidenceBlocksToSubjects(
     subject_id: string
     subject_name: string
     excel_label: string
+    excel_labels: string[]
     match_score: number
-    groups: IncidenceSubjectBlock["groups"]
+    groups: IncidenceGroup[]
     manual?: boolean
   }[] = []
+  const merge_warnings: {
+    subject_id: string
+    subject_name: string
+    excel_labels: string[]
+  }[] = []
 
-  for (const block of blocks) {
-    if (!(block.subject_label in manualOverrides)) continue
-    const sid = manualOverrides[block.subject_label]
+  const manualBySubject = new Map<string, string[]>()
+  for (const [excelLabel, sid] of Object.entries(manualOverrides)) {
     if (sid == null) {
-      usedBlocks.add(block.subject_label)
+      usedBlocks.add(excelLabel)
       continue
     }
-    const sub = subjectById(subjects, sid)
-    if (!sub || mappedSubjectIds.has(sub.id)) continue
-    mappedSubjectIds.add(sub.id)
-    usedBlocks.add(block.subject_label)
+    const list = manualBySubject.get(sid) ?? []
+    list.push(excelLabel)
+    manualBySubject.set(sid, list)
+  }
+
+  for (const [subjectId, excelLabels] of manualBySubject) {
+    const sub = subjectById(subjects, subjectId)
+    if (!sub) continue
+    const matchedBlocks = blocks.filter((b) => excelLabels.includes(b.subject_label))
+    for (const lbl of excelLabels) usedBlocks.add(lbl)
+    mappedSubjectIds.add(subjectId)
+
+    if (excelLabels.length > 1) {
+      merge_warnings.push({
+        subject_id: subjectId,
+        subject_name: sub.name,
+        excel_labels: excelLabels,
+      })
+    }
+
     by_subject.push({
-      subject_id: sub.id,
+      subject_id: subjectId,
       subject_name: sub.name,
-      excel_label: block.subject_label,
+      excel_label: excelLabels.join(" + "),
+      excel_labels: excelLabels,
       match_score: 100,
-      groups: block.groups,
+      groups: mergeGroups(matchedBlocks.map((b) => b.groups)),
       manual: true,
     })
   }
@@ -149,6 +195,7 @@ export function mapIncidenceBlocksToSubjects(
         subject_id: sub.id,
         subject_name: sub.name,
         excel_label: best.subject_label,
+        excel_labels: [best.subject_label],
         match_score: bestScore,
         groups: best.groups,
       })
@@ -170,7 +217,9 @@ export function mapIncidenceBlocksToSubjects(
         manual: true,
       }
     }
-    const linked = by_subject.find((r) => r.excel_label === block.subject_label)
+    const linked = by_subject.find((r) =>
+      r.excel_labels.includes(block.subject_label)
+    )
     if (linked) {
       return {
         excel_label: block.subject_label,
@@ -201,7 +250,7 @@ export function mapIncidenceBlocksToSubjects(
 
   const unmapped_blocks = blocks.filter((b) => !usedBlocks.has(b.subject_label))
 
-  return { by_subject, by_block, unmapped_subjects, unmapped_blocks }
+  return { by_subject, by_block, unmapped_subjects, unmapped_blocks, merge_warnings }
 }
 
 export function groupsForSubjectFromBlocks(
