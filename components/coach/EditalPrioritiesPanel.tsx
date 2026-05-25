@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Loader2, Sparkles, FileUp } from "lucide-react"
 import type { EditalSubjectRankRow, ExamPlanStructured } from "@/lib/coach-types"
+import { isDiscursiveSubject } from "@/lib/edital-discursive"
 
 type EditalDocRow = {
   id: string
@@ -137,9 +138,28 @@ export default function EditalPrioritiesPanel({
           body: JSON.stringify({ user_id: userId }),
         }
       )
-      const data = await res.json()
-      if (data.error) {
-        alert(data.error)
+      let data: {
+        error?: string
+        model_used?: string
+        edital_subjects_count?: number
+        subject_rank?: unknown[]
+      }
+      const raw = await res.text()
+      try {
+        data = JSON.parse(raw) as typeof data
+      } catch {
+        alert(
+          res.status === 504 || res.status === 408
+            ? "A análise demorou demais (timeout). Os créditos da API podem ter sido consumidos — aguarde 1 min e tente de novo."
+            : `Resposta inválida do servidor (${res.status}). Tente de novo em instantes.`
+        )
+        return
+      }
+      if (!res.ok || data.error) {
+        alert(
+          data.error ??
+            `Erro no servidor (${res.status}). Se a API já cobrou, aguarde 1 minuto e tente novamente.`
+        )
       } else {
         await loadAnalysis()
         onAnalysisDone?.()
@@ -151,18 +171,20 @@ export default function EditalPrioritiesPanel({
           `Análise salva (${data.model_used ?? "IA"}). Ranking com ${n} matérias do edital.`
         )
       }
-    } catch {
-      alert("Falha na análise do edital.")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "erro de rede"
+      alert(`Falha na análise: ${msg}`)
     } finally {
       setAnalyzing(false)
     }
   }
 
   const priorities = analysis?.priorities as ExamPlanStructured | undefined
-  const rank: EditalSubjectRankRow[] =
+  const rank: EditalSubjectRankRow[] = (
     analysis?.subject_rank?.length
       ? analysis.subject_rank
       : priorities?.subject_priority_rank ?? []
+  ).filter((r) => !isDiscursiveSubject(r.subject_name ?? ""))
   const editalSubjectsInStructure = analysis?.structure?.subjects?.length ?? 0
 
   return (
@@ -280,10 +302,36 @@ export default function EditalPrioritiesPanel({
             />
           </div>
 
+          {(priorities?.discursive_subjects?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-slate-300 bg-slate-50 p-4">
+              <h4 className="mb-2 text-sm font-semibold text-slate-900">
+                Provas discursivas (fora do ranking objetivo)
+              </h4>
+              {priorities?.discursive_note && (
+                <p className="mb-2 text-xs text-slate-600">
+                  {priorities.discursive_note}
+                </p>
+              )}
+              <ul className="space-y-1 text-sm text-slate-700">
+                {priorities?.discursive_subjects?.map((d) => (
+                  <li key={d.name}>
+                    <span className="font-medium">{d.name}</span>
+                    {d.prova && (
+                      <span className="text-slate-500"> · {d.prova}</span>
+                    )}
+                    {d.note && (
+                      <span className="text-slate-500"> — {d.note}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div>
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h4 className="text-sm font-semibold text-slate-900">
-                Ranking de relevância das matérias
+                Ranking de relevância (matérias objetivas)
               </h4>
               <p className="text-xs text-slate-500">
                 {rank.length} matérias

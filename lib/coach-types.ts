@@ -176,6 +176,14 @@ export type EditalSubjectLabel = {
   why?: string
 }
 
+export type DiscursiveSubjectNote = {
+  name: string
+  question_count?: number
+  percent_of_total?: number
+  prova?: string
+  note?: string
+}
+
 export type EditalIncidenceMapNote = {
   edital_subject?: string
   excel_subject?: string
@@ -190,6 +198,8 @@ export type ExamPlanStructured = {
   priority_subjects?: EditalSubjectLabel[]
   secondary_subjects?: EditalSubjectLabel[]
   trap_subjects?: EditalSubjectLabel[]
+  discursive_subjects?: DiscursiveSubjectNote[]
+  discursive_note?: string
   incidence_map_notes?: EditalIncidenceMapNote[]
   subject_priority_rank?: EditalSubjectRankRow[]
   topic_matrix?: {

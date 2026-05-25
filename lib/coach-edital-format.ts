@@ -97,6 +97,27 @@ export function buildCoachEditalSummaryMd(
     lines.push("")
   }
 
+  if (structured.discursive_subjects?.length) {
+    lines.push("## Provas / matérias discursivas (fora do ranking objetivo)", "")
+    if (structured.discursive_note) {
+      lines.push(structured.discursive_note, "")
+    }
+    for (const d of structured.discursive_subjects) {
+      const meta = [
+        d.question_count != null && `${d.question_count} itens`,
+        d.percent_of_total != null && `${d.percent_of_total}%`,
+        d.prova,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+      lines.push(
+        `- **${d.name}**${meta ? ` (${meta})` : ""}`,
+        d.note ? `  ${d.note}` : ""
+      )
+    }
+    lines.push("")
+  }
+
   if (structured.trap_subjects?.length) {
     lines.push("## Matérias armadilha", "")
     for (const s of structured.trap_subjects) {

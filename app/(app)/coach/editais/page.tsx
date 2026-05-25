@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { FileUp, Loader2, Plus, Star } from "lucide-react"
 import IncidenceHierarchyPanel from "@/components/coach/IncidenceHierarchyPanel"
 import EditalPrioritiesPanel from "@/components/coach/EditalPrioritiesPanel"
+import EditalSubjectMappingPanel from "@/components/coach/EditalSubjectMappingPanel"
 import type { ExamTarget } from "@/lib/coach-types"
 
 type IncidenceDocRow = {
@@ -33,6 +34,7 @@ export default function CoachEditaisPage() {
   const [saving, setSaving] = useState(false)
   const [uploadingExcel, setUploadingExcel] = useState(false)
   const [hierarchyKey, setHierarchyKey] = useState(0)
+  const [mappingKey, setMappingKey] = useState(0)
 
   const active = targets.find((t) => t.id === selectedId) ?? targets.find((t) => t.is_active)
 
@@ -297,6 +299,13 @@ export default function CoachEditaisPage() {
             examTargetId={active.id}
             examName={active.name}
             hasIncidenceExcel={!!incidenceDoc}
+            onAnalysisDone={() => setMappingKey((k) => k + 1)}
+          />
+
+          <EditalSubjectMappingPanel
+            userId={userId}
+            examTargetId={active.id}
+            reloadKey={mappingKey}
           />
         </section>
       )}

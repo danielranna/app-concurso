@@ -5,10 +5,12 @@ import { fetchIncidenceRows } from "../incidence-rows-db"
 import { runAgent } from "./run-agent"
 import { getUserAiCredentials } from "./user-credentials"
 import type { EditalSubjectRankRow, ExamPlanStructured } from "../coach-types"
+import { isDiscursiveSubject, type DiscursiveSubjectNote } from "../edital-discursive"
 import { persistEditalSubjectRank } from "../edital-subject-rank-db"
 import {
   asExamPlanStructured,
   buildCoachEditalSummaryMd,
+  parseCoachEditalJson,
 } from "../coach-edital-format"
 
 const STRUCTURE_SYSTEM = `Você extrai a estrutura de um edital de concurso público (texto do PDF).
@@ -32,9 +34,11 @@ Responda JSON válido:
 
 const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise o edital (lista edital_subjects) e cruze com incidence_crosswalk quando existir.
 
-REGRA OBRIGATÓRIA: subject_priority_rank deve listar TODAS as matérias de edital_subjects — uma linha por matéria, sem omitir nenhuma. Ordene por impacto na nota (peso, questões, %). priority começa em 1 (mais relevante).
+REGRA OBRIGATÓRIA: subject_priority_rank deve listar TODAS as matérias OBJETIVAS de edital_subjects (prova objetiva / múltipla escolha) — uma linha por matéria, sem omitir nenhuma. NÃO inclua provas ou matérias DISCURSIVAS no ranking.
+Matérias discursivas vão só em discursive_subjects (nome, question_count, percent_of_total, prova, note breve) e opcionalmente discursive_note (parágrafo resumindo o papel delas no concurso).
+Ordene o ranking por impacto na nota objetiva (peso, questões, %). priority começa em 1 (mais relevante).
 
-Para cada matéria: why breve, edital_weight, question_count, percent_of_total, prova, tiebreaker_note se houver, impact_on_final_score, incidence_summary (1 frase; use crosswalk ou "sem dados de incidência").
+Para cada matéria: why em até 120 caracteres, edital_weight, question_count, percent_of_total, prova, tiebreaker_note se houver, impact_on_final_score, incidence_summary em 1 frase curta.
 
 Também: resumo do edital, conclusões estratégicas, listas priority_subjects / secondary_subjects / trap_subjects (subconjuntos do ranking, não substituem o ranking completo).
 
@@ -46,6 +50,8 @@ Responda JSON válido:
   "priority_subjects": [{ "name": "", "why": "" }],
   "secondary_subjects": [{ "name": "", "why": "" }],
   "trap_subjects": [{ "name": "", "why": "" }],
+  "discursive_subjects": [{ "name": "", "question_count": 0, "percent_of_total": 0, "prova": "", "note": "" }],
+  "discursive_note": "",
   "subject_priority_rank": [
     {
       "subject_name": "",
@@ -152,7 +158,33 @@ function findLlmRankForSubject(
   )
 }
 
-/** Garante uma linha no ranking para cada matéria extraída do edital. */
+export function splitDiscursiveSubjects<
+  T extends {
+    name: string
+    question_count?: number
+    percent_of_total?: number
+    prova?: string
+  },
+>(subjects: T[]) {
+  const objective: T[] = []
+  const discursive: DiscursiveSubjectNote[] = []
+  for (const s of subjects) {
+    if (isDiscursiveSubject(s.name)) {
+      discursive.push({
+        name: s.name,
+        question_count: s.question_count,
+        percent_of_total: s.percent_of_total,
+        prova: s.prova,
+        note: "Prova discursiva — fora do ranking de matérias objetivas.",
+      })
+    } else {
+      objective.push(s)
+    }
+  }
+  return { objective, discursive }
+}
+
+/** Garante uma linha no ranking para cada matéria objetiva do edital (sem discursivas). */
 export function ensureFullSubjectRanking(
   editalSubjects: {
     name: string
@@ -163,8 +195,13 @@ export function ensureFullSubjectRanking(
   }[],
   llmRank: EditalSubjectRankRow[]
 ): EditalSubjectRankRow[] {
-  const merged = editalSubjects.map((es) => {
-    const fromLlm = findLlmRankForSubject(llmRank, es.name)
+  const { objective } = splitDiscursiveSubjects(editalSubjects)
+  const objectiveRank = llmRank.filter(
+    (r) => !isDiscursiveSubject(r.subject_name ?? "")
+  )
+
+  const merged = objective.map((es) => {
+    const fromLlm = findLlmRankForSubject(objectiveRank, es.name)
     if (fromLlm) {
       return {
         ...fromLlm,
@@ -352,7 +389,8 @@ export async function analyzeExamEdital(
     subjects: { name: string; edital_weight?: string; topics: { name: string }[] }[]
   } = { subjects: [] }
 
-  for (let i = 0; i < chunks.length; i++) {
+  const chunksToProcess = chunks.slice(0, 4)
+  for (let i = 0; i < chunksToProcess.length; i++) {
     if (i > 0) await sleep(1200)
     const part = await runAgent({
       agentType: "edital",
@@ -360,7 +398,7 @@ export async function analyzeExamEdital(
       examTargetId,
       model: "gpt-4o-mini",
       systemPrompt: STRUCTURE_SYSTEM,
-      userContent: `Parte ${i + 1}/${chunks.length} do edital:\n\n${chunks[i]}`,
+      userContent: `Parte ${i + 1}/${chunksToProcess.length} do edital:\n\n${chunksToProcess[i]}`,
       jsonMode: true,
       maxTokens: 3500,
       metadata: { phase: "structure", chunk: i },
@@ -456,14 +494,46 @@ export async function analyzeExamEdital(
     })
   }
 
-  const structuredRaw = JSON.parse(prioritiesResult.text || "{}") as Record<string, unknown>
+  const structuredRaw = parseCoachEditalJson(prioritiesResult.text || "{}")
   const structured = asExamPlanStructured(structuredRaw)
+  if (
+    !structure.subjects.length &&
+    !(structured.subject_priority_rank?.length ?? 0)
+  ) {
+    throw new Error(
+      "Não foi possível extrair matérias do PDF. Confira se o arquivo é o edital completo e tente reenviar."
+    )
+  }
+
+  const { objective: objectiveSubjects, discursive: discursiveFromStructure } =
+    splitDiscursiveSubjects(structure.subjects)
 
   const fullRank = ensureFullSubjectRanking(
-    structure.subjects,
+    objectiveSubjects,
     structured.subject_priority_rank ?? []
   )
   structured.subject_priority_rank = fullRank
+
+  const llmDiscursive = (structured.discursive_subjects ?? []).filter(
+    (d) => d.name && isDiscursiveSubject(d.name)
+  )
+  const discursiveMerged = [...discursiveFromStructure]
+  const discNames = new Set(discursiveMerged.map((d) => normLabel(d.name)))
+  for (const d of llmDiscursive) {
+    const key = normLabel(d.name)
+    if (!discNames.has(key)) {
+      discursiveMerged.push(d)
+      discNames.add(key)
+    }
+  }
+  if (discursiveMerged.length) {
+    structured.discursive_subjects = discursiveMerged
+    if (!structured.discursive_note) {
+      structured.discursive_note =
+        "As matérias/provas discursivas abaixo não entram no ranking objetivo; prepare-as à parte conforme o edital."
+    }
+  }
+
   delete (structured as Record<string, unknown>).topic_matrix
   delete (structured as Record<string, unknown>).incidence_map_notes
 
@@ -490,8 +560,21 @@ export async function analyzeExamEdital(
 
   if (error) throw new Error(error.message)
 
+  const suggestedIncidence: Record<string, string> = {}
+  for (const es of objectiveSubjects) {
+    const m = matched[es.name]
+    if (m?.subject_label && (m.match_score ?? 0) >= 35) {
+      suggestedIncidence[es.name] = m.subject_label
+    }
+  }
+
   try {
-    await persistEditalSubjectRank(userId, examTargetId, fullRank)
+    await persistEditalSubjectRank(
+      userId,
+      examTargetId,
+      fullRank,
+      suggestedIncidence
+    )
   } catch (rankErr) {
     console.warn(
       "exam_edital_subject_rank:",
@@ -506,10 +589,14 @@ export async function analyzeExamEdital(
     structured,
     input_snapshot: {
       edital_subjects_count: structure.subjects.length,
+      rank_rows_count: fullRank.length,
       incidence_rows_count: incidenceRows.length,
-      incidence_crosswalk: incidenceForLlm,
     },
     model_used: modelUsed,
+  }).then(({ error: reportErr }) => {
+    if (reportErr) {
+      console.warn("exam_target_reports:", reportErr.message)
+    }
   })
 
   await supabaseServer.from("ai_runs").insert({
@@ -520,6 +607,8 @@ export async function analyzeExamEdital(
     cost_estimate: prioritiesResult.costUsd,
     status: "ok",
     metadata: { exam_target_id: examTargetId, analysis_id: analysis?.id },
+  }).then(({ error: runErr }) => {
+    if (runErr) console.warn("ai_runs edital_analysis:", runErr.message)
   })
 
   const { syncEditalWeightsToQueue } = await import("./strategic-queue")
@@ -563,7 +652,8 @@ export async function getExamEditalAnalysis(userId: string, examTargetId: string
   )?.subjects
 
   if (structureSubjects?.length) {
-    subject_rank = ensureFullSubjectRanking(structureSubjects, subject_rank)
+    const { objective } = splitDiscursiveSubjects(structureSubjects)
+    subject_rank = ensureFullSubjectRanking(objective, subject_rank)
   }
 
   return { ...data, subject_rank }
