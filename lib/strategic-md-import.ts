@@ -13,6 +13,73 @@ import { parseStrategicMd, validateStrategicMd } from "./strategic-md-parser"
 import type { StrategicMdBundle } from "./strategic-md-types"
 import type { SubjectRow } from "./incidence-subject-map"
 
+export function countBundleTopics(bundle: StrategicMdBundle | null | undefined): number {
+  if (!bundle?.topics_by_slug) return 0
+  return Object.values(bundle.topics_by_slug).reduce(
+    (n, topics) => n + (topics?.length ?? 0),
+    0
+  )
+}
+
+export function flattenTopicsFromBundle(bundle: StrategicMdBundle) {
+  const out: {
+    subject: string
+    slug: string
+    topic: string
+    quantity: number
+    percent: number
+  }[] = []
+
+  for (const [slug, topics] of Object.entries(bundle.topics_by_slug)) {
+    if (!topics?.length) continue
+    const subject = mdNameForSlug(bundle, slug)
+    for (const t of topics) {
+      out.push({
+        subject,
+        slug,
+        topic: t.topic,
+        quantity: t.quantity,
+        percent: t.percent,
+      })
+    }
+  }
+
+  return out.sort((a, b) => b.quantity - a.quantity)
+}
+
+/** Re-parseia o MD salvo quando o bundle no banco ficou sem tópicos (import antigo). */
+export async function ensureStrategicBundleFresh(
+  userId: string,
+  examTargetId: string
+): Promise<{ bundle: StrategicMdBundle | null; refreshed: boolean }> {
+  const doc = await getStrategicMdDocument(userId, examTargetId)
+  if (!doc) return { bundle: null, refreshed: false }
+
+  const pt = (doc.parsed_tables ?? {}) as {
+    bundle?: StrategicMdBundle
+    full_text?: string
+  }
+
+  if (countBundleTopics(pt.bundle) > 0) {
+    return { bundle: pt.bundle ?? null, refreshed: false }
+  }
+
+  const markdown = pt.full_text ?? ""
+  if (!markdown.trim()) {
+    return { bundle: pt.bundle ?? null, refreshed: false }
+  }
+
+  await reparseStrategicDocument({
+    userId,
+    documentId: doc.id,
+    examTargetId,
+  })
+
+  const fresh = await getStrategicMdDocument(userId, examTargetId)
+  const freshPt = (fresh?.parsed_tables ?? {}) as { bundle?: StrategicMdBundle }
+  return { bundle: freshPt.bundle ?? null, refreshed: true }
+}
+
 export function bundleToIncidenceWorkbook(bundle: StrategicMdBundle): ParsedIncidenceWorkbook {
   const flat_rows: IncidenceFlatRow[] = []
   const blocksByLabel = new Map<

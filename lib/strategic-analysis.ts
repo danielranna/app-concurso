@@ -8,7 +8,12 @@ import type {
   StrategicMdMappings,
 } from "./strategic-md-types"
 import type { ExamPlanStructured } from "./coach-types"
-import { getStrategicMdDocument } from "./strategic-md-import"
+import {
+  countBundleTopics,
+  ensureStrategicBundleFresh,
+  flattenTopicsFromBundle,
+  getStrategicMdDocument,
+} from "./strategic-md-import"
 
 function computePredictability(
   bundle: StrategicMdBundle
@@ -99,11 +104,20 @@ export async function buildStrategicAnalysisPayload(
   userId: string,
   examTargetId: string
 ): Promise<StrategicAnalysisPayload> {
+  let bundleRefreshed = false
+  let ensured = await ensureStrategicBundleFresh(userId, examTargetId)
+  if (ensured.refreshed) bundleRefreshed = true
+
   const doc = await getStrategicMdDocument(userId, examTargetId)
   const pt = (doc?.parsed_tables ?? {}) as {
     bundle?: StrategicMdBundle
     subject_mappings?: StrategicMdMappings
     parse_stats?: Record<string, unknown>
+  }
+
+  let bundle = ensured.bundle ?? pt.bundle ?? null
+  if (!countBundleTopics(bundle) && pt.bundle && countBundleTopics(pt.bundle) > 0) {
+    bundle = pt.bundle
   }
 
   const { data: analysis } = await supabaseServer
@@ -120,7 +134,6 @@ export async function buildStrategicAnalysisPayload(
     .eq("exam_target_id", examTargetId)
 
   const enrichment = (analysis?.enrichment ?? {}) as StrategicEnrichment
-  const bundle = pt.bundle ?? null
   const mappings = pt.subject_mappings ?? null
 
   const basePredictability = bundle ? computePredictability(bundle) : []
@@ -153,6 +166,7 @@ export async function buildStrategicAnalysisPayload(
     incidence_row_count: count ?? 0,
     parse_stats: pt.parse_stats ?? null,
     strategic_queue_preview: queue ?? [],
+    bundle_refreshed: bundleRefreshed,
   }
 }
 
@@ -162,7 +176,7 @@ export async function getGlobalTopicRanking(
   limit = 30
 ) {
   const rows = await fetchIncidenceRows({ userId, examTargetId })
-  return rows
+  const fromDb = rows
     .map((r) => ({
       subject: r.subject_label,
       topic: r.topic_name,
@@ -170,6 +184,19 @@ export async function getGlobalTopicRanking(
       percent: Number(r.percent),
     }))
     .sort((a, b) => b.quantity - a.quantity)
+
+  if (fromDb.length > 0) return fromDb.slice(0, limit)
+
+  const { bundle } = await ensureStrategicBundleFresh(userId, examTargetId)
+  if (!bundle) return []
+
+  return flattenTopicsFromBundle(bundle)
+    .map(({ subject, topic, quantity, percent }) => ({
+      subject,
+      topic,
+      quantity,
+      percent,
+    }))
     .slice(0, limit)
 }
 

@@ -136,4 +136,5 @@ export type StrategicAnalysisPayload = {
     quantity: number
     percent: number
   }[]
+  bundle_refreshed?: boolean
 }
