@@ -19,8 +19,17 @@ export async function POST(
     const result = await analyzeExamEdital(user_id, id)
     return NextResponse.json(result)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erro"
-    return NextResponse.json({ error: msg }, { status: 500 })
+    const raw = e instanceof Error ? e.message : "Erro"
+    if (/rate limit|tokens per min|TPM|too large/i.test(raw)) {
+      return NextResponse.json(
+        {
+          error:
+            "Limite de tokens da OpenAI (30 mil/min). Aguarde cerca de 1 minuto e clique em Analisar de novo. Se repetir, o PDF pode estar muito longo — tente só o edital (sem anexos repetidos).",
+        },
+        { status: 429 }
+      )
+    }
+    return NextResponse.json({ error: raw }, { status: 500 })
   }
 }
 

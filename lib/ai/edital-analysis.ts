@@ -1,9 +1,5 @@
 import { supabaseServer } from "../supabase-server"
-import {
-  buildIncidencePayloadForExam,
-  documentTextExcerpt,
-  listCoachDocuments,
-} from "../coach-documents"
+import { documentTextExcerpt, listCoachDocuments } from "../coach-documents"
 import { normLabel } from "../incidence-subject-map"
 import { fetchIncidenceRows } from "../incidence-rows-db"
 import { runAgent } from "./run-agent"
@@ -87,7 +83,90 @@ Responda JSON válido:
   ],
   "risks_if_ignored": [],
   "exam_readiness_score": 0
-}`
+}
+
+No topic_matrix: no máximo 6 tópicos por matéria e só para as 12 matérias mais relevantes do ranking.`
+
+/** ~4 chars/token — mantém cada chamada bem abaixo do TPM 30k do gpt-4o */
+const MAX_EDITAL_CHARS = 55_000
+const STRUCTURE_CHUNK_CHARS = 16_000
+const MAX_TOPICS_PER_EDITAL_SUBJECT = 15
+const MAX_INCIDENCE_TOPICS_PER_SUBJECT = 12
+const MAX_PRIORITIES_PAYLOAD_CHARS = 72_000
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function compactEditalSubjects(
+  subjects: {
+    name: string
+    edital_weight?: string
+    question_count?: number
+    percent_of_total?: number
+    prova?: string
+    topics?: { name: string; weight_hint?: string }[]
+  }[]
+) {
+  return subjects.map((s) => ({
+    name: s.name,
+    edital_weight: s.edital_weight,
+    question_count: s.question_count,
+    percent_of_total: s.percent_of_total,
+    prova: s.prova,
+    topics: (s.topics ?? [])
+      .slice(0, MAX_TOPICS_PER_EDITAL_SUBJECT)
+      .map((t) => ({ name: t.name })),
+  }))
+}
+
+function trimPayloadJson(payload: unknown, maxChars: number): string {
+  let json = JSON.stringify(payload)
+  if (json.length <= maxChars) return json
+
+  const p = payload as {
+    edital_subjects?: ReturnType<typeof compactEditalSubjects>
+    incidence_crosswalk?: ReturnType<typeof buildIncidencePayloadForLlm>
+  }
+
+  const slimCrosswalk = (p.incidence_crosswalk ?? []).map((row) => ({
+    ...row,
+    topics_from_edital: (row.topics_from_edital ?? []).slice(0, 8),
+    incidence_topics: (row.incidence_topics ?? []).slice(0, 6),
+  }))
+
+  const slimmerSubjects = (p.edital_subjects ?? []).map((s) => ({
+    ...s,
+    topics: (s.topics ?? []).slice(0, 8),
+  }))
+
+  json = JSON.stringify({
+    ...p,
+    edital_subjects: slimmerSubjects,
+    incidence_crosswalk: slimCrosswalk,
+    _note: "payload reduzido por limite de tokens",
+  })
+
+  if (json.length > maxChars) {
+    return JSON.stringify({
+      exam_target: (payload as { exam_target?: unknown }).exam_target,
+      edital_subjects: slimmerSubjects,
+      incidence_crosswalk: slimCrosswalk.map((r) => ({
+        edital_subject: r.edital_subject,
+        edital_weight: r.edital_weight,
+        excel_subject_label: r.excel_subject_label,
+        incidence_topics: (r.incidence_topics ?? []).slice(0, 5),
+      })),
+      _note: "payload mínimo por limite de tokens",
+    })
+  }
+  return json
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /rate limit|tokens per min|TPM|too large/i.test(msg)
+}
 
 function scoreNameMatch(a: string, b: string): number {
   const na = normLabel(a)
@@ -175,12 +254,14 @@ function buildIncidencePayloadForLlm(
       excel_subject_label: m?.subject_label ?? null,
       match_score: m?.match_score ?? 0,
       topics_from_edital: es.topics.map((t) => t.name),
-      incidence_topics: sorted.slice(0, 80).map((r) => ({
-        topic: r.topic_name,
-        percent: Number(r.percent),
-        quantity: r.quantity,
-        is_subtopic: r.is_subtopic,
-      })),
+      incidence_topics: sorted
+        .filter((r) => !r.is_subtopic)
+        .slice(0, MAX_INCIDENCE_TOPICS_PER_SUBJECT)
+        .map((r) => ({
+          topic: r.topic_name,
+          percent: Number(r.percent),
+          quantity: r.quantity,
+        })),
       incidence_aggregate_percent: sorted.reduce((s, r) => s + Number(r.percent), 0),
     }
   })
@@ -215,11 +296,10 @@ export async function analyzeExamEdital(
   const editalDoc = docs.find((d) => d.doc_type === "edital")
   if (!editalDoc) throw new Error("Envie o PDF do edital antes de analisar.")
 
-  const editalText = documentTextExcerpt(editalDoc)
+  const editalText = documentTextExcerpt(editalDoc).slice(0, MAX_EDITAL_CHARS)
   const chunks: string[] = []
-  const chunkSize = 90_000
-  for (let i = 0; i < editalText.length; i += chunkSize) {
-    chunks.push(editalText.slice(i, i + chunkSize))
+  for (let i = 0; i < editalText.length; i += STRUCTURE_CHUNK_CHARS) {
+    chunks.push(editalText.slice(i, i + STRUCTURE_CHUNK_CHARS))
   }
 
   let structure: {
@@ -227,14 +307,16 @@ export async function analyzeExamEdital(
   } = { subjects: [] }
 
   for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await sleep(1200)
     const part = await runAgent({
       agentType: "edital",
       userId,
       examTargetId,
+      model: "gpt-4o-mini",
       systemPrompt: STRUCTURE_SYSTEM,
       userContent: `Parte ${i + 1}/${chunks.length} do edital:\n\n${chunks[i]}`,
       jsonMode: true,
-      maxTokens: 4000,
+      maxTokens: 3500,
       metadata: { phase: "structure", chunk: i },
     })
     try {
@@ -268,24 +350,64 @@ export async function analyzeExamEdital(
   )
 
   const incidenceForLlm = buildIncidencePayloadForLlm(structure.subjects, matched)
+  const compactSubjects = compactEditalSubjects(structure.subjects)
 
-  const mappingPayload = await buildIncidencePayloadForExam(userId, examTargetId)
+  const prioritiesPayload = {
+    exam_target: { name: exam.name, banca: exam.banca },
+    edital_subjects: compactSubjects,
+    incidence_crosswalk: incidenceForLlm,
+    incidence_rows_total: incidenceRows.length,
+  }
+  const prioritiesUserContent = trimPayloadJson(
+    prioritiesPayload,
+    MAX_PRIORITIES_PAYLOAD_CHARS
+  )
 
-  const prioritiesResult = await runAgent({
-    agentType: "edital",
-    userId,
-    examTargetId,
-    systemPrompt: PRIORITIES_SYSTEM,
-    userContent: JSON.stringify({
-      exam_target: { name: exam.name, banca: exam.banca },
-      edital_subjects: structure.subjects,
-      incidence_crosswalk: incidenceForLlm,
-      app_subject_mappings: mappingPayload.for_llm,
-    }),
-    jsonMode: true,
-    maxTokens: 4500,
-    metadata: { phase: "priorities" },
-  })
+  let prioritiesResult
+  try {
+    prioritiesResult = await runAgent({
+      agentType: "edital",
+      userId,
+      examTargetId,
+      systemPrompt: PRIORITIES_SYSTEM,
+      userContent: prioritiesUserContent,
+      jsonMode: true,
+      maxTokens: 4000,
+      metadata: { phase: "priorities" },
+    })
+  } catch (e) {
+    if (!isRateLimitError(e)) throw e
+    await sleep(2000)
+    const minimalContent = trimPayloadJson(
+      {
+        exam_target: prioritiesPayload.exam_target,
+        edital_subjects: compactSubjects.map((s) => ({
+          name: s.name,
+          edital_weight: s.edital_weight,
+          question_count: s.question_count,
+          percent_of_total: s.percent_of_total,
+          prova: s.prova,
+        })),
+        incidence_crosswalk: incidenceForLlm.map((r) => ({
+          edital_subject: r.edital_subject,
+          edital_weight: r.edital_weight,
+          excel_subject_label: r.excel_subject_label,
+          incidence_topics: (r.incidence_topics ?? []).slice(0, 5),
+        })),
+      },
+      40_000
+    )
+    prioritiesResult = await runAgent({
+      agentType: "edital",
+      userId,
+      examTargetId,
+      systemPrompt: PRIORITIES_SYSTEM,
+      userContent: minimalContent,
+      jsonMode: true,
+      maxTokens: 4000,
+      metadata: { phase: "priorities_retry" },
+    })
+  }
 
   const structuredRaw = JSON.parse(prioritiesResult.text || "{}") as Record<string, unknown>
   const structured = asExamPlanStructured(structuredRaw)
