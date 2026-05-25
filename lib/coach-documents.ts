@@ -1,3 +1,4 @@
+import { createHash } from "crypto"
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
 import { buildTreesBySubject } from "./incidence-hierarchy"
@@ -368,15 +369,39 @@ export async function uploadCoachDocument(params: {
     if (ext !== "pdf") {
       throw new Error("Este tipo de documento deve ser PDF")
     }
-    const text = await extractPdfText(buffer)
-    const excerpt = truncateText(text, 120_000)
-    parsed_tables = {
-      format: "pdf",
-      text_excerpt: excerpt,
-      full_text: text,
-      char_count: text.length,
+    if (params.docType === "study_material") {
+      parsed_tables = {
+        format: "pdf",
+        pending_parse: true,
+      }
+    } else {
+      const text = await extractPdfText(buffer)
+      const excerpt = truncateText(text, 120_000)
+      parsed_tables = {
+        format: "pdf",
+        text_excerpt: excerpt,
+        full_text: text,
+        char_count: text.length,
+      }
     }
     contentType = "application/pdf"
+  }
+
+  const fileHash = createHash("sha256").update(buffer).digest("hex")
+
+  if (params.docType === "study_material" && params.subjectId) {
+    const { data: dup } = await supabaseServer
+      .from("subject_documents")
+      .select("id, title, ingest_stage, chunk_count, status")
+      .eq("user_id", params.userId)
+      .eq("subject_id", params.subjectId)
+      .eq("doc_type", "study_material")
+      .eq("file_sha256", fileHash)
+      .maybeSingle()
+
+    if (dup?.id) {
+      return dup
+    }
   }
 
   const path = `${params.userId}/${params.docType}/${Date.now()}.${ext}`
@@ -397,22 +422,43 @@ export async function uploadCoachDocument(params: {
     throw new Error(upErr.message)
   }
 
-  const { data: doc, error: insErr } = await supabaseServer
+  const isAsyncMaterial = params.docType === "study_material"
+
+  const insertRow: Record<string, unknown> = {
+    user_id: params.userId,
+    subject_id: params.subjectId ?? null,
+    exam_target_id: params.examTargetId ?? null,
+    doc_type: params.docType,
+    file_path: path,
+    title: params.title.trim() || params.file.name,
+    parsed_tables,
+    status: isAsyncMaterial ? "pending" : "ready",
+    file_sha256: fileHash,
+    ingest_stage: isAsyncMaterial ? "uploaded" : "ready",
+    chunk_count: 0,
+  }
+
+  let saved: Record<string, unknown>
+  const { data: inserted, error: insErr } = await supabaseServer
     .from("subject_documents")
-    .insert({
-      user_id: params.userId,
-      subject_id: params.subjectId ?? null,
-      exam_target_id: params.examTargetId ?? null,
-      doc_type: params.docType,
-      file_path: path,
-      title: params.title.trim() || params.file.name,
-      parsed_tables,
-      status: "ready",
-    })
+    .insert(insertRow)
     .select("*")
     .single()
 
-  if (insErr) throw new Error(insErr.message)
+  if (insErr) {
+    const { file_sha256: _h, ingest_stage: _s, chunk_count: _c, ...fallback } =
+      insertRow
+    const retry = await supabaseServer
+      .from("subject_documents")
+      .insert(fallback)
+      .select("*")
+      .single()
+    if (retry.error) throw new Error(retry.error.message)
+    saved = retry.data as Record<string, unknown>
+  } else {
+    if (!inserted) throw new Error("Falha ao salvar documento")
+    saved = inserted as Record<string, unknown>
+  }
 
   if (
     params.docType === "incidence" &&
@@ -423,11 +469,11 @@ export async function uploadCoachDocument(params: {
     const persist = await persistIncidenceRows({
       userId: params.userId,
       examTargetId: params.examTargetId,
-      documentId: doc.id,
+      documentId: saved.id as string,
       parsed: incidenceParsed,
     })
 
-    const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+    const pt = (saved.parsed_tables ?? {}) as Record<string, unknown>
     const parse_stats = displayParseStats(
       (pt.parse_stats ?? incidenceParsed.stats) as Parameters<typeof displayParseStats>[0],
       {
@@ -444,21 +490,21 @@ export async function uploadCoachDocument(params: {
     const { data: updated, error: statsErr } = await supabaseServer
       .from("subject_documents")
       .update({ parsed_tables: updated_tables })
-      .eq("id", doc.id)
+      .eq("id", saved.id as string)
       .select("*")
       .single()
 
     if (statsErr) throw new Error(statsErr.message)
     if (updated) {
-      Object.assign(doc, updated)
+      Object.assign(saved, updated)
     }
 
     if (persist.error) {
-      const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
-      doc.parsed_tables = {
-        ...pt,
+      const pt2 = (saved.parsed_tables ?? {}) as Record<string, unknown>
+      saved.parsed_tables = {
+        ...pt2,
         parse_stats: {
-          ...((pt.parse_stats as object) ?? {}),
+          ...((pt2.parse_stats as object) ?? {}),
           persist_error: persist.error,
         },
       }
@@ -468,12 +514,41 @@ export async function uploadCoachDocument(params: {
   if (params.docType === "edital" && params.examTargetId) {
     await supabaseServer
       .from("exam_targets")
-      .update({ edital_document_id: doc.id })
+      .update({ edital_document_id: saved.id as string })
       .eq("id", params.examTargetId)
       .eq("user_id", params.userId)
   }
 
-  return doc
+  return saved
+}
+
+export async function deleteCoachDocument(userId: string, documentId: string) {
+  const { data: doc, error } = await supabaseServer
+    .from("subject_documents")
+    .select("file_path")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .single()
+
+  if (error || !doc) throw new Error("Documento não encontrado")
+
+  await supabaseServer.from("document_chunks").delete().eq("document_id", documentId)
+  await supabaseServer
+    .from("document_source_text")
+    .delete()
+    .eq("document_id", documentId)
+
+  if (doc.file_path) {
+    await supabaseServer.storage.from(COACH_DOCS_BUCKET).remove([doc.file_path])
+  }
+
+  const { error: delErr } = await supabaseServer
+    .from("subject_documents")
+    .delete()
+    .eq("id", documentId)
+    .eq("user_id", userId)
+
+  if (delErr) throw new Error(delErr.message)
 }
 
 export async function listCoachDocuments(
@@ -496,6 +571,7 @@ export async function listCoachDocuments(
 }
 
 export function documentTextExcerpt(doc: {
+  id?: string
   parsed_tables?: Record<string, unknown> | null
 }) {
   const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>

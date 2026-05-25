@@ -1,23 +1,39 @@
 import { NextResponse } from "next/server"
 import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
 import { supabaseServer } from "@/lib/supabase-server"
+import { enqueueJob } from "@/lib/ai/jobs/queue"
 
 export const runtime = "nodejs"
 export const maxDuration = 120
+
+function enqueueMaterialIngest(userId: string, documentId: string) {
+  return enqueueJob({
+    userId,
+    jobType: "document_ingest",
+    idempotencyKey: `ingest:${documentId}:v2`,
+    payload: { document_id: documentId },
+    priority: 6,
+  })
+}
 
 export async function POST(req: Request) {
   try {
     const form = await req.formData()
     const user_id = form.get("user_id") as string | null
     const doc_type = form.get("doc_type") as CoachDocType | null
-    const title = (form.get("title") as string) || ""
     const subject_id = (form.get("subject_id") as string) || null
     const exam_target_id = (form.get("exam_target_id") as string) || null
-    const file = form.get("file") as File | null
 
-    if (!user_id || !doc_type || !file) {
+    if (!user_id || !doc_type) {
       return NextResponse.json(
-        { error: "user_id, doc_type e file obrigatórios" },
+        { error: "user_id e doc_type obrigatórios" },
+        { status: 400 }
+      )
+    }
+
+    if (doc_type === "study_material" && !subject_id) {
+      return NextResponse.json(
+        { error: "subject_id obrigatório para material de estudo" },
         { status: 400 }
       )
     }
@@ -46,46 +62,73 @@ export async function POST(req: Request) {
       subjectName = sub?.name ?? null
     }
 
-    const doc = await uploadCoachDocument({
-      userId: user_id,
-      file,
-      docType: doc_type,
-      title: title || file.name,
-      subjectId: subject_id,
-      subjectName,
-      examTargetId: exam_target_id,
-    })
-
-    if (doc_type === "study_material" && doc.id) {
-      const { enqueueJob } = await import("@/lib/ai/jobs/queue")
-      const { runJobWorker } = await import("@/lib/ai/jobs/worker")
-      await enqueueJob({
-        userId: user_id,
-        jobType: "document_ingest",
-        idempotencyKey: `ingest:${doc.id}`,
-        payload: { document_id: doc.id },
-        priority: 5,
-      })
-      runJobWorker(1).catch(() => {})
+    const files: File[] = []
+    const multi = form.getAll("files")
+    if (multi.length) {
+      for (const f of multi) {
+        if (f instanceof File && f.size > 0) files.push(f)
+      }
+    }
+    const single = form.get("file")
+    if (single instanceof File && single.size > 0) {
+      files.push(single)
     }
 
-    const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+    if (!files.length) {
+      return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 })
+    }
+
+    const uploaded: Record<string, unknown>[] = []
+    const documentIds: string[] = []
+
+    for (const file of files) {
+      const title =
+        (form.get(`title_${file.name}`) as string) ||
+        (form.get("title") as string) ||
+        file.name
+
+      const doc = await uploadCoachDocument({
+        userId: user_id,
+        file,
+        docType: doc_type,
+        title,
+        subjectId: subject_id,
+        subjectName,
+        examTargetId: exam_target_id,
+      })
+
+      const docId = doc.id as string
+      const row = doc as Record<string, unknown>
+      uploaded.push({
+        id: docId,
+        title: row.title,
+        doc_type: row.doc_type,
+        status: row.status,
+        ingest_stage: row.ingest_stage,
+        duplicate: Number(row.chunk_count ?? 0) > 0,
+      })
+
+      if (doc_type === "study_material" && docId) {
+        documentIds.push(docId)
+      }
+    }
+
+    if (documentIds.length === 1) {
+      await enqueueMaterialIngest(user_id, documentIds[0]!)
+    } else if (documentIds.length > 1) {
+      await enqueueJob({
+        userId: user_id,
+        jobType: "document_batch_ingest",
+        idempotencyKey: `batch:${subject_id}:${Date.now()}`,
+        payload: { document_ids: documentIds, subject_id },
+        priority: 6,
+      })
+    }
+
     return NextResponse.json({
-      id: doc.id,
-      title: doc.title,
-      doc_type: doc.doc_type,
-      exam_target_id: doc.exam_target_id,
-      status: doc.status,
-      created_at: doc.created_at,
-      parsed_tables: {
-        format: pt.format,
-        scope: pt.scope,
-        parse_stats: pt.parse_stats,
-        block_count: pt.block_count,
-        flat_row_count: pt.flat_row_count,
-        persist_error: (pt.parse_stats as { persist_error?: string } | undefined)
-          ?.persist_error,
-      },
+      uploaded,
+      count: uploaded.length,
+      document_ids: documentIds,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

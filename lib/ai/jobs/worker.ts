@@ -6,7 +6,13 @@ import { persistReportExecutableActions } from "../report-action-drafts"
 import { persistSubjectBrain } from "../subject-brain"
 import { recomputeStrategicQueue } from "../strategic-queue"
 import { generateDailyStudyPlan } from "../execution-plan"
-import { ingestDocumentChunks } from "../document-rag"
+import {
+  chunkDocument,
+  embedDocumentChunks,
+  ingestDocumentBatch,
+  ingestDocumentPipeline,
+  parseDocumentFromStorage,
+} from "../document-ingest"
 import { generateRemediationDrafts } from "../remediation-drafts"
 import { claimPendingJobs, completeJob, enqueueJob } from "./queue"
 
@@ -282,10 +288,67 @@ export async function processJob(job: {
         break
       }
 
+      case "document_parse": {
+        const documentId = payload.document_id as string
+        const parsed = await parseDocumentFromStorage(userId, documentId)
+        await enqueueJob({
+          userId,
+          jobType: "document_chunk",
+          idempotencyKey: `chunk:${documentId}:${Date.now()}`,
+          payload: { document_id: documentId },
+          priority: 4,
+        })
+        await completeJob(job.id, parsed)
+        break
+      }
+
+      case "document_chunk": {
+        const documentId = payload.document_id as string
+        const chunked = await chunkDocument(userId, documentId)
+        if (chunked.chunks > 0) {
+          await enqueueJob({
+            userId,
+            jobType: "document_embed",
+            idempotencyKey: `embed:${documentId}:${Date.now()}`,
+            payload: { document_id: documentId },
+            priority: 3,
+          })
+        } else {
+          await completeJob(job.id, { chunks: 0, skipped_embed: true })
+          break
+        }
+        await completeJob(job.id, chunked)
+        break
+      }
+
+      case "document_embed": {
+        const documentId = payload.document_id as string
+        const emb = await embedDocumentChunks(userId, documentId)
+        await supabaseServer
+          .from("subject_documents")
+          .update({
+            ingest_stage: "ready",
+            status: "ready",
+            ingest_error: null,
+          })
+          .eq("id", documentId)
+        await completeJob(job.id, { ...emb, ready: true })
+        break
+      }
+
       case "document_ingest": {
         const documentId = payload.document_id as string
-        const result = await ingestDocumentChunks(userId, documentId)
+        const result = await ingestDocumentPipeline(userId, documentId)
         await completeJob(job.id, result)
+        break
+      }
+
+      case "document_batch_ingest": {
+        const ids = Array.isArray(payload.document_ids)
+          ? (payload.document_ids as string[])
+          : []
+        const batch = await ingestDocumentBatch(userId, ids, 2)
+        await completeJob(job.id, batch)
         break
       }
 

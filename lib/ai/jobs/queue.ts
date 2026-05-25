@@ -9,6 +9,10 @@ export type JobType =
   | "strategy_recompute_all"
   | "execution_plan_today"
   | "document_ingest"
+  | "document_parse"
+  | "document_chunk"
+  | "document_embed"
+  | "document_batch_ingest"
 
 export async function enqueueJob(params: {
   userId: string
