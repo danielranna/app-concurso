@@ -4,7 +4,8 @@ import { normLabel } from "../incidence-subject-map"
 import { fetchIncidenceRows } from "../incidence-rows-db"
 import { runAgent } from "./run-agent"
 import { getUserAiCredentials } from "./user-credentials"
-import type { ExamPlanStructured } from "../coach-types"
+import type { EditalSubjectRankRow, ExamPlanStructured } from "../coach-types"
+import { persistEditalSubjectRank } from "../edital-subject-rank-db"
 import {
   asExamPlanStructured,
   buildCoachEditalSummaryMd,
@@ -29,22 +30,19 @@ Responda JSON válido:
   ]
 }`
 
-const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise o edital (estrutura extraída do PDF) e cruze com a incidência histórica da banca (JSON), quando fornecida.
+const PRIORITIES_SYSTEM = `Você é especialista em concursos públicos. Analise o edital (lista edital_subjects) e cruze com incidence_crosswalk quando existir.
 
-Tarefas:
-1) Ranking de relevância das matérias do edital — ordene por impacto na nota final.
-2) Para cada matéria: peso no edital, quantidade de questões, % do total, prova, critérios de desempate (se existirem), impacto na nota, resumo da incidência da banca.
-3) Explique resumidamente o motivo da posição de cada matéria no ranking.
-4) Classifique matérias em: prioritárias, secundárias e possíveis "armadilha" (muito extensas no edital e pouco cobradas historicamente).
-5) Resumo do edital, conclusões estratégicas e notas sobre o mapa de incidência da banca.
+REGRA OBRIGATÓRIA: subject_priority_rank deve listar TODAS as matérias de edital_subjects — uma linha por matéria, sem omitir nenhuma. Ordene por impacto na nota (peso, questões, %). priority começa em 1 (mais relevante).
 
-Use APENAS dados fornecidos. Se não houver incidência da banca, baseie-se só no edital e indique isso.
+Para cada matéria: why breve, edital_weight, question_count, percent_of_total, prova, tiebreaker_note se houver, impact_on_final_score, incidence_summary (1 frase; use crosswalk ou "sem dados de incidência").
+
+Também: resumo do edital, conclusões estratégicas, listas priority_subjects / secondary_subjects / trap_subjects (subconjuntos do ranking, não substituem o ranking completo).
 
 Responda JSON válido:
 {
-  "headline": "título curto da análise",
-  "edital_summary": "resumo do edital",
-  "strategic_conclusions": ["conclusão 1", "conclusão 2"],
+  "headline": "",
+  "edital_summary": "",
+  "strategic_conclusions": [],
   "priority_subjects": [{ "name": "", "why": "" }],
   "secondary_subjects": [{ "name": "", "why": "" }],
   "trap_subjects": [{ "name": "", "why": "" }],
@@ -52,7 +50,7 @@ Responda JSON válido:
     {
       "subject_name": "",
       "priority": 1,
-      "why": "motivo da posição no ranking",
+      "why": "",
       "edital_weight": "",
       "question_count": 0,
       "percent_of_total": 0,
@@ -62,30 +60,9 @@ Responda JSON válido:
       "incidence_summary": ""
     }
   ],
-  "incidence_map_notes": [
-    {
-      "edital_subject": "",
-      "excel_subject": "",
-      "top_topics": ["tópico mais cobrado"],
-      "note": ""
-    }
-  ],
-  "topic_matrix": [
-    {
-      "subject": "",
-      "topic": "",
-      "edital_weight_hint": "",
-      "incidence_hint": "",
-      "incidence_percent": 0,
-      "incidence_quantity": 0,
-      "action": ""
-    }
-  ],
   "risks_if_ignored": [],
   "exam_readiness_score": 0
-}
-
-No topic_matrix: no máximo 6 tópicos por matéria e só para as 12 matérias mais relevantes do ranking.`
+}`
 
 /** ~4 chars/token — mantém cada chamada bem abaixo do TPM 30k do gpt-4o */
 const MAX_EDITAL_CHARS = 55_000
@@ -161,6 +138,73 @@ function trimPayloadJson(payload: unknown, maxChars: number): string {
     })
   }
   return json
+}
+
+function findLlmRankForSubject(
+  llmRank: EditalSubjectRankRow[],
+  editalName: string
+): EditalSubjectRankRow | undefined {
+  const key = normLabel(editalName)
+  return llmRank.find(
+    (r) =>
+      normLabel(r.subject_name) === key ||
+      scoreNameMatch(r.subject_name, editalName) >= 80
+  )
+}
+
+/** Garante uma linha no ranking para cada matéria extraída do edital. */
+export function ensureFullSubjectRanking(
+  editalSubjects: {
+    name: string
+    edital_weight?: string
+    question_count?: number
+    percent_of_total?: number
+    prova?: string
+  }[],
+  llmRank: EditalSubjectRankRow[]
+): EditalSubjectRankRow[] {
+  const merged = editalSubjects.map((es) => {
+    const fromLlm = findLlmRankForSubject(llmRank, es.name)
+    if (fromLlm) {
+      return {
+        ...fromLlm,
+        subject_name: es.name,
+        edital_weight: fromLlm.edital_weight ?? es.edital_weight,
+        question_count: fromLlm.question_count ?? es.question_count,
+        percent_of_total: fromLlm.percent_of_total ?? es.percent_of_total,
+        prova: fromLlm.prova ?? es.prova,
+      }
+    }
+    return {
+      subject_name: es.name,
+      priority: 999,
+      edital_weight: es.edital_weight,
+      question_count: es.question_count,
+      percent_of_total: es.percent_of_total,
+      prova: es.prova,
+      why: "Matéria do edital incluída automaticamente (detalhes não retornados pela IA).",
+      impact_on_final_score:
+        (es.percent_of_total ?? 0) >= 10 || (es.question_count ?? 0) >= 15
+          ? "alto"
+          : (es.percent_of_total ?? 0) >= 5 || (es.question_count ?? 0) >= 8
+            ? "medio"
+            : "baixo",
+      incidence_summary: "",
+    }
+  })
+
+  merged.sort((a, b) => {
+    const aLlm = (a.priority ?? 999) < 900
+    const bLlm = (b.priority ?? 999) < 900
+    if (aLlm && bLlm) return (a.priority ?? 0) - (b.priority ?? 0)
+    if (aLlm && !bLlm) return -1
+    if (!aLlm && bLlm) return 1
+    const qd = (b.question_count ?? 0) - (a.question_count ?? 0)
+    if (qd !== 0) return qd
+    return (b.percent_of_total ?? 0) - (a.percent_of_total ?? 0)
+  })
+
+  return merged.map((r, i) => ({ ...r, priority: i + 1 }))
 }
 
 function isRateLimitError(err: unknown): boolean {
@@ -275,6 +319,8 @@ export async function analyzeExamEdital(
   summary_md: string
   analysis_id: string
   model_used: string
+  subject_rank: EditalSubjectRankRow[]
+  edital_subjects_count: number
 }> {
   const credentials = await getUserAiCredentials(userId)
   if (!credentials) {
@@ -354,6 +400,7 @@ export async function analyzeExamEdital(
 
   const prioritiesPayload = {
     exam_target: { name: exam.name, banca: exam.banca },
+    required_subject_count: compactSubjects.length,
     edital_subjects: compactSubjects,
     incidence_crosswalk: incidenceForLlm,
     incidence_rows_total: incidenceRows.length,
@@ -372,7 +419,7 @@ export async function analyzeExamEdital(
       systemPrompt: PRIORITIES_SYSTEM,
       userContent: prioritiesUserContent,
       jsonMode: true,
-      maxTokens: 4000,
+      maxTokens: 6000,
       metadata: { phase: "priorities" },
     })
   } catch (e) {
@@ -404,13 +451,22 @@ export async function analyzeExamEdital(
       systemPrompt: PRIORITIES_SYSTEM,
       userContent: minimalContent,
       jsonMode: true,
-      maxTokens: 4000,
+      maxTokens: 6000,
       metadata: { phase: "priorities_retry" },
     })
   }
 
   const structuredRaw = JSON.parse(prioritiesResult.text || "{}") as Record<string, unknown>
   const structured = asExamPlanStructured(structuredRaw)
+
+  const fullRank = ensureFullSubjectRanking(
+    structure.subjects,
+    structured.subject_priority_rank ?? []
+  )
+  structured.subject_priority_rank = fullRank
+  delete (structured as Record<string, unknown>).topic_matrix
+  delete (structured as Record<string, unknown>).incidence_map_notes
+
   const summaryMd = buildCoachEditalSummaryMd(exam.name, structured)
 
   const modelUsed = prioritiesResult.model
@@ -433,6 +489,15 @@ export async function analyzeExamEdital(
     .single()
 
   if (error) throw new Error(error.message)
+
+  try {
+    await persistEditalSubjectRank(userId, examTargetId, fullRank)
+  } catch (rankErr) {
+    console.warn(
+      "exam_edital_subject_rank:",
+      rankErr instanceof Error ? rankErr.message : rankErr
+    )
+  }
 
   await supabaseServer.from("exam_target_reports").insert({
     exam_target_id: examTargetId,
@@ -465,6 +530,8 @@ export async function analyzeExamEdital(
     summary_md: summaryMd,
     analysis_id: analysis!.id,
     model_used: modelUsed,
+    subject_rank: fullRank,
+    edital_subjects_count: structure.subjects.length,
   }
 }
 
@@ -476,5 +543,28 @@ export async function getExamEditalAnalysis(userId: string, examTargetId: string
     .eq("exam_target_id", examTargetId)
     .maybeSingle()
 
-  return data
+  if (!data) return null
+
+  const { fetchEditalSubjectRank } = await import("../edital-subject-rank-db")
+  let subject_rank: EditalSubjectRankRow[] = []
+  try {
+    subject_rank = await fetchEditalSubjectRank(userId, examTargetId)
+  } catch {
+    /* tabela ainda não criada */
+  }
+
+  if (!subject_rank.length && data.priorities) {
+    const p = data.priorities as ExamPlanStructured
+    subject_rank = p.subject_priority_rank ?? []
+  }
+
+  const structureSubjects = (
+    data.structure as { subjects?: { name: string; edital_weight?: string; question_count?: number; percent_of_total?: number; prova?: string }[] }
+  )?.subjects
+
+  if (structureSubjects?.length) {
+    subject_rank = ensureFullSubjectRanking(structureSubjects, subject_rank)
+  }
+
+  return { ...data, subject_rank }
 }

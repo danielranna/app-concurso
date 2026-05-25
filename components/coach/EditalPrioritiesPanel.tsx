@@ -1,14 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import {
-  Loader2,
-  Sparkles,
-  ChevronDown,
-  ChevronRight,
-  FileUp,
-} from "lucide-react"
-import type { ExamPlanStructured } from "@/lib/coach-types"
+import { Loader2, Sparkles, FileUp } from "lucide-react"
+import type { EditalSubjectRankRow, ExamPlanStructured } from "@/lib/coach-types"
 
 type EditalDocRow = {
   id: string
@@ -20,6 +14,7 @@ type AnalysisRow = {
   id: string
   structure?: { subjects?: { name: string }[] }
   priorities?: ExamPlanStructured
+  subject_rank?: EditalSubjectRankRow[]
   model_used?: string
   analyzed_at?: string
 }
@@ -41,9 +36,7 @@ function SubjectChipList({
         {items.map((s) => (
           <li key={s.name}>
             <span className="font-medium text-slate-900">{s.name}</span>
-            {s.why && (
-              <span className="text-slate-600"> — {s.why}</span>
-            )}
+            {s.why && <span className="text-slate-600"> — {s.why}</span>}
           </li>
         ))}
       </ul>
@@ -69,7 +62,6 @@ export default function EditalPrioritiesPanel({
   const [loading, setLoading] = useState(true)
   const [uploadingPdf, setUploadingPdf] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
-  const [openSubjects, setOpenSubjects] = useState<Set<string>>(new Set())
 
   const loadEditalDoc = useCallback(() => {
     return fetch(
@@ -151,8 +143,12 @@ export default function EditalPrioritiesPanel({
       } else {
         await loadAnalysis()
         onAnalysisDone?.()
+        const n =
+          data.edital_subjects_count ??
+          data.subject_rank?.length ??
+          "?"
         alert(
-          `Análise concluída (${data.model_used ?? "IA"}). Ranking e conclusões abaixo.`
+          `Análise salva (${data.model_used ?? "IA"}). Ranking com ${n} matérias do edital.`
         )
       }
     } catch {
@@ -163,27 +159,11 @@ export default function EditalPrioritiesPanel({
   }
 
   const priorities = analysis?.priorities as ExamPlanStructured | undefined
-  const rank = priorities?.subject_priority_rank ?? []
-  const matrix = priorities?.topic_matrix ?? []
-  const incidenceNotes = priorities?.incidence_map_notes ?? []
-
-  function toggleSubject(name: string) {
-    setOpenSubjects((prev) => {
-      const next = new Set(prev)
-      if (next.has(name)) next.delete(name)
-      else next.add(name)
-      return next
-    })
-  }
-
-  const topicsBySubject = new Map<string, typeof matrix>()
-  for (const row of matrix) {
-    const sub = (row.subject ?? "").trim()
-    if (!sub) continue
-    const list = topicsBySubject.get(sub) ?? []
-    list.push(row)
-    topicsBySubject.set(sub, list)
-  }
+  const rank: EditalSubjectRankRow[] =
+    analysis?.subject_rank?.length
+      ? analysis.subject_rank
+      : priorities?.subject_priority_rank ?? []
+  const editalSubjectsInStructure = analysis?.structure?.subjects?.length ?? 0
 
   return (
     <section className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4 md:p-6">
@@ -191,15 +171,12 @@ export default function EditalPrioritiesPanel({
         <div>
           <h3 className="text-lg font-bold text-slate-900">Edital (PDF) + análise IA</h3>
           <p className="text-sm text-slate-600">
-            Envie o PDF do edital de <strong>{examName}</strong>. A IA extrai matérias,
-            pesos e questões, cruza com o Excel de incidência (se houver) e gera ranking,
-            conclusões e matérias armadilha.
+            Envie o PDF do edital de <strong>{examName}</strong>. A IA gera o ranking
+            completo de todas as matérias e salva no banco (associações com incidência e
+            suas matérias virão depois).
           </p>
           {editalDoc ? (
-            <p className="mt-1 text-xs text-violet-800">
-              PDF: {editalDoc.title}
-              {editalDoc.status && ` · ${editalDoc.status}`}
-            </p>
+            <p className="mt-1 text-xs text-violet-800">PDF: {editalDoc.title}</p>
           ) : (
             <p className="mt-1 text-xs text-amber-800">Nenhum PDF do edital enviado.</p>
           )}
@@ -208,6 +185,7 @@ export default function EditalPrioritiesPanel({
               Última análise: {analysis.model_used}
               {analysis.analyzed_at &&
                 ` · ${new Date(analysis.analyzed_at).toLocaleString("pt-BR")}`}
+              {rank.length > 0 && ` · ${rank.length} matérias salvas`}
             </p>
           )}
         </div>
@@ -249,8 +227,8 @@ export default function EditalPrioritiesPanel({
 
       {!hasIncidenceExcel && (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Dica: importe o Excel de incidência acima para cruzar peso do edital com o
-          histórico da banca na análise.
+          Dica: importe o Excel de incidência acima para enriquecer a coluna de incidência
+          da banca no ranking.
         </p>
       )}
 
@@ -259,26 +237,26 @@ export default function EditalPrioritiesPanel({
           <Loader2 className="h-5 w-5 animate-spin" />
           Carregando análise…
         </div>
-      ) : !priorities?.subject_priority_rank?.length ? (
+      ) : !rank.length ? (
         <div className="rounded-lg border border-dashed border-violet-300 bg-white/60 px-4 py-6 text-center text-sm text-slate-600">
           {editalDoc
-            ? 'Clique em "Analisar com IA" para gerar ranking, resumo e conclusões estratégicas.'
+            ? 'Clique em "Analisar com IA" para gerar e salvar o ranking de todas as matérias.'
             : "Envie o PDF do edital e depois analise com IA."}
         </div>
       ) : (
         <div className="space-y-5">
-          {priorities.headline && (
+          {priorities?.headline && (
             <p className="rounded-lg bg-white px-4 py-3 text-sm font-medium text-slate-800">
               {priorities.headline}
             </p>
           )}
 
-          {priorities.edital_summary && (
+          {priorities?.edital_summary && (
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <h4 className="mb-2 text-sm font-semibold text-slate-900">
                 Resumo do edital
               </h4>
-              <p className="text-sm text-slate-700 whitespace-pre-wrap">
+              <p className="whitespace-pre-wrap text-sm text-slate-700">
                 {priorities.edital_summary}
               </p>
             </div>
@@ -287,25 +265,34 @@ export default function EditalPrioritiesPanel({
           <div className="grid gap-3 md:grid-cols-3">
             <SubjectChipList
               title="Matérias prioritárias"
-              items={priorities.priority_subjects ?? []}
+              items={priorities?.priority_subjects ?? []}
               className="border-emerald-200 bg-emerald-50/50"
             />
             <SubjectChipList
               title="Matérias secundárias"
-              items={priorities.secondary_subjects ?? []}
+              items={priorities?.secondary_subjects ?? []}
               className="border-slate-200 bg-slate-50/80"
             />
             <SubjectChipList
               title="Possíveis armadilhas"
-              items={priorities.trap_subjects ?? []}
+              items={priorities?.trap_subjects ?? []}
               className="border-amber-200 bg-amber-50/50"
             />
           </div>
 
           <div>
-            <h4 className="mb-2 text-sm font-semibold text-slate-900">
-              Ranking de relevância das matérias
-            </h4>
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <h4 className="text-sm font-semibold text-slate-900">
+                Ranking de relevância das matérias
+              </h4>
+              <p className="text-xs text-slate-500">
+                {rank.length} matérias
+                {editalSubjectsInStructure > 0 &&
+                  editalSubjectsInStructure !== rank.length &&
+                  ` · ${editalSubjectsInStructure} extraídas do PDF`}
+                {" · salvo no banco"}
+              </p>
+            </div>
             <div className="overflow-x-auto rounded-lg border border-violet-200 bg-white">
               <table className="w-full min-w-[640px] text-sm">
                 <thead className="bg-violet-50 text-left text-xs text-slate-600">
@@ -367,43 +354,7 @@ export default function EditalPrioritiesPanel({
             </div>
           </div>
 
-          {incidenceNotes.length > 0 && (
-            <div>
-              <h4 className="mb-2 text-sm font-semibold text-slate-900">
-                Mapa de incidência (edital × Excel)
-              </h4>
-              <div className="overflow-x-auto rounded-lg border border-emerald-200 bg-white">
-                <table className="w-full text-sm">
-                  <thead className="bg-emerald-50 text-left text-xs text-slate-600">
-                    <tr>
-                      <th className="px-3 py-2">Matéria no edital</th>
-                      <th className="px-3 py-2">Matéria no Excel</th>
-                      <th className="px-3 py-2">Tópicos mais cobrados</th>
-                      <th className="px-3 py-2">Nota</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {incidenceNotes.map((n, i) => (
-                      <tr key={i} className="border-t border-slate-100">
-                        <td className="px-3 py-2 font-medium">
-                          {n.edital_subject ?? "—"}
-                        </td>
-                        <td className="px-3 py-2">{n.excel_subject ?? "—"}</td>
-                        <td className="px-3 py-2 text-emerald-800">
-                          {(n.top_topics ?? []).join("; ") || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-600">
-                          {n.note ?? "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {priorities.strategic_conclusions?.length ? (
+          {priorities?.strategic_conclusions?.length ? (
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <h4 className="mb-2 text-sm font-semibold text-slate-900">
                 Conclusões estratégicas
@@ -416,7 +367,7 @@ export default function EditalPrioritiesPanel({
             </div>
           ) : null}
 
-          {priorities.risks_if_ignored?.length ? (
+          {priorities?.risks_if_ignored?.length ? (
             <div className="rounded-lg border border-red-100 bg-red-50/40 p-4">
               <h4 className="mb-2 text-sm font-semibold text-red-900">
                 Riscos se ignorar
@@ -428,84 +379,6 @@ export default function EditalPrioritiesPanel({
               </ul>
             </div>
           ) : null}
-
-          <div>
-            <h4 className="mb-2 text-sm font-semibold text-slate-900">
-              Tópicos por matéria (edital × incidência)
-            </h4>
-            <div className="space-y-3">
-              {rank.map((item) => {
-                const subName = item.subject_name ?? ""
-                const open = openSubjects.has(subName)
-                const topics = topicsBySubject.get(subName) ?? []
-                if (!topics.length) return null
-                return (
-                  <div
-                    key={subName}
-                    className="overflow-hidden rounded-xl border border-violet-200 bg-white"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleSubject(subName)}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-violet-50/50"
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-600 text-sm font-bold text-white">
-                        {item.priority ?? "—"}
-                      </span>
-                      <p className="min-w-0 flex-1 font-semibold text-slate-900">
-                        {subName}
-                      </p>
-                      {open ? (
-                        <ChevronDown className="h-5 w-5 text-slate-400" />
-                      ) : (
-                        <ChevronRight className="h-5 w-5 text-slate-400" />
-                      )}
-                    </button>
-                    {open && (
-                      <div className="border-t border-violet-100 px-4 pb-4">
-                        <table className="mt-2 w-full text-sm">
-                          <thead className="text-left text-xs text-slate-500">
-                            <tr>
-                              <th className="py-1 pr-2">Assunto</th>
-                              <th className="py-1 pr-2">Peso edital</th>
-                              <th className="py-1 pr-2">Incidência</th>
-                              <th className="py-1">Ação</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {topics.map((t, i) => (
-                              <tr key={i} className="border-t border-slate-50">
-                                <td className="py-2 pr-2 font-medium text-slate-800">
-                                  {t.topic}
-                                </td>
-                                <td className="py-2 pr-2 text-slate-600">
-                                  {t.edital_weight_hint ?? "—"}
-                                </td>
-                                <td className="py-2 pr-2 text-emerald-700">
-                                  {t.incidence_percent != null
-                                    ? `${Number(t.incidence_percent).toFixed(1)}%`
-                                    : t.incidence_hint ?? "—"}
-                                  {t.incidence_quantity != null && (
-                                    <span className="text-slate-400">
-                                      {" "}
-                                      ({t.incidence_quantity} quest.)
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2 text-xs text-slate-600">
-                                  {t.action ?? "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
         </div>
       )}
     </section>
