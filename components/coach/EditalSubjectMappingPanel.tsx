@@ -69,18 +69,18 @@ function MultiLinkEditor({
   options: { value: string; label: string }[]
   values: string[]
   optionLabel: (value: string) => string
-  onSave: (rowId: string, next: string[]) => void
+  onSave: (rowId: string, next: string[]) => void | Promise<void>
 }) {
   const [pick, setPick] = useState("")
 
-  function add() {
-    if (!pick || values.includes(pick)) return
-    onSave(rowId, [...values, pick])
+  function commitValue(value: string) {
+    if (!value || values.includes(value)) return
+    void onSave(rowId, [...values, value])
     setPick("")
   }
 
   function remove(value: string) {
-    onSave(
+    void onSave(
       rowId,
       values.filter((v) => v !== value)
     )
@@ -93,9 +93,9 @@ function MultiLinkEditor({
       {values.map((v) => (
         <div
           key={v}
-          className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
+          className="flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-xs"
         >
-          <span className="min-w-0 flex-1 truncate text-slate-800">
+          <span className="min-w-0 flex-1 truncate font-medium text-slate-800">
             {optionLabel(v)}
           </span>
           <button
@@ -114,10 +114,14 @@ function MultiLinkEditor({
           className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
           value={pick}
           disabled={disabled || !available.length}
-          onChange={(e) => setPick(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value
+            setPick(v)
+            if (v) commitValue(v)
+          }}
         >
           <option value="">
-            {available.length ? "Escolher…" : "— todas adicionadas —"}
+            {available.length ? "Escolher e salvar…" : "— todas vinculadas —"}
           </option>
           {available.map((o) => (
             <option key={o.value} value={o.value}>
@@ -125,16 +129,21 @@ function MultiLinkEditor({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          disabled={disabled || !pick}
-          onClick={add}
-          className="inline-flex shrink-0 items-center justify-center rounded border border-violet-300 bg-violet-50 px-2 py-1 text-violet-800 hover:bg-violet-100 disabled:opacity-40"
-          title="Adicionar vínculo"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
+        {available.length > 1 && (
+          <button
+            type="button"
+            disabled={disabled || !pick}
+            onClick={() => commitValue(pick)}
+            className="inline-flex shrink-0 items-center justify-center rounded border border-violet-300 bg-violet-50 px-2 py-1 text-violet-800 hover:bg-violet-100 disabled:opacity-40"
+            title="Adicionar outro vínculo"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
+      {disabled && (
+        <p className="text-xs text-slate-400">Salvando…</p>
+      )}
     </div>
   )
 }
@@ -201,49 +210,65 @@ export default function EditalSubjectMappingPanel({
     rankId: string,
     body: { incidence_subject_labels?: string[]; subject_ids?: string[] }
   ) {
+    const snapshot = rows.find((r) => r.id === rankId)
+    if (!snapshot) return
+
     setSavingId(rankId)
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === rankId
+          ? {
+              ...r,
+              incidence_subject_labels:
+                body.incidence_subject_labels ?? r.incidence_subject_labels,
+              subject_ids: body.subject_ids ?? r.subject_ids,
+            }
+          : r
+      )
+    )
+
     try {
       const res = await fetch(
         `/api/coach/exam-targets/${examTargetId}/edital-subject-rank`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, rank_id: rankId, ...body }),
+          body: JSON.stringify({
+            user_id: userId,
+            rank_id: rankId,
+            incidence_subject_labels:
+              body.incidence_subject_labels ?? snapshot.incidence_subject_labels,
+            subject_ids: body.subject_ids ?? snapshot.subject_ids,
+          }),
         }
       )
       const data = await res.json()
       if (!res.ok || data.error) {
         alert(data.error ?? `Erro ao salvar (${res.status})`)
-        await load()
+        setRows((prev) =>
+          prev.map((r) => (r.id === rankId ? snapshot : r))
+        )
         return
       }
       if (data.row) {
         applyRowPatch(rankId, normalizeRankRow(data.row))
-      } else {
-        await load()
       }
     } catch {
-      alert("Falha ao salvar vínculo.")
-      await load()
+      alert("Falha ao salvar vínculo. Verifique a conexão.")
+      setRows((prev) =>
+        prev.map((r) => (r.id === rankId ? snapshot : r))
+      )
     } finally {
       setSavingId(null)
     }
   }
 
   function saveIncidenceLabels(rankId: string, labels: string[]) {
-    const row = rows.find((r) => r.id === rankId)
-    return patchMapping(rankId, {
-      incidence_subject_labels: labels,
-      subject_ids: row?.subject_ids,
-    })
+    return patchMapping(rankId, { incidence_subject_labels: labels })
   }
 
   function saveSubjectIds(rankId: string, ids: string[]) {
-    const row = rows.find((r) => r.id === rankId)
-    return patchMapping(rankId, {
-      subject_ids: ids,
-      incidence_subject_labels: row?.incidence_subject_labels,
-    })
+    return patchMapping(rankId, { subject_ids: ids })
   }
 
   if (loading) {
@@ -259,8 +284,8 @@ export default function EditalSubjectMappingPanel({
     return (
       <p className="rounded-lg border border-dashed border-slate-300 bg-white/80 px-4 py-3 text-sm text-slate-600">
         Após analisar o edital, configure aqui o pareamento. Um item do edital pode
-        ligar a <strong>várias</strong> matérias do mapa de incidência (Excel) e do
-        app (use +).
+        ligar a várias matérias do mapa de incidência (Excel) e do app. Escolher no
+        menu já salva; o chip verde confirma o vínculo gravado.
       </p>
     )
   }
@@ -277,8 +302,7 @@ export default function EditalSubjectMappingPanel({
           </h4>
           <p className="text-xs text-slate-600">
             Incidência: mesmas matérias do <strong>Mapa de incidência (Excel)</strong>{" "}
-            ({incidenceLabels.length} no mapa). Use <strong>+</strong> para vários
-            vínculos por linha do edital.
+            ({incidenceLabels.length} no mapa). Escolher no menu salva automaticamente.
           </p>
         </div>
       </div>

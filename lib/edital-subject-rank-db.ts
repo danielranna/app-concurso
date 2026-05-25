@@ -212,13 +212,38 @@ export async function updateEditalSubjectRankMapping(
     subject_id: ids[0] ?? null,
   }
 
-  const { data, error } = await supabaseServer
+  let { data, error } = await supabaseServer
     .from("exam_edital_subject_rank")
     .update(updates)
     .eq("id", rankId)
     .eq("user_id", userId)
     .select("*")
     .single()
+
+  if (
+    error &&
+    /subject_ids|incidence_subject_labels|column/i.test(error.message)
+  ) {
+    if (ids.length > 1 || labels.length > 1) {
+      throw new Error(
+        "Execute sql-edital-subject-rank-multi.sql no Supabase para salvar vários vínculos por linha."
+      )
+    }
+    const legacyOnly: Record<string, unknown> = {
+      updated_at: updates.updated_at,
+      incidence_subject_label: labels[0] ?? null,
+      subject_id: ids[0] ?? null,
+    }
+    const retry = await supabaseServer
+      .from("exam_edital_subject_rank")
+      .update(legacyOnly)
+      .eq("id", rankId)
+      .eq("user_id", userId)
+      .select("*")
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) throw new Error(error.message)
   return rowFromDb(data as Record<string, unknown>)
