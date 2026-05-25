@@ -7,6 +7,7 @@ import { FileUp, Loader2, Plus, Sparkles, Star } from "lucide-react"
 import ExamPlanReportCard from "@/components/coach/ExamPlanReportCard"
 import ExamStrategyBoardPanel from "@/components/coach/ExamStrategyBoard"
 import EditalPrioritiesPanel from "@/components/coach/EditalPrioritiesPanel"
+import IncidenceHierarchyPanel from "@/components/coach/IncidenceHierarchyPanel"
 import StrategicExamDashboard from "@/components/coach/StrategicExamDashboard"
 import type { ExamPlanStructured, ExamTarget } from "@/lib/coach-types"
 
@@ -64,6 +65,8 @@ export default function CoachEditaisPage() {
   const [banca, setBanca] = useState("")
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadingExcel, setUploadingExcel] = useState(false)
+  const [hierarchyKey, setHierarchyKey] = useState(0)
   const [reprocessing, setReprocessing] = useState(false)
   const [enriching, setEnriching] = useState(false)
   const [savingMapping, setSavingMapping] = useState<string | null>(null)
@@ -140,6 +143,48 @@ export default function CoachEditaisPage() {
     })
     setSelectedId(id)
     reloadTargets(userId)
+  }
+
+  async function uploadIncidenceExcel(file: File) {
+    if (!userId || !selectedId) {
+      alert("Selecione uma prova na lista acima.")
+      return
+    }
+    setUploadingExcel(true)
+    const form = new FormData()
+    form.set("user_id", userId)
+    form.set("exam_target_id", selectedId)
+    form.set("doc_type", "incidence")
+    form.set("file", file)
+    form.set("title", file.name)
+
+    try {
+      const res = await fetch("/api/coach/documents/upload", {
+        method: "POST",
+        body: form,
+      })
+      const data = await res.json()
+      if (data.error) {
+        alert(data.error)
+      } else {
+        const stats = (data.parsed_tables?.parse_stats ?? {}) as {
+          subjects?: number
+          topics?: number
+          subtopics?: number
+          rows_imported?: number
+        }
+        alert(
+          `Excel importado: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} assuntos, ${stats.subtopics ?? 0} subtópicos, ${stats.rows_imported ?? 0} linhas no banco.`
+        )
+        reloadDocs(userId, selectedId)
+        setHierarchyKey((k) => k + 1)
+        setDashboardKey((k) => k + 1)
+      }
+    } catch {
+      alert("Falha no envio do Excel.")
+    } finally {
+      setUploadingExcel(false)
+    }
   }
 
   async function uploadStrategicMd(file: File) {
@@ -285,14 +330,20 @@ export default function CoachEditaisPage() {
   }
 
   const strategicDoc = docs.find((d) => d.doc_type === "strategic_md")
+  const incidenceDoc = docs.find(
+    (d) =>
+      d.doc_type === "incidence" &&
+      !d.subject_id &&
+      (d.parsed_tables as { scope?: string } | undefined)?.scope === "exam_workbook"
+  )
   const slugMappings = strategicDoc?.parsed_tables?.subject_mappings
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-600">
-        Cadastre a prova e importe o arquivo <strong>.md</strong> de análise
-        estratégica (template com metadados, ranking, incidência e prioridades).
-        Limites e fase em{" "}
+        Cadastre a prova e importe o <strong>Excel de incidência</strong> (índice
+        hierárquico com Hierarquia, Índice, Quantidade e Porcentagem). Opcional:
+        análise estratégica em <strong>.md</strong>. Limites e fase em{" "}
         <a href="/coach/configuracoes" className="text-violet-700 hover:underline">
           Configurações
         </a>
@@ -371,12 +422,60 @@ export default function CoachEditaisPage() {
       )}
 
       {active ? (
-        <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4">
-          <h3 className="font-semibold text-slate-900">Análise estratégica — {active.name}</h3>
+        <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
+          <h3 className="font-semibold text-slate-900">Incidência (Excel) — {active.name}</h3>
           <p className="text-xs text-slate-600">
-            Importe o <code className="rounded bg-white px-1">analise_estrategica_*.md</code> com
-            edital, incidência e prioridades. O plano de estudo diário fica em Coach → Hoje (outros
-            agentes).
+            Planilha com matérias, tópicos e subtópicos (códigos 01, 02.01, 01.01.01…). O app monta
+            a árvore com % em cada nível e grava em <code className="rounded bg-white px-1">incidence_rows</code>.
+          </p>
+
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-600 bg-white px-4 py-2.5 text-sm font-medium text-emerald-800 shadow-sm hover:bg-emerald-50">
+            <FileUp className="h-4 w-4" />
+            {uploadingExcel
+              ? "Importando Excel…"
+              : incidenceDoc
+                ? "Substituir Excel de incidência"
+                : "Importar Excel de incidência (.xlsx)"}
+            <input
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="sr-only"
+              disabled={uploadingExcel}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) uploadIncidenceExcel(f)
+                e.target.value = ""
+              }}
+            />
+          </label>
+
+          {incidenceDoc && (
+            <p className="text-xs font-medium text-emerald-700">
+              ✓ {incidenceDoc.title} ·{" "}
+              {(incidenceDoc.parsed_tables?.parse_stats as { subjects?: number })?.subjects ?? 0}{" "}
+              matérias ·{" "}
+              {(incidenceDoc.parsed_tables?.parse_stats as { rows_inserted_db?: number })
+                ?.rows_inserted_db ?? 0}{" "}
+              linhas no banco
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {active && userId && incidenceDoc && (
+        <IncidenceHierarchyPanel
+          userId={userId}
+          examTargetId={active.id}
+          reloadKey={hierarchyKey}
+        />
+      )}
+
+      {active ? (
+        <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4">
+          <h3 className="font-semibold text-slate-900">Análise estratégica (opcional) — {active.name}</h3>
+          <p className="text-xs text-slate-600">
+            <code className="rounded bg-white px-1">analise_estrategica_*.md</code> — ranking,
+            peso no edital e prioridades. O plano diário fica em Coach → Hoje.
           </p>
 
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
@@ -543,28 +642,34 @@ export default function CoachEditaisPage() {
         )
       )}
 
-      {active && userId && strategicDoc && (
+      {active && userId && (incidenceDoc || strategicDoc) && (
         <>
-          <StrategicExamDashboard
-            key={dashboardKey}
-            userId={userId}
-            examTargetId={active.id}
-            onEnrich={enrichWithAi}
-            enriching={enriching}
-          />
-          <EditalPrioritiesPanel
-            userId={userId}
-            examTargetId={active.id}
-            examName={active.name}
-            hasStrategicMd={!!strategicDoc}
-          />
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
-            <ExamStrategyBoardPanel
+          {strategicDoc && (
+            <StrategicExamDashboard
+              key={dashboardKey}
+              userId={userId}
+              examTargetId={active.id}
+              onEnrich={enrichWithAi}
+              enriching={enriching}
+            />
+          )}
+          {strategicDoc && (
+            <EditalPrioritiesPanel
               userId={userId}
               examTargetId={active.id}
               examName={active.name}
+              hasStrategicMd={!!strategicDoc}
             />
-          </div>
+          )}
+          {incidenceDoc && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
+              <ExamStrategyBoardPanel
+                userId={userId}
+                examTargetId={active.id}
+                examName={active.name}
+              />
+            </div>
+          )}
         </>
       )}
 

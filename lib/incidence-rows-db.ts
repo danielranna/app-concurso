@@ -28,7 +28,7 @@ export async function persistIncidenceRows(params: {
     return {
       inserted: 0,
       error:
-        "Nenhum tópico encontrado para gravar. No MD, confira se há tabelas em «Tópicos Mais Incidentes por Matéria» (#### slug - Nome).",
+        "Nenhum tópico encontrado para gravar. Confira se o Excel tem colunas Hierarquia, Índice, Quantidade e Porcentagem.",
     }
   }
 

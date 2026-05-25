@@ -107,17 +107,10 @@ function parseQuantity(raw: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function isGroupCode(hierarquia: string) {
-  return /^\d{1,2}$/.test(hierarquia.trim())
-}
+import { hierarchyDepth, parentCodeFromHierarchy } from "./incidence-hierarchy"
 
-function isSubtopicCode(hierarquia: string) {
-  return /^\d{1,2}\.\d+/.test(hierarquia.trim())
-}
-
-function parentCodeFromSubtopic(hierarquia: string): string | null {
-  const m = hierarquia.trim().match(/^(\d{1,2})\./)
-  return m ? m[1]! : null
+function isHierarchyCode(hierarquia: string) {
+  return /^\d{1,2}(\.\d+)*$/.test(hierarquia.trim())
 }
 
 function isSubjectHeaderRow(hierarquia: string, indice: string) {
@@ -137,19 +130,21 @@ function pushTopic(
   qty: number,
   pct: number
 ) {
-  const isSub = isSubtopicCode(hierarquia)
-  const code = hierarquia.trim() || (isSub ? "" : String(current.groups.length + 1).padStart(2, "0"))
+  const code =
+    hierarquia.trim() ||
+    String(current.groups.length + 1).padStart(2, "0")
   const name = indice.trim()
   if (!name) return
 
-  const parent = isSub ? parentCodeFromSubtopic(hierarquia) : null
+  const depth = hierarchyDepth(code)
+  const parent = parentCodeFromHierarchy(code)
 
   current.groups.push({
     code,
     name,
     quantity: qty,
     percent: pct,
-    is_subtopic: isSub,
+    is_subtopic: depth > 1,
     parent_code: parent,
   })
 
@@ -158,7 +153,7 @@ function pushTopic(
     subject_label: current.subject_label,
     hierarchy_code: code,
     topic_name: name,
-    is_subtopic: isSub,
+    is_subtopic: depth > 1,
     parent_code: parent,
     quantity: qty,
     percent: pct,
@@ -206,7 +201,7 @@ function parseSheetRows(
       }
     }
 
-    if (isSubtopicCode(hierarquia) || isGroupCode(hierarquia)) {
+    if (isHierarchyCode(hierarquia)) {
       pushTopic(current, flat, sheetName, hierarquia, indice, qty, pct)
       continue
     }

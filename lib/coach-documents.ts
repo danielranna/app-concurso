@@ -1,5 +1,6 @@
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
+import { buildTreesBySubject } from "./incidence-hierarchy"
 import {
   displayParseStats,
   incidenceSummaryForLlm,
@@ -63,6 +64,42 @@ export async function getExamStrategicMd(
   return docs[0] ?? null
 }
 
+export async function getExamIncidenceHierarchy(
+  userId: string,
+  examTargetId: string
+) {
+  const wb = await getExamIncidenceWorkbook(userId, examTargetId)
+  if (!wb) return null
+
+  const pt = (wb.parsed_tables ?? {}) as {
+    blocks?: IncidenceSubjectBlock[]
+    trees_by_subject?: ReturnType<typeof buildTreesBySubject>
+    parse_stats?: Record<string, unknown>
+    subject_mappings?: ReturnType<typeof mapIncidenceBlocksToSubjects>
+  }
+
+  const blocks = pt.blocks ?? []
+  const trees_by_subject =
+    pt.trees_by_subject ??
+    (blocks.length ? buildTreesBySubject(blocks) : {})
+
+  const subjects = blocks.map((block) => ({
+    label: block.subject_label,
+    total_quantity: block.total_quantity,
+    topic_count: block.groups.length,
+    tree: trees_by_subject[block.subject_label] ?? [],
+  }))
+
+  return {
+    exam_target_id: examTargetId,
+    document_id: wb.id,
+    subjects,
+    trees_by_subject,
+    parse_stats: pt.parse_stats ?? null,
+    subject_mappings: pt.subject_mappings ?? null,
+  }
+}
+
 /** Único Excel de incidência da prova (todas as matérias no arquivo). */
 export async function getExamIncidenceWorkbook(
   userId: string,
@@ -85,6 +122,48 @@ export async function buildIncidencePayloadForExam(
   userId: string,
   examTargetId: string
 ) {
+  const wb = await getExamIncidenceWorkbook(userId, examTargetId)
+  const wbBlocks =
+    (wb?.parsed_tables as { blocks?: IncidenceSubjectBlock[] } | null)?.blocks ??
+    []
+
+  if (wbBlocks.length) {
+    const { data: subjects } = await supabaseServer
+      .from("subjects")
+      .select("id, name")
+      .eq("user_id", userId)
+
+    const manualOverrides = wb ? getManualOverridesFromDoc(wb) : {}
+    const mapping = mapIncidenceBlocksToSubjects(
+      wbBlocks,
+      (subjects ?? []) as SubjectRow[],
+      manualOverrides
+    )
+
+    return {
+      workbook: wb,
+      blocks: wbBlocks,
+      mapping,
+      for_llm: mapping.by_subject.map((row) => ({
+        subject_id: row.subject_id,
+        subject_name: row.subject_name,
+        excel_label: row.excel_label,
+        excel_labels: row.excel_labels,
+        top_topics: [...row.groups]
+          .sort((a, b) => b.percent - a.percent)
+          .slice(0, 50)
+          .map((g) => ({
+            name: g.name,
+            percent: g.percent,
+            qty: g.quantity,
+            code: g.code,
+            is_subtopic: g.is_subtopic,
+          })),
+      })),
+      merge_warnings: mapping.merge_warnings,
+    }
+  }
+
   const md = await getExamStrategicMd(userId, examTargetId)
   if (md) {
     const pt = (md.parsed_tables ?? {}) as {
@@ -173,44 +252,18 @@ export async function buildIncidencePayloadForExam(
     }
   }
 
-  const wb = await getExamIncidenceWorkbook(userId, examTargetId)
-  const blocks =
-    (wb?.parsed_tables as { blocks?: IncidenceSubjectBlock[] } | null)?.blocks ??
-    []
-
-  const { data: subjects } = await supabaseServer
-    .from("subjects")
-    .select("id, name")
-    .eq("user_id", userId)
-
-  const manualOverrides = wb ? getManualOverridesFromDoc(wb) : {}
-  const mapping = mapIncidenceBlocksToSubjects(
-    blocks,
-    (subjects ?? []) as SubjectRow[],
-    manualOverrides
-  )
-
   return {
-    workbook: wb,
-    blocks,
-    mapping,
-    for_llm: mapping.by_subject.map((row) => ({
-      subject_id: row.subject_id,
-      subject_name: row.subject_name,
-      excel_label: row.excel_label,
-      excel_labels: row.excel_labels,
-      top_topics: [...row.groups]
-        .sort((a, b) => b.percent - a.percent)
-        .slice(0, 50)
-        .map((g) => ({
-          name: g.name,
-          percent: g.percent,
-          qty: g.quantity,
-          code: g.code,
-          is_subtopic: g.is_subtopic,
-        })),
-    })),
-    merge_warnings: mapping.merge_warnings,
+    workbook: null,
+    blocks: [],
+    mapping: {
+      by_subject: [],
+      by_block: [],
+      unmapped_subjects: [],
+      unmapped_blocks: [],
+      merge_warnings: [],
+    },
+    for_llm: [],
+    merge_warnings: [],
   }
 }
 
@@ -274,11 +327,16 @@ export async function uploadCoachDocument(params: {
         ? pickBlockForSubject(parsed.blocks, params.subjectName)
         : null
 
+    const trees_by_subject = isWorkbook
+      ? buildTreesBySubject(parsed.blocks)
+      : undefined
+
     parsed_tables = {
       format: "xlsx_incidence",
       scope: isWorkbook ? "exam_workbook" : "single_subject",
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
+      trees_by_subject,
       flat_row_count: parsed.flat_rows.length,
       parse_stats: displayParseStats(parsed.stats),
       block_count: parsed.blocks.length,
