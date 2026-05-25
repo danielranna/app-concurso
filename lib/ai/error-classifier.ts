@@ -3,6 +3,14 @@ import type { ErrorTaxonomy, PerQuestionError, SubjectBrainState } from "../coac
 import { loadSubjectBrain, getReportPreferences } from "./context-builder"
 import { runTeacherAgent } from "./agents/teacher"
 import { runAgent } from "./run-agent"
+import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
+import {
+  buildIncidenceTopicIndex,
+  computeErrorPriorityScore,
+  getActiveExamTargetId,
+  getEditalWeightForSubject,
+  matchTopicToIncidence,
+} from "../strategic-weights"
 
 export type WrongAttemptRow = {
   attempt_id: string
@@ -16,6 +24,9 @@ export type WrongAttemptRow = {
   notes: string[]
   prior_correct_count: number
   priority_score: number
+  incidence_weight?: number
+  edital_weight?: number
+  matched_incidence_topic?: string | null
 }
 
 const TAXONOMY_SEVERITY: Record<ErrorTaxonomy, number> = {
@@ -70,18 +81,35 @@ export function heuristicClassify(row: WrongAttemptRow): {
   return { taxonomy: "pegadinha_interpretacao", evidence: ["Padrão interpretativo"] }
 }
 
-export function computeErrorPriorityScore(params: {
-  wrongCount: number
-  incidenceWeight: number
-  brainGap: number
-  taxonomy: ErrorTaxonomy
-}): number {
-  return (
-    params.wrongCount * 10 +
-    params.incidenceWeight * 20 +
-    params.brainGap * 15 +
-    TAXONOMY_SEVERITY[params.taxonomy] * 5
+async function loadWeightContext(userId: string, subjectId: string | null) {
+  const examId = await getActiveExamTargetId(userId)
+  if (!examId || !subjectId) {
+    return { examId: null as string | null, editalWeight: 1, topicIndex: buildIncidenceTopicIndex([]) }
+  }
+
+  const [editalWeight, labels] = await Promise.all([
+    getEditalWeightForSubject(userId, examId, subjectId),
+    resolveSubjectLabels(userId, examId, subjectId).catch(() => [] as string[]),
+  ])
+
+  const rows =
+    labels.length > 0
+      ? await fetchIncidenceRows({
+          userId,
+          examTargetId: examId,
+          subjectLabels: labels,
+        })
+      : []
+
+  const topicIndex = buildIncidenceTopicIndex(
+    (rows ?? []).map((r) => ({
+      topic_name: String(r.topic_name),
+      percent: Number(r.percent),
+      is_subtopic: Boolean(r.is_subtopic),
+    }))
   )
+
+  return { examId, editalWeight, topicIndex }
 }
 
 export async function fetchWrongAttemptsForNotebook(
@@ -103,6 +131,7 @@ export async function fetchWrongAttemptsForNotebook(
     .order("created_at", { ascending: false })
 
   const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
+  const weights = await loadWeightContext(userId, subjectId)
 
   const rows: WrongAttemptRow[] = []
   const seenQ = new Set<string>()
@@ -129,6 +158,10 @@ export async function fetchWrongAttemptsForNotebook(
     const entry = brain?.topic_map?.[topic]
     const brainGap = entry ? 1 - entry.dominio : 0.5
 
+    const incidenceMatch = matchTopicToIncidence(topic, weights.topicIndex)
+    const incidenceWeight = incidenceMatch.weight
+    const editalWeight = weights.editalWeight
+
     const { taxonomy } = heuristicClassify({
       attempt_id: a.id,
       question_id: a.question_id,
@@ -145,9 +178,10 @@ export async function fetchWrongAttemptsForNotebook(
 
     const priority_score = computeErrorPriorityScore({
       wrongCount: 1,
-      incidenceWeight: 1,
+      incidenceWeight,
+      editalWeight,
       brainGap,
-      taxonomy,
+      taxonomySeverity: TAXONOMY_SEVERITY[taxonomy],
     })
 
     rows.push({
@@ -162,6 +196,9 @@ export async function fetchWrongAttemptsForNotebook(
       notes: [],
       prior_correct_count: priorCorrect ?? 0,
       priority_score,
+      incidence_weight: incidenceWeight,
+      edital_weight: editalWeight,
+      matched_incidence_topic: incidenceMatch.matchedTopic,
     })
   }
 
@@ -186,17 +223,22 @@ export async function classifyWrongAttempts(
     const { taxonomy, evidence, specific_mistake } = heuristicClassify(row)
     const brainEntry = brain?.topic_map?.[row.tec_topic]
 
+    const errorDetail = {
+      specific_mistake,
+      evidence,
+      source: "heuristic" as const,
+      priority_score: row.priority_score,
+      incidence_weight: row.incidence_weight,
+      edital_weight: row.edital_weight,
+      matched_incidence_topic: row.matched_incidence_topic,
+      brain_topic_status: brainEntry?.status,
+    }
+
     await supabaseServer
       .from("question_attempts")
       .update({
         error_taxonomy: taxonomy,
-        error_detail: {
-          specific_mistake,
-          evidence,
-          source: "heuristic",
-          priority_score: row.priority_score,
-          brain_topic_status: brainEntry?.status,
-        },
+        error_detail: errorDetail,
       })
       .eq("id", row.attempt_id)
 
@@ -234,12 +276,9 @@ export async function classifyWrongAttempts(
         .from("question_attempts")
         .update({
           error_detail: {
-            specific_mistake,
-            evidence,
-            source: "heuristic",
+            ...errorDetail,
             explanation: teacher.answer,
             explanation_source: teacher.source,
-            priority_score: row.priority_score,
           },
         })
         .eq("id", row.attempt_id)

@@ -93,6 +93,7 @@ export default function CoachInsightsPage() {
               topic_key: string
               priority_score: number
               incidence_weight?: number
+              edital_weight?: number
               gap_score?: number
               retention_penalty?: number
               reason?: string
@@ -101,6 +102,7 @@ export default function CoachInsightsPage() {
               topic_key: i.topic_key,
               priority_score: Number(i.priority_score),
               incidence_weight: i.incidence_weight,
+              edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
               gap_score: i.gap_score,
               retention_penalty: i.retention_penalty,
               reason: i.reason,
@@ -140,6 +142,7 @@ export default function CoachInsightsPage() {
             topic_key: string
             priority_score: number
             incidence_weight?: number
+            edital_weight?: number
             gap_score?: number
             retention_penalty?: number
             reason?: string
@@ -148,6 +151,7 @@ export default function CoachInsightsPage() {
             topic_key: i.topic_key,
             priority_score: Number(i.priority_score),
             incidence_weight: i.incidence_weight,
+            edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
             gap_score: i.gap_score,
             retention_penalty: i.retention_penalty,
             reason: i.reason,

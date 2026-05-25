@@ -164,11 +164,26 @@ export async function processJob(job: {
         const state = await ingestBrainFromReport(userId, subjectId, reportId)
         await completeJob(job.id, { topics: Object.keys(state.topic_map).length })
 
+        const { data: reportRow } = await supabaseServer
+          .from("subject_notebook_reports")
+          .select("structured")
+          .eq("id", reportId)
+          .maybeSingle()
+        const structured = reportRow?.structured as
+          | { per_question_errors?: { tec_topic: string }[] }
+          | undefined
+        const recentWrongTopics = (structured?.per_question_errors ?? []).map(
+          (e) => e.tec_topic
+        )
+
         await enqueueJob({
           userId,
           jobType: "strategy_recompute",
           idempotencyKey: `strategy:${subjectId}:${new Date().toISOString().slice(0, 13)}`,
-          payload: { subject_id: subjectId },
+          payload: {
+            subject_id: subjectId,
+            recent_wrong_topics: recentWrongTopics,
+          },
           priority: 7,
         })
 
@@ -184,8 +199,12 @@ export async function processJob(job: {
 
       case "strategy_recompute": {
         const subjectId = payload.subject_id as string
+        const recentWrongTopics = Array.isArray(payload.recent_wrong_topics)
+          ? (payload.recent_wrong_topics as string[])
+          : undefined
         const rows = await recomputeStrategicQueue(userId, subjectId, {
           withLlmNarrative: false,
+          recentWrongTopics,
         })
         await completeJob(job.id, { items: rows.length })
         break

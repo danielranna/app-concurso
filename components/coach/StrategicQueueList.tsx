@@ -7,6 +7,7 @@ export type QueueItem = {
   topic_key: string
   priority_score: number
   incidence_weight?: number
+  edital_weight?: number
   gap_score?: number
   retention_penalty?: number
   reason?: string | null
@@ -66,6 +67,9 @@ export default function StrategicQueueList({
             />
           </div>
           <div className="mt-1.5 flex flex-wrap gap-2 pl-7 text-[10px] text-slate-500">
+            {item.edital_weight != null && item.edital_weight > 0 && (
+              <span>Edital ×{item.edital_weight.toFixed(1)}</span>
+            )}
             {item.incidence_weight != null && (
               <span>Incid. ×{item.incidence_weight.toFixed(1)}</span>
             )}
