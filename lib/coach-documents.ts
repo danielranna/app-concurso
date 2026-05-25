@@ -2,6 +2,7 @@ import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
 import { buildTreesBySubject } from "./incidence-hierarchy"
 import {
+  buildSubjectPercentChecks,
   displayParseStats,
   incidenceSummaryForLlm,
   parseIncidenceXlsx,
@@ -83,12 +84,19 @@ export async function getExamIncidenceHierarchy(
     pt.trees_by_subject ??
     (blocks.length ? buildTreesBySubject(blocks) : {})
 
-  const subjects = blocks.map((block) => ({
-    label: block.subject_label,
-    total_quantity: block.total_quantity,
-    topic_count: block.groups.length,
-    tree: trees_by_subject[block.subject_label] ?? [],
-  }))
+  const percent_checks = buildSubjectPercentChecks(blocks)
+
+  const subjects = blocks.map((block) => {
+    const check = percent_checks.find((c) => c.subject_label === block.subject_label)
+    return {
+      label: block.subject_label,
+      total_quantity: block.total_quantity,
+      topic_count: block.groups.length,
+      tree: trees_by_subject[block.subject_label] ?? [],
+      top_level_percent_sum: check?.top_level_sum ?? null,
+      percent_sum_ok: check?.ok ?? null,
+    }
+  })
 
   return {
     exam_target_id: examTargetId,
@@ -97,6 +105,7 @@ export async function getExamIncidenceHierarchy(
     trees_by_subject,
     parse_stats: pt.parse_stats ?? null,
     subject_mappings: pt.subject_mappings ?? null,
+    subject_percent_checks: percent_checks,
   }
 }
 

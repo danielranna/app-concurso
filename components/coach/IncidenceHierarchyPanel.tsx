@@ -9,6 +9,8 @@ type SubjectTree = {
   total_quantity: number
   topic_count: number
   tree: IncidenceTreeNode[]
+  top_level_percent_sum?: number | null
+  percent_sum_ok?: boolean | null
 }
 
 type HierarchyPayload = {
@@ -19,7 +21,14 @@ type HierarchyPayload = {
     topics?: number
     subtopics?: number
     rows_imported?: number
+    subjects_percent_ok?: number
+    subjects_percent_fail?: number
   } | null
+  subject_percent_checks?: {
+    subject_label: string
+    top_level_sum: number
+    ok: boolean
+  }[]
 }
 
 function TreeBranch({
@@ -180,6 +189,13 @@ export default function IncidenceHierarchyPanel({
             {stats.subjects ?? data.subjects.length} matérias ·{" "}
             {stats.topics ?? 0} linhas · {stats.subtopics ?? 0} subtópicos ·{" "}
             {stats.rows_imported ?? 0} gravadas no banco
+            {stats.subjects_percent_ok != null && (
+              <>
+                {" "}
+                · {stats.subjects_percent_ok} matérias com Σ%≈100% (
+                {stats.subjects_percent_fail ?? 0} fora da margem)
+              </>
+            )}
           </p>
         )}
       </div>
@@ -203,8 +219,23 @@ export default function IncidenceHierarchyPanel({
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
                 )}
                 <span className="flex-1 font-semibold text-slate-900">{sub.label}</span>
-                <span className="text-xs text-slate-500">
-                  {sub.topic_count} itens · {sub.total_quantity} quest.
+                <span className="flex shrink-0 flex-col items-end text-xs">
+                  <span className="text-slate-500">
+                    {sub.topic_count} itens · {sub.total_quantity} quest.
+                  </span>
+                  {sub.top_level_percent_sum != null && (
+                    <span
+                      className={
+                        sub.percent_sum_ok
+                          ? "font-medium text-emerald-700"
+                          : "font-medium text-amber-700"
+                      }
+                      title="Soma dos % dos tópicos 01, 02, 03… (1º nível)"
+                    >
+                      Σ 1º nível {sub.top_level_percent_sum.toFixed(1)}%
+                      {sub.percent_sum_ok ? " ✓" : " ⚠"}
+                    </span>
+                  )}
                 </span>
               </button>
               {subOpen && (

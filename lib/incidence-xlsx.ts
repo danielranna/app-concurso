@@ -31,12 +31,23 @@ export type IncidenceFlatRow = {
   percent: number
 }
 
+export type SubjectPercentCheck = {
+  subject_label: string
+  top_level_sum: number
+  ok: boolean
+  top_level_count: number
+}
+
 export type IncidenceParseStats = {
   subject_count: number
   topic_count: number
   subtopic_count: number
   ignored_count: number
   ignored_samples: string[]
+  /** Soma dos % dos tópicos de 1º nível (01, 02…) — deve ficar ~100% */
+  subject_percent_checks?: SubjectPercentCheck[]
+  subjects_percent_ok?: number
+  subjects_percent_fail?: number
   /** Alias para UI */
   subjects?: number
   topics?: number
@@ -117,24 +128,65 @@ function cellHierarchy(raw: unknown): string {
   return normalizeHierarchyCode(String(raw).trim())
 }
 
+/** Só a linha de cabeçalho da planilha — não confundir com tópicos tipo «Índices de…». */
+function isTableHeaderRow(hierarquia: string, indice: string) {
+  const h = hierarquia.trim().toLowerCase()
+  const i = indice.trim().toLowerCase()
+  if (i === "total" || i === "totais") return true
+  if (i === "índice" || i === "indice") return true
+  if (h === "hierarquia" || i === "hierarquia") return true
+  if (h.includes("hierarquia") && (i === "índice" || i === "indice")) return true
+  return false
+}
+
 function isHierarchyCode(hierarquia: string) {
   const h = normalizeHierarchyCode(hierarquia)
   return /^\d{2}(\.\d{2})*$/.test(h)
 }
 
-/** Cabeçalho de matéria (sem código hierárquico). Dentro de um bloco, linha vazia = tópico pai, não nova matéria. */
+/** Linha de matéria no Excel: Hierarquia vazia + nome longo + % ≈ 100% (total da matéria). */
+function isSubjectPercentTotal(pct: number) {
+  return pct >= 99.5
+}
+
 function isSubjectHeaderRow(
   hierarquia: string,
   indice: string,
-  insideSubject: boolean
+  pct: number
 ) {
   const h = hierarquia.trim()
   const i = indice.trim()
   if (!i) return false
-  if (insideSubject && !h) return false
-  if (!h && i.length > 2) return true
-  if (/^[A-Z]{2,5}$/i.test(h) && i.length > 8) return true
+  if (!h && i.length > 2) {
+    return isSubjectPercentTotal(pct)
+  }
   return false
+}
+
+/** Tópicos de 1º nível (01, 02…) cuja soma de % deve fechar ~100% na matéria. */
+export function topLevelGroups(groups: IncidenceGroup[]) {
+  return groups.filter(
+    (g) => !g.parent_code && /^\d{2}$/.test(normalizeHierarchyCode(g.code))
+  )
+}
+
+const PERCENT_SUM_TOLERANCE = 1.5
+
+export function validateSubjectPercentSum(block: IncidenceSubjectBlock): SubjectPercentCheck {
+  const tops = topLevelGroups(block.groups)
+  const top_level_sum = Math.round(tops.reduce((s, g) => s + g.percent, 0) * 100) / 100
+  return {
+    subject_label: block.subject_label,
+    top_level_sum,
+    ok: Math.abs(top_level_sum - 100) <= PERCENT_SUM_TOLERANCE,
+    top_level_count: tops.length,
+  }
+}
+
+export function buildSubjectPercentChecks(
+  blocks: IncidenceSubjectBlock[]
+): SubjectPercentCheck[] {
+  return blocks.map(validateSubjectPercentSum)
 }
 
 function inferTopLevelCode(groups: IncidenceGroup[]): string {
@@ -201,12 +253,11 @@ function parseSheetRows(
     const pct = parsePercent(row[3])
 
     if (!indice && !hierarquia) continue
-    const lower = indice.toLowerCase()
-    if (lower.includes("hierarquia") || lower.includes("índice") || lower === "total") {
+    if (isTableHeaderRow(hierarquia, indice)) {
       continue
     }
 
-    if (isSubjectHeaderRow(hierarquia, indice, !!current)) {
+    if (isSubjectHeaderRow(hierarquia, indice, pct)) {
       if (current && (current.groups.length || current.subject_label !== "Matéria")) {
         blocks.push(current)
       }
@@ -266,6 +317,9 @@ export function parseIncidenceXlsx(buffer: Buffer): ParsedIncidenceWorkbook {
 
   const subtopic_count = flat_rows.filter((r) => r.is_subtopic).length
   const topic_count = flat_rows.length
+  const subject_percent_checks = buildSubjectPercentChecks(blocks)
+  const subjects_percent_ok = subject_percent_checks.filter((c) => c.ok).length
+  const subjects_percent_fail = subject_percent_checks.length - subjects_percent_ok
 
   return {
     blocks,
@@ -277,6 +331,9 @@ export function parseIncidenceXlsx(buffer: Buffer): ParsedIncidenceWorkbook {
       subtopic_count,
       ignored_count: ignored_samples.length,
       ignored_samples,
+      subject_percent_checks,
+      subjects_percent_ok,
+      subjects_percent_fail,
     },
   }
 }
