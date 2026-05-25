@@ -295,7 +295,13 @@ export async function uploadCoachDocument(params: {
       throw new Error("exam_target_id obrigatório para incidência")
     }
 
-    incidenceParsed = parseIncidenceXlsx(buffer)
+    try {
+      incidenceParsed = parseIncidenceXlsx(buffer)
+    } catch (parseErr) {
+      const hint =
+        parseErr instanceof Error ? parseErr.message : "formato inválido"
+      throw new Error(`Não foi possível ler o Excel: ${hint}`)
+    }
     const parsed = incidenceParsed
 
     const { data: subjects } = await supabaseServer
@@ -327,16 +333,11 @@ export async function uploadCoachDocument(params: {
         ? pickBlockForSubject(parsed.blocks, params.subjectName)
         : null
 
-    const trees_by_subject = isWorkbook
-      ? buildTreesBySubject(parsed.blocks)
-      : undefined
-
     parsed_tables = {
       format: "xlsx_incidence",
       scope: isWorkbook ? "exam_workbook" : "single_subject",
       sheet_names: parsed.sheet_names,
       blocks: parsed.blocks,
-      trees_by_subject,
       flat_row_count: parsed.flat_rows.length,
       parse_stats: displayParseStats(parsed.stats),
       block_count: parsed.blocks.length,
@@ -444,9 +445,14 @@ export async function uploadCoachDocument(params: {
     }
 
     if (persist.error) {
-      throw new Error(
-        `Excel salvo, mas as linhas não entraram no banco: ${persist.error}`
-      )
+      const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+      doc.parsed_tables = {
+        ...pt,
+        parse_stats: {
+          ...((pt.parse_stats as object) ?? {}),
+          persist_error: persist.error,
+        },
+      }
     }
   }
 

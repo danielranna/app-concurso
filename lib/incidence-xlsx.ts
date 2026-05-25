@@ -1,4 +1,9 @@
 import * as XLSX from "xlsx"
+import {
+  hierarchyDepth,
+  normalizeHierarchyCode,
+  parentCodeFromHierarchy,
+} from "./incidence-hierarchy"
 
 export type IncidenceGroup = {
   code: string
@@ -106,12 +111,6 @@ function parseQuantity(raw: unknown): number {
   const n = parseInt(String(raw ?? "0"), 10)
   return Number.isFinite(n) ? n : 0
 }
-
-import {
-  hierarchyDepth,
-  normalizeHierarchyCode,
-  parentCodeFromHierarchy,
-} from "./incidence-hierarchy"
 
 function cellHierarchy(raw: unknown): string {
   if (raw == null || raw === "") return ""

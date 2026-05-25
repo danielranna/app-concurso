@@ -3,7 +3,7 @@ import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export const runtime = "nodejs"
-export const maxDuration = 60
+export const maxDuration = 120
 
 export async function POST(req: Request) {
   try {
@@ -69,9 +69,27 @@ export async function POST(req: Request) {
       runJobWorker(1).catch(() => {})
     }
 
-    return NextResponse.json(doc)
+    const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+    return NextResponse.json({
+      id: doc.id,
+      title: doc.title,
+      doc_type: doc.doc_type,
+      exam_target_id: doc.exam_target_id,
+      status: doc.status,
+      created_at: doc.created_at,
+      parsed_tables: {
+        format: pt.format,
+        scope: pt.scope,
+        parse_stats: pt.parse_stats,
+        block_count: pt.block_count,
+        flat_row_count: pt.flat_row_count,
+        persist_error: (pt.parse_stats as { persist_error?: string } | undefined)
+          ?.persist_error,
+      },
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
+    console.error("[coach/documents/upload]", msg, e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

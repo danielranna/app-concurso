@@ -158,30 +158,54 @@ export default function CoachEditaisPage() {
     form.set("file", file)
     form.set("title", file.name)
 
+    if (file.size > 15 * 1024 * 1024) {
+      alert("Arquivo muito grande (máx. 15 MB). Tente salvar uma cópia mais leve no Excel.")
+      setUploadingExcel(false)
+      return
+    }
+
     try {
       const res = await fetch("/api/coach/documents/upload", {
         method: "POST",
         body: form,
       })
-      const data = await res.json()
-      if (data.error) {
-        alert(data.error)
-      } else {
-        const stats = (data.parsed_tables?.parse_stats ?? {}) as {
-          subjects?: number
-          topics?: number
-          subtopics?: number
-          rows_imported?: number
+      let data: {
+        error?: string
+        parsed_tables?: {
+          parse_stats?: {
+            subjects?: number
+            topics?: number
+            subtopics?: number
+            rows_imported?: number
+            persist_error?: string | null
+          }
         }
+      }
+      try {
+        data = await res.json()
+      } catch {
         alert(
-          `Excel importado: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} assuntos, ${stats.subtopics ?? 0} subtópicos, ${stats.rows_imported ?? 0} linhas no banco.`
+          `Resposta inválida do servidor (${res.status}). Se o arquivo for grande, aguarde ou use uma cópia menor.`
+        )
+        return
+      }
+      if (!res.ok || data.error) {
+        alert(data.error ?? `Erro no servidor (${res.status})`)
+      } else {
+        const stats = data.parsed_tables?.parse_stats ?? {}
+        const warn = stats.persist_error
+          ? `\n\nAviso: ${stats.persist_error}`
+          : ""
+        alert(
+          `Excel importado: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} assuntos, ${stats.subtopics ?? 0} subtópicos, ${stats.rows_imported ?? 0} linhas no banco.${warn}`
         )
         reloadDocs(userId, selectedId)
         setHierarchyKey((k) => k + 1)
         setDashboardKey((k) => k + 1)
       }
-    } catch {
-      alert("Falha no envio do Excel.")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "erro de rede"
+      alert(`Falha no envio do Excel: ${msg}`)
     } finally {
       setUploadingExcel(false)
     }
