@@ -140,6 +140,8 @@ export type DailyStudyPlan = {
   blocks: DailyStudyBlock[]
   rotation_note?: string
   narrative_summary?: string
+  combined_notebook_id?: string | null
+  combined_question_count?: number
 }
 
 export type NotebookReportStructured = {

@@ -9,6 +9,7 @@ const links = [
   { href: "/coach/materias", label: "Matérias" },
   { href: "/coach/editais", label: "Prova / Edital" },
   { href: "/coach/inbox", label: "Ações pendentes" },
+  { href: "/coach/configuracoes", label: "Configurações" },
 ]
 
 export default function CoachSubNav() {

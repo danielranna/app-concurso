@@ -11,6 +11,7 @@ import {
   Star,
 } from "lucide-react"
 import ExamPlanReportCard from "@/components/coach/ExamPlanReportCard"
+import ExamStrategyBoardPanel from "@/components/coach/ExamStrategyBoard"
 import type { ExamPlanStructured, ExamTarget } from "@/lib/coach-types"
 
 type SubjectRow = { id: string; name: string }
@@ -522,6 +523,16 @@ export default function CoachEditaisPage() {
             Clique em uma prova na lista para enviar documentos.
           </p>
         )
+      )}
+
+      {active && userId && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
+          <ExamStrategyBoardPanel
+            userId={userId}
+            examTargetId={active.id}
+            examName={active.name}
+          />
+        </div>
       )}
 
       {reports.length > 0 && (

@@ -4,7 +4,10 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, Play, Sparkles } from "lucide-react"
+import { ArrowLeft, Loader2, Play, Sparkles, RefreshCw } from "lucide-react"
+import StrategicQueueList, {
+  type QueueItem,
+} from "@/components/coach/StrategicQueueList"
 import type { LearningSignal, SubjectBrainState } from "@/lib/coach-types"
 import { BRAIN_STATUS_LABELS, ERROR_TAXONOMY_LABELS } from "@/lib/coach-labels"
 
@@ -55,6 +58,8 @@ export default function CoachInsightsPage() {
   const [loadingPriorities, setLoadingPriorities] = useState(false)
   const [brain, setBrain] = useState<SubjectBrainState | null>(null)
   const [brainSummary, setBrainSummary] = useState<string | null>(null)
+  const [queueItems, setQueueItems] = useState<QueueItem[]>([])
+  const [loadingQueue, setLoadingQueue] = useState(false)
 
   function reload(uid: string) {
     setLoading(true)
@@ -69,8 +74,11 @@ export default function CoachInsightsPage() {
       fetch(`/api/coach/brain?user_id=${uid}&subject_id=${subjectId}`).then(
         (r) => r.json()
       ),
+      fetch(`/api/coach/strategic-queue?user_id=${uid}&subject_id=${subjectId}`).then(
+        (r) => r.json()
+      ),
     ])
-      .then(([subs, sig, reps, brainRes]) => {
+      .then(([subs, sig, reps, brainRes, queueRes]) => {
         const sub = (subs ?? []).find((s: { id: string }) => s.id === subjectId)
         setSubjectName(sub?.name ?? "Matéria")
         setSignals(sig.signals ?? [])
@@ -78,6 +86,27 @@ export default function CoachInsightsPage() {
         setReports(reps ?? [])
         setBrain(brainRes.state ?? null)
         setBrainSummary(brainRes.summary_md ?? null)
+        setQueueItems(
+          (queueRes.items ?? []).map(
+            (i: {
+              id: string
+              topic_key: string
+              priority_score: number
+              incidence_weight?: number
+              gap_score?: number
+              retention_penalty?: number
+              reason?: string
+            }) => ({
+              id: i.id,
+              topic_key: i.topic_key,
+              priority_score: Number(i.priority_score),
+              incidence_weight: i.incidence_weight,
+              gap_score: i.gap_score,
+              retention_penalty: i.retention_penalty,
+              reason: i.reason,
+            })
+          )
+        )
       })
       .finally(() => setLoading(false))
   }
@@ -92,6 +121,41 @@ export default function CoachInsightsPage() {
       reload(user.id)
     })
   }, [subjectId, router])
+
+  async function refreshQueue() {
+    if (!userId) return
+    setLoadingQueue(true)
+    const res = await fetch("/api/coach/strategic-queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, subject_id: subjectId }),
+    })
+    const data = await res.json()
+    setLoadingQueue(false)
+    if (data.items) {
+      setQueueItems(
+        data.items.map(
+          (i: {
+            id: string
+            topic_key: string
+            priority_score: number
+            incidence_weight?: number
+            gap_score?: number
+            retention_penalty?: number
+            reason?: string
+          }) => ({
+            id: i.id,
+            topic_key: i.topic_key,
+            priority_score: Number(i.priority_score),
+            incidence_weight: i.incidence_weight,
+            gap_score: i.gap_score,
+            retention_penalty: i.retention_penalty,
+            reason: i.reason,
+          })
+        )
+      )
+    }
+  }
 
   async function loadPriorities() {
     if (!userId) return
@@ -169,6 +233,28 @@ export default function CoachInsightsPage() {
           Veredito de prioridades
         </button>
       </div>
+
+      <section className="rounded-xl border border-violet-200 bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-violet-800">
+            Fila estratégica desta matéria
+          </h3>
+          <button
+            type="button"
+            onClick={refreshQueue}
+            disabled={loadingQueue}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loadingQueue ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            Recalcular
+          </button>
+        </div>
+        <StrategicQueueList items={queueItems} loading={loading && !queueItems.length} />
+      </section>
 
       {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">

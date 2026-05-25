@@ -2,6 +2,7 @@ import { supabaseServer } from "../supabase-server"
 import type { DailyStudyBlock, DailyStudyPlan } from "../coach-types"
 import { buildExecutionContext } from "./context-builder"
 import { pickQuestionIdsFromPerformance } from "../notebook-from-performance"
+import { createNotebookFromQuestionIds } from "../notebook-from-performance"
 import { runExecutionNarrativeAgent } from "./agents/execution"
 
 export async function generateDailyStudyPlan(
@@ -11,14 +12,21 @@ export async function generateDailyStudyPlan(
   const ctx = await buildExecutionContext(userId)
 
   if (ctx.existing_plan && !force) {
+    const blocks = ctx.existing_plan.blocks as DailyStudyBlock[]
     return {
       id: ctx.existing_plan.id,
       date: ctx.today,
       mode: ctx.existing_plan.mode as DailyStudyPlan["mode"],
       limits: ctx.existing_plan.limits as DailyStudyPlan["limits"],
-      blocks: ctx.existing_plan.blocks as DailyStudyBlock[],
+      blocks,
       rotation_note: ctx.existing_plan.rotation_note ?? undefined,
       narrative_summary: ctx.existing_plan.narrative_summary ?? undefined,
+      combined_notebook_id:
+        (ctx.existing_plan as { combined_notebook_id?: string })
+          .combined_notebook_id ?? null,
+      combined_question_count: blocks
+        .filter((b) => b.type === "questions" && b.params?.is_combined)
+        .reduce((s, b) => s + b.count, 0),
     }
   }
 
@@ -40,8 +48,7 @@ export async function generateDailyStudyPlan(
   const pool = rotate
     ? subjectIds.filter((id) => !ctx.yesterday_subject_ids.includes(id))
     : subjectIds
-  const orderedSubjects =
-    pool.length > 0 ? pool : subjectIds
+  const orderedSubjects = pool.length > 0 ? pool : subjectIds
 
   const queueBySubject = new Map<string, typeof ctx.queue>()
   for (const item of ctx.queue) {
@@ -52,60 +59,93 @@ export async function generateDailyStudyPlan(
   }
 
   const maxSubjectsPerDay =
-    mode === "reta_final" ? Math.min(3, orderedSubjects.length) : Math.min(5, orderedSubjects.length)
+    mode === "reta_final"
+      ? Math.min(3, orderedSubjects.length)
+      : Math.min(5, orderedSubjects.length)
 
   const pickedSubjects = orderedSubjects.slice(0, maxSubjectsPerDay)
 
+  const allQuestionIds: string[] = []
+  const seenQ = new Set<string>()
+  let primarySubjectId: string | null = null
+
   for (const subjectId of pickedSubjects) {
+    if (questionsBudget <= 0) break
     const sub = ctx.subjects.find((s) => s.id === subjectId)
     const topTopics = (queueBySubject.get(subjectId) ?? []).slice(0, 3)
     const topic = topTopics[0]?.topic_key as string | undefined
 
-    if (questionsBudget > 0) {
-      const count = Math.min(
-        mode === "reta_final" ? 15 : 10,
-        questionsBudget
-      )
-      const questionIds = await pickQuestionIdsFromPerformance(userId, {
-        subject_id: subjectId,
-        wrong_only: true,
-        min_wrong_attempts: 1,
-        tec_topics: topic ? [topic] : undefined,
-        limit: count,
-      })
+    const count = Math.min(
+      mode === "reta_final" ? 15 : 12,
+      Math.ceil(questionsBudget / Math.max(1, pickedSubjects.length))
+    )
 
-      blocks.push({
-        subject_id: subjectId,
-        subject_name: sub?.name,
-        type: "questions",
-        count: questionIds.length || count,
-        minutes: Math.min(45, count * 4),
-        label: topic
-          ? `${count} questões — ${topic}`
-          : `${count} questões de reforço`,
-        params: {
-          question_ids: questionIds,
-          tec_topics: topic ? [topic] : [],
-          subject_id: subjectId,
-          suggested_name: `Plano ${ctx.today} — ${sub?.name ?? "Matéria"}`,
-        },
-      })
-      questionsBudget -= count
-    }
+    const questionIds = await pickQuestionIdsFromPerformance(userId, {
+      subject_id: subjectId,
+      wrong_only: true,
+      min_wrong_attempts: 1,
+      tec_topics: topic ? [topic] : undefined,
+      limit: count,
+    })
 
-    if (errorBudget > 0) {
-      const errCount = Math.min(5, errorBudget)
-      blocks.push({
-        subject_id: subjectId,
-        subject_name: sub?.name,
-        type: "error_review",
-        count: errCount,
-        minutes: errCount * 3,
-        label: `Revisar ${errCount} erros`,
-        params: { subject_id: subjectId },
-      })
-      errorBudget -= errCount
+    for (const qid of questionIds) {
+      if (seenQ.has(qid)) continue
+      seenQ.add(qid)
+      allQuestionIds.push(qid)
+      if (!primarySubjectId) primarySubjectId = subjectId
+      questionsBudget--
+      if (questionsBudget <= 0) break
     }
+  }
+
+  let combinedNotebookId: string | null = null
+
+  if (allQuestionIds.length > 0 && primarySubjectId) {
+    const subjectLabels = pickedSubjects
+      .map((id) => ctx.subjects.find((s) => s.id === id)?.name)
+      .filter(Boolean)
+      .slice(0, 3)
+
+    combinedNotebookId = await createNotebookFromQuestionIds(
+      userId,
+      `Plano ${ctx.today}${subjectLabels.length ? ` — ${subjectLabels.join(", ")}` : ""}`.slice(
+        0,
+        120
+      ),
+      primarySubjectId,
+      allQuestionIds
+    )
+
+    blocks.push({
+      subject_id: primarySubjectId,
+      subject_name: subjectLabels.join(" · ") || "Várias matérias",
+      type: "questions",
+      count: allQuestionIds.length,
+      minutes: Math.min(90, allQuestionIds.length * 4),
+      label: `Caderno do dia (${allQuestionIds.length} questões)`,
+      params: {
+        question_ids: allQuestionIds,
+        notebook_id: combinedNotebookId,
+        is_combined: true,
+        subject_ids: pickedSubjects,
+      },
+    })
+  }
+
+  for (const subjectId of pickedSubjects) {
+    if (errorBudget <= 0) break
+    const sub = ctx.subjects.find((s) => s.id === subjectId)
+    const errCount = Math.min(5, errorBudget)
+    blocks.push({
+      subject_id: subjectId,
+      subject_name: sub?.name,
+      type: "error_review",
+      count: errCount,
+      minutes: errCount * 3,
+      label: `Revisar erros — ${sub?.name ?? "matéria"}`,
+      params: { subject_id: subjectId },
+    })
+    errorBudget -= errCount
   }
 
   if (flashBudget > 0 && ctx.flashcards_due > 0) {
@@ -121,8 +161,8 @@ export async function generateDailyStudyPlan(
   }
 
   const rotation_note = rotate
-    ? `Rotação: ${pickedSubjects.length} matérias hoje (excluídas as de ontem).`
-    : `Prioridade pela fila estratégica (${mode}).`
+    ? `Rotação: ${pickedSubjects.length} matérias. Questões em um único caderno.`
+    : `Prioridade pela fila estratégica (${mode}). Questões em um único caderno.`
 
   const plan: DailyStudyPlan = {
     date: ctx.today,
@@ -130,6 +170,8 @@ export async function generateDailyStudyPlan(
     limits,
     blocks,
     rotation_note,
+    combined_notebook_id: combinedNotebookId,
+    combined_question_count: allQuestionIds.length,
   }
 
   plan.narrative_summary = await runExecutionNarrativeAgent({ userId, plan }).catch(
@@ -143,7 +185,10 @@ export async function generateDailyStudyPlan(
         user_id: userId,
         plan_date: ctx.today,
         mode: plan.mode,
-        limits: plan.limits,
+        limits: {
+          ...plan.limits,
+          combined_notebook_id: combinedNotebookId,
+        },
         blocks: plan.blocks,
         rotation_note: plan.rotation_note,
         narrative_summary: plan.narrative_summary,
@@ -155,27 +200,6 @@ export async function generateDailyStudyPlan(
 
   if (error) throw new Error(error.message)
   plan.id = row?.id
-
-  for (const block of blocks) {
-    if (block.type === "questions" && block.params.question_ids) {
-      const ids = block.params.question_ids as string[]
-      if (!ids.length) continue
-      await supabaseServer.from("ai_action_drafts").insert({
-        user_id: userId,
-        subject_id: block.subject_id,
-        type: "notebook_create",
-        label: block.label,
-        payload: {
-          question_ids: ids,
-          subject_id: block.subject_id,
-          suggested_name: block.params.suggested_name,
-          from_daily_plan: true,
-        },
-        source_agent: "execution",
-        status: "pending",
-      })
-    }
-  }
 
   return plan
 }

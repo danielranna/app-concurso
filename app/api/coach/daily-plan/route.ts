@@ -17,7 +17,20 @@ export async function GET(req: Request) {
     .eq("plan_date", today)
     .maybeSingle()
 
-  return NextResponse.json({ plan: data })
+  if (!data) return NextResponse.json({ plan: null })
+
+  const limits = (data.limits ?? {}) as Record<string, unknown>
+  return NextResponse.json({
+    plan: {
+      ...data,
+      combined_notebook_id:
+        (limits.combined_notebook_id as string) ??
+        (data.blocks as { params?: { notebook_id?: string } }[])?.find(
+          (b) => b.params?.notebook_id
+        )?.params?.notebook_id ??
+        null,
+    },
+  })
 }
 
 export async function POST(req: Request) {
@@ -30,7 +43,13 @@ export async function POST(req: Request) {
 
   try {
     const plan = await generateDailyStudyPlan(user_id, Boolean(force))
-    return NextResponse.json({ plan })
+    return NextResponse.json({
+      plan: {
+        ...plan,
+        plan_date: plan.date,
+        combined_notebook_id: plan.combined_notebook_id,
+      },
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })

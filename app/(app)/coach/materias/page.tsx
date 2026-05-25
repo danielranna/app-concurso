@@ -30,7 +30,7 @@ export default function CoachMateriasPage() {
   return (
     <div>
       <p className="mb-4 text-sm text-slate-600">
-        Prioridades, sinais de aprendizado e relatórios por matéria.
+        Prioridades, fila estratégica, sinais e relatórios por matéria.
       </p>
       <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
         {subjects.map((s) => (
@@ -39,7 +39,10 @@ export default function CoachMateriasPage() {
               href={`/coach/materias/${s.id}/insights`}
               className="flex items-center justify-between px-4 py-3 hover:bg-slate-50"
             >
-              <span className="font-medium text-slate-900">{s.name}</span>
+              <div>
+                <span className="font-medium text-slate-900">{s.name}</span>
+                <p className="text-xs text-slate-500">Fila estratégica e insights</p>
+              </div>
               <ChevronRight className="h-4 w-4 text-slate-400" />
             </Link>
           </li>
