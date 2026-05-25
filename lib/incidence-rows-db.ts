@@ -98,6 +98,35 @@ export async function resolveSubjectLabels(
   examTargetId: string,
   subjectId: string
 ): Promise<string[]> {
+  const { data: mdDoc } = await supabaseServer
+    .from("subject_documents")
+    .select("parsed_tables")
+    .eq("user_id", userId)
+    .eq("exam_target_id", examTargetId)
+    .eq("doc_type", "strategic_md")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (mdDoc) {
+    const pt = (mdDoc.parsed_tables ?? {}) as {
+      bundle?: { edital_subjects: { slug: string; name: string }[] }
+      subject_mappings?: {
+        by_slug?: { slug: string; subject_id: string | null; md_name: string }[]
+      }
+    }
+    const labels: string[] = []
+    for (const row of pt.subject_mappings?.by_slug ?? []) {
+      if (row.subject_id === subjectId) {
+        const name =
+          pt.bundle?.edital_subjects.find((s) => s.slug === row.slug)?.name ??
+          row.md_name
+        if (!labels.includes(name)) labels.push(name)
+      }
+    }
+    if (labels.length) return labels
+  }
+
   const wb = await supabaseServer
     .from("subject_documents")
     .select("parsed_tables")

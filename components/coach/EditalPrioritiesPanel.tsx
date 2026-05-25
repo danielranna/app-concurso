@@ -16,14 +16,12 @@ export default function EditalPrioritiesPanel({
   userId,
   examTargetId,
   examName,
-  hasEdital,
-  hasIncidence,
+  hasStrategicMd,
 }: {
   userId: string
   examTargetId: string
   examName: string
-  hasEdital: boolean
-  hasIncidence: boolean
+  hasStrategicMd: boolean
 }) {
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,14 +45,14 @@ export default function EditalPrioritiesPanel({
   }, [load])
 
   async function runAnalysis() {
-    if (!hasEdital) {
-      alert("Envie o PDF do edital antes de analisar.")
+    if (!hasStrategicMd) {
+      alert("Importe o arquivo .md de análise estratégica primeiro.")
       return
     }
     setAnalyzing(true)
     try {
       const res = await fetch(
-        `/api/coach/exam-targets/${examTargetId}/analyze-edital`,
+        `/api/coach/exam-targets/${examTargetId}/enrich-strategic`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -106,9 +104,8 @@ export default function EditalPrioritiesPanel({
             Prioridades do edital
           </h3>
           <p className="text-sm text-slate-600">
-            Cruza o edital de <strong>{examName}</strong> com a incidência
-            histórica (gpt-4o). Só matérias presentes no edital entram na
-            análise.
+            Prioridades importadas do MD de <strong>{examName}</strong>. Use o
+            painel acima para enriquecer com IA (hierarquia e gaps).
           </p>
           {analysis?.model_used && (
             <p className="mt-1 text-xs text-slate-500">
@@ -121,7 +118,7 @@ export default function EditalPrioritiesPanel({
         <button
           type="button"
           onClick={runAnalysis}
-          disabled={analyzing || !hasEdital}
+          disabled={analyzing || !hasStrategicMd}
           className="inline-flex items-center gap-2 rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
         >
           {analyzing ? (
@@ -129,18 +126,13 @@ export default function EditalPrioritiesPanel({
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
-          Analisar edital com IA (gpt-4o)
+          Reenriquecer com IA (gpt-4o)
         </button>
       </div>
 
-      {!hasEdital && (
+      {!hasStrategicMd && (
         <p className="text-sm text-amber-800">
-          Envie o PDF do edital para habilitar a análise.
-        </p>
-      )}
-      {hasEdital && !hasIncidence && (
-        <p className="text-sm text-amber-800">
-          Envie também o Excel de incidência para cruzar com o edital.
+          Importe o arquivo .md para ver as prioridades do edital.
         </p>
       )}
 
@@ -151,9 +143,9 @@ export default function EditalPrioritiesPanel({
         </div>
       ) : !rank.length ? (
         <div className="rounded-lg border border-dashed border-amber-300 bg-white/60 px-4 py-6 text-center text-sm text-slate-600">
-          {hasEdital && hasIncidence
-            ? "Clique em “Analisar edital com IA” para gerar a ordem de prioridades e o porquê de cada matéria."
-            : "Envie PDF + Excel e clique em analisar."}
+          {hasStrategicMd
+            ? "As prioridades vêm do MD importado. Clique em reenriquecer para atualizar hierarquia e gaps com IA."
+            : "Importe o .md e as prioridades aparecerão aqui."}
         </div>
       ) : (
         <div className="space-y-3">

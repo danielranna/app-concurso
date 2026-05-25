@@ -22,7 +22,7 @@ function truncateText(text: string, maxChars: number) {
 
 export const COACH_DOCS_BUCKET = "coach-documents"
 
-export type CoachDocType = "edital" | "incidence" | "study_material"
+export type CoachDocType = "edital" | "incidence" | "study_material" | "strategic_md"
 
 export type IncidenceWorkbookDoc = {
   id: string
@@ -52,6 +52,17 @@ function recomputeSubjectMappings(
   return mapIncidenceBlocksToSubjects(blocks, subjects, manualOverrides)
 }
 
+export async function getExamStrategicMd(
+  userId: string,
+  examTargetId: string
+) {
+  const docs = await listCoachDocuments(userId, {
+    examTargetId,
+    docType: "strategic_md",
+  })
+  return docs[0] ?? null
+}
+
 /** Único Excel de incidência da prova (todas as matérias no arquivo). */
 export async function getExamIncidenceWorkbook(
   userId: string,
@@ -74,6 +85,85 @@ export async function buildIncidencePayloadForExam(
   userId: string,
   examTargetId: string
 ) {
+  const md = await getExamStrategicMd(userId, examTargetId)
+  if (md) {
+    const pt = (md.parsed_tables ?? {}) as {
+      bundle?: { edital_subjects: { name: string }[]; topics_by_slug: Record<string, { topic: string; quantity: number; percent: number }[]> }
+      subject_mappings?: ReturnType<typeof import("./strategic-md-map").mapStrategicMdToSubjects>
+      merge_warnings?: { subject_id: string; subject_name: string; slugs: string[] }[]
+    }
+    const { data: subjects } = await supabaseServer
+      .from("subjects")
+      .select("id, name")
+      .eq("user_id", userId)
+    const mappings = pt.subject_mappings
+    const by_subject = (subjects ?? []).map((sub) => {
+      const slugRows = mappings?.by_slug.filter((r) => r.subject_id === sub.id) ?? []
+      const topics: { name: string; percent: number; qty: number; code: string }[] = []
+      for (const row of slugRows) {
+        const list = pt.bundle?.topics_by_slug[row.slug] ?? []
+        for (const t of list) {
+          topics.push({
+            name: t.topic,
+            percent: t.percent,
+            qty: t.quantity,
+            code: "",
+          })
+        }
+      }
+      topics.sort((a, b) => b.percent - a.percent)
+      return {
+        subject_id: sub.id,
+        subject_name: sub.name,
+        excel_label: slugRows.map((r) => r.md_name).join(" + ") || null,
+        excel_labels: slugRows.map((r) => r.md_name),
+        top_topics: topics.slice(0, 50),
+      }
+    })
+    const emptyMapping = {
+      by_subject: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["by_subject"],
+      by_block: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["by_block"],
+      unmapped_subjects: (subjects ?? []).filter(
+        (sub) => !mappings?.by_slug.some((r) => r.subject_id === sub.id)
+      ),
+      unmapped_blocks: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["unmapped_blocks"],
+      merge_warnings: [] as ReturnType<typeof mapIncidenceBlocksToSubjects>["merge_warnings"],
+    }
+    for (const sub of subjects ?? []) {
+      const slugRows = mappings?.by_slug.filter((r) => r.subject_id === sub.id) ?? []
+      if (!slugRows.length) continue
+      const groups = slugRows.flatMap((row) => {
+        const list = pt.bundle?.topics_by_slug[row.slug] ?? []
+        return list.map((t, i) => ({
+          code: String(i + 1).padStart(2, "0"),
+          name: t.topic,
+          quantity: t.quantity,
+          percent: t.percent,
+        }))
+      })
+      emptyMapping.by_subject.push({
+        subject_id: sub.id,
+        subject_name: sub.name,
+        excel_label: slugRows.map((r) => r.md_name).join(" + "),
+        excel_labels: slugRows.map((r) => r.md_name),
+        match_score: Math.max(...slugRows.map((r) => r.match_score)),
+        groups,
+      })
+    }
+
+    return {
+      workbook: md,
+      blocks: [],
+      mapping: emptyMapping,
+      for_llm: by_subject.filter((r) => r.top_topics.length > 0),
+      merge_warnings: (pt.merge_warnings ?? []).map((w) => ({
+        subject_id: w.subject_id,
+        subject_name: w.subject_name,
+        excel_labels: w.slugs,
+      })),
+    }
+  }
+
   const wb = await getExamIncidenceWorkbook(userId, examTargetId)
   const blocks =
     (wb?.parsed_tables as { blocks?: IncidenceSubjectBlock[] } | null)?.blocks ??

@@ -74,6 +74,33 @@ export async function generateCoachEditalPlan(
 
   if (exErr || !exam) throw new Error("Prova alvo não encontrada")
 
+  const { getStrategicMdDocument } = await import("../strategic-md-import")
+  const strategicMd = await getStrategicMdDocument(userId, examTargetId)
+  if (strategicMd) {
+    const { data: analysis } = await supabaseServer
+      .from("exam_edital_analysis")
+      .select("priorities, structure")
+      .eq("exam_target_id", examTargetId)
+      .eq("user_id", userId)
+      .maybeSingle()
+
+    const structured = asExamPlanStructured(
+      (analysis?.priorities ?? {}) as Record<string, unknown>
+    )
+    const summaryMd = buildCoachEditalSummaryMd(exam.name, structured)
+
+    await supabaseServer.from("exam_target_reports").insert({
+      exam_target_id: examTargetId,
+      user_id: userId,
+      summary_md: summaryMd,
+      structured,
+      input_snapshot: { source: "strategic_md" },
+      model_used: "md_import",
+    })
+
+    return { structured, summary_md: summaryMd }
+  }
+
   const docs = await listCoachDocuments(userId, { examTargetId })
   const editalDoc = docs.find((d) => d.doc_type === "edital")
   const incidencePayload = await buildIncidencePayloadForExam(
@@ -118,10 +145,9 @@ export async function generateCoachEditalPlan(
       ? {
           title: incidencePayload.workbook.title,
           block_count: incidencePayload.blocks.length,
-          mapped_subjects: incidencePayload.mapping.by_subject.length,
-          unmapped_subjects: incidencePayload.mapping.unmapped_subjects.map(
-            (s) => s.name
-          ),
+          mapped_subjects: incidencePayload.mapping?.by_subject?.length ?? 0,
+          unmapped_subjects:
+            incidencePayload.mapping?.unmapped_subjects?.map((s) => s.name) ?? [],
         }
       : null,
     incidence_by_subject: incidenceBySubject,

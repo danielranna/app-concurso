@@ -3,41 +3,23 @@
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
-import {
-  FileUp,
-  Loader2,
-  Plus,
-  Sparkles,
-  Star,
-} from "lucide-react"
+import { FileUp, Loader2, Plus, Sparkles, Star } from "lucide-react"
 import ExamPlanReportCard from "@/components/coach/ExamPlanReportCard"
 import ExamStrategyBoardPanel from "@/components/coach/ExamStrategyBoard"
 import EditalPrioritiesPanel from "@/components/coach/EditalPrioritiesPanel"
+import StrategicExamDashboard from "@/components/coach/StrategicExamDashboard"
 import type { ExamPlanStructured, ExamTarget } from "@/lib/coach-types"
 
 type SubjectRow = { id: string; name: string }
 
-type IncidenceGroup = {
-  code: string
-  name: string
-  quantity: number
-  percent: number
-}
-
-type BlockMapping = {
-  excel_label: string
+type SlugMapping = {
+  slug: string
+  md_name: string
   subject_id: string | null
   subject_name: string | null
   match_score: number
-  group_count: number
+  topic_count: number
   manual?: boolean
-}
-
-type SubjectMapping = {
-  subject_id: string
-  subject_name: string
-  excel_label: string
-  match_score: number
 }
 
 type DocRow = {
@@ -48,37 +30,15 @@ type DocRow = {
   status: string
   created_at: string
   parsed_tables?: {
-    char_count?: number
-    format?: string
-    scope?: string
-    block_count?: number
-    group_count?: number
-    groups?: IncidenceGroup[]
-    matched_subject_label?: string
     parse_stats?: {
       subjects?: number
       topics?: number
-      subtopics?: number
-      subject_count?: number
-      topic_count?: number
-      subtopic_count?: number
-      rows_imported?: number
       rows_inserted_db?: number
-      rows_ignored?: number
-      ignored_count?: number
-      persist_error?: string | null
-      ignored_samples?: string[]
+      warnings?: string[]
     }
-    flat_row_count?: number
-    merge_warnings?: {
-      subject_id: string
-      subject_name: string
-      excel_labels: string[]
-    }[]
     subject_mappings?: {
-      by_block?: BlockMapping[]
-      by_subject?: SubjectMapping[]
-      unmapped_subjects?: { id: string; name: string }[]
+      by_slug?: SlugMapping[]
+      merge_warnings?: { subject_id: string; subject_name: string; slugs: string[] }[]
     }
   }
 }
@@ -88,22 +48,6 @@ type PlanReport = {
   summary_md: string | null
   structured: ExamPlanStructured
   created_at: string
-}
-
-function incidenceStatsLine(
-  pt: DocRow["parsed_tables"] | undefined
-): string | null {
-  if (!pt?.parse_stats && pt?.flat_row_count == null) return null
-  const s = pt?.parse_stats ?? {}
-  const rows =
-    s.rows_inserted_db ??
-    s.rows_imported ??
-    s.topic_count ??
-    pt?.flat_row_count ??
-    0
-  const subtopics = s.subtopics ?? s.subtopic_count ?? 0
-  const ignored = s.rows_ignored ?? s.ignored_count ?? 0
-  return `${rows} linhas no banco · ${subtopics} subtópicos${ignored > 0 ? ` · ${ignored} ignoradas` : ""}`
 }
 
 export default function CoachEditaisPage() {
@@ -117,9 +61,11 @@ export default function CoachEditaisPage() {
   const [name, setName] = useState("")
   const [banca, setBanca] = useState("")
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [planning, setPlanning] = useState(false)
+  const [enriching, setEnriching] = useState(false)
   const [savingMapping, setSavingMapping] = useState<string | null>(null)
+  const [dashboardKey, setDashboardKey] = useState(0)
   const active = targets.find((t) => t.id === selectedId) ?? targets.find((t) => t.is_active)
 
   function reloadTargets(uid: string) {
@@ -194,21 +140,20 @@ export default function CoachEditaisPage() {
     reloadTargets(userId)
   }
 
-  async function uploadDoc(docType: "edital" | "incidence", file: File) {
+  async function uploadStrategicMd(file: File) {
     if (!userId || !selectedId) {
       alert("Selecione uma prova na lista acima.")
       return
     }
-    setUploading(docType)
+    setUploading(true)
     const form = new FormData()
     form.set("user_id", userId)
-    form.set("doc_type", docType)
-    form.set("file", file)
     form.set("exam_target_id", selectedId)
+    form.set("file", file)
     form.set("title", file.name)
 
     try {
-      const res = await fetch("/api/coach/documents/upload", {
+      const res = await fetch("/api/coach/strategic-md/upload", {
         method: "POST",
         body: form,
       })
@@ -216,61 +161,74 @@ export default function CoachEditaisPage() {
       if (data.error) {
         alert(data.error)
       } else {
+        const stats = data.parse_stats ?? {}
+        const mapped = data.subject_mappings?.by_slug?.filter(
+          (r: SlugMapping) => r.subject_id
+        ).length
+        alert(
+          `MD importado: ${stats.subjects ?? 0} matérias, ${stats.topics ?? 0} tópicos, ${stats.rows_inserted_db ?? 0} linhas no banco. ${mapped ?? 0} matérias vinculadas automaticamente.`
+        )
         reloadDocs(userId, selectedId)
-        if (docType === "incidence") {
-          const stats = data.parsed_tables?.parse_stats
-          const n = data.parsed_tables?.block_count ?? 0
-          const mapped =
-            data.parsed_tables?.subject_mappings?.by_subject?.length ?? 0
-          const rows =
-            stats?.rows_inserted_db ??
-            stats?.rows_imported ??
-            stats?.topic_count ??
-            data.parsed_tables?.flat_row_count ??
-            0
-          const msg = stats
-            ? `Importadas: ${stats.subjects ?? stats.subject_count ?? 0} matérias, ${stats.topics ?? stats.topic_count ?? 0} assuntos, ${stats.subtopics ?? stats.subtopic_count ?? 0} subtópicos (${rows} linhas no banco${(stats.rows_ignored ?? stats.ignored_count ?? 0) > 0 ? `, ${stats.rows_ignored ?? stats.ignored_count} ignoradas` : ""}). ${mapped} matérias vinculadas.`
-            : `Excel importado: ${n} blocos. ${mapped} matérias vinculadas.`
-          if (stats?.persist_error) {
-            alert(`${msg}\n\nErro no banco: ${stats.persist_error}`)
-          } else {
-            alert(msg)
-          }
-        }
+        setDashboardKey((k) => k + 1)
       }
     } catch {
-      alert("Falha no envio. Verifique o bucket coach-documents no Supabase.")
+      alert("Falha no envio do MD.")
     } finally {
-      setUploading(null)
+      setUploading(false)
     }
   }
 
-  async function updateIncidenceMapping(
-    excelLabel: string,
-    subjectId: string | null
-  ) {
-    if (!userId || !incidenceWorkbook) return
-    setSavingMapping(excelLabel)
+  async function updateSlugMapping(slug: string, subjectId: string | null) {
+    if (!userId || !strategicDoc) return
+    setSavingMapping(slug)
     try {
       const res = await fetch(
-        `/api/coach/documents/${incidenceWorkbook.id}/incidence-mapping`,
+        `/api/coach/documents/${strategicDoc.id}/strategic-mapping`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             user_id: userId,
-            excel_label: excelLabel,
+            slug,
             subject_id: subjectId,
           }),
         }
       )
       const data = await res.json()
       if (data.error) alert(data.error)
-      else if (selectedId) reloadDocs(userId, selectedId)
+      else if (selectedId) {
+        reloadDocs(userId, selectedId)
+        setDashboardKey((k) => k + 1)
+      }
     } catch {
       alert("Não foi possível salvar o vínculo.")
     } finally {
       setSavingMapping(null)
+    }
+  }
+
+  async function enrichWithAi() {
+    if (!userId || !selectedId) return
+    setEnriching(true)
+    try {
+      const res = await fetch(
+        `/api/coach/exam-targets/${selectedId}/enrich-strategic`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId }),
+        }
+      )
+      const data = await res.json()
+      if (data.error) alert(data.error)
+      else {
+        alert(`Enriquecimento concluído (${data.model_used ?? "IA"}).`)
+        setDashboardKey((k) => k + 1)
+      }
+    } catch {
+      alert("Falha no enriquecimento com IA.")
+    } finally {
+      setEnriching(false)
     }
   }
 
@@ -287,41 +245,32 @@ export default function CoachEditaisPage() {
     if (data.error) alert(data.error)
     else {
       reloadDocs(userId, selectedId)
-      alert(
-        "Plano gerado! Veja abaixo e confira ações sugeridas em Ações pendentes."
-      )
+      alert("Plano gerado! Veja abaixo.")
     }
   }
 
-  const editalDoc = docs.find((d) => d.doc_type === "edital")
-  const incidenceWorkbook = docs.find(
-    (d) =>
-      d.doc_type === "incidence" &&
-      !d.subject_id &&
-      d.parsed_tables?.scope === "exam_workbook"
-  )
-  const legacyIncidenceDocs = docs.filter(
-    (d) => d.doc_type === "incidence" && d.subject_id
-  )
-  const mappings = incidenceWorkbook?.parsed_tables?.subject_mappings
+  const strategicDoc = docs.find((d) => d.doc_type === "strategic_md")
+  const slugMappings = strategicDoc?.parsed_tables?.subject_mappings
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-600">
-        Cadastre a prova, envie o PDF do edital e um único Excel de incidência
-        (todas as matérias no mesmo arquivo). O coach distribui automaticamente
-        para cada matéria sua.
+        Cadastre a prova e importe o arquivo <strong>.md</strong> de análise
+        estratégica (template com metadados, ranking, incidência e prioridades).
+        Limites e fase em{" "}
+        <a href="/coach/configuracoes" className="text-violet-700 hover:underline">
+          Configurações
+        </a>
+        .
       </p>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <h3 className="mb-3 text-sm font-semibold text-slate-900">
-          Nova prova alvo
-        </h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">Nova prova alvo</h3>
         <div className="flex flex-wrap gap-2">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Nome (ex. TRT 2026)"
+            placeholder="Nome (ex. SEEC Auditor 2019)"
             className="min-w-[200px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
           <input
@@ -336,11 +285,7 @@ export default function CoachEditaisPage() {
             disabled={saving || !name.trim()}
             className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Adicionar
           </button>
         </div>
@@ -361,9 +306,7 @@ export default function CoachEditaisPage() {
           >
             <div>
               <p className="font-medium text-slate-900">{t.name}</p>
-              {t.banca && (
-                <p className="text-xs text-slate-500">{t.banca}</p>
-              )}
+              {t.banca && <p className="text-xs text-slate-500">{t.banca}</p>}
             </div>
             {t.is_active ? (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-800">
@@ -388,158 +331,102 @@ export default function CoachEditaisPage() {
 
       {!targets.length && (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Crie uma prova alvo acima para liberar o envio de edital e incidência.
+          Crie uma prova alvo acima para importar a análise estratégica.
         </p>
       )}
 
       {active ? (
         <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50/30 p-4">
-          <h3 className="font-semibold text-slate-900">
-            Documentos — {active.name}
-          </h3>
+          <h3 className="font-semibold text-slate-900">Análise estratégica — {active.name}</h3>
           <p className="text-xs text-slate-600">
-            Edital = PDF. Incidência = Excel (.xlsx) com códigos 01, 02 e
-            subtópicos 02.01, 03.02 (alinhados aos tec_topic dos cadernos).
-            Limites diários e fase da prova em{" "}
-            <a href="/coach/configuracoes" className="text-violet-700 hover:underline">
-              Configurações
-            </a>
-            .
+            Envie o <code className="rounded bg-white px-1">analise_estrategica_*.md</code> gerado
+            com ranking, incidência da banca e prioridades. PDF e Excel não são mais necessários.
           </p>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
-              <FileUp className="h-4 w-4" />
-              {uploading === "edital" ? "Enviando…" : "Enviar PDF do edital"}
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                className="sr-only"
-                disabled={!!uploading}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadDoc("edital", f)
-                  e.target.value = ""
-                }}
-              />
-            </label>
-            {editalDoc && (
-              <span className="text-xs font-medium text-emerald-700">
-                ✓ {editalDoc.title} (
-                {editalDoc.parsed_tables?.char_count ?? 0} caracteres)
-              </span>
-            )}
-          </div>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+            <FileUp className="h-4 w-4" />
+            {uploading
+              ? "Importando…"
+              : strategicDoc
+                ? "Substituir análise (.md)"
+                : "Importar análise estratégica (.md)"}
+            <input
+              type="file"
+              accept=".md,.markdown,text/markdown"
+              className="sr-only"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) uploadStrategicMd(f)
+                e.target.value = ""
+              }}
+            />
+          </label>
 
-          <div className="space-y-2 border-t border-slate-200 pt-4">
-            <p className="text-sm font-medium text-slate-800">
-              Incidência — um Excel para toda a prova
-            </p>
-            <p className="text-xs text-slate-600">
-              O mesmo arquivo que você já tem (várias disciplinas em abas ou
-              blocos). Não precisa separar por matéria.
-            </p>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
-              <FileUp className="h-4 w-4" />
-              {uploading === "incidence"
-                ? "Enviando…"
-                : incidenceWorkbook
-                  ? "Substituir Excel de incidência"
-                  : "Enviar Excel completo"}
-              <input
-                type="file"
-                accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                className="sr-only"
-                disabled={!!uploading}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadDoc("incidence", f)
-                  e.target.value = ""
-                }}
-              />
-            </label>
-            {incidenceWorkbook && (
-              <div className="text-xs font-medium text-emerald-700 space-y-1">
-                <p>
-                  ✓ {incidenceWorkbook.title} —{" "}
-                  {incidenceWorkbook.parsed_tables?.block_count ?? 0} blocos,{" "}
-                  {mappings?.by_subject?.length ?? 0} matérias vinculadas
-                </p>
-                {incidenceStatsLine(incidenceWorkbook.parsed_tables) && (
-                  <p className="text-slate-600 font-normal">
-                    {incidenceStatsLine(incidenceWorkbook.parsed_tables)}
-                  </p>
-                )}
-                {incidenceWorkbook.parsed_tables?.parse_stats?.persist_error && (
-                  <p className="text-amber-800 font-normal">
-                    Erro ao gravar no banco:{" "}
-                    {incidenceWorkbook.parsed_tables.parse_stats.persist_error}
-                    {" "}
-                    (execute sql-incidence-rows.sql no Supabase e envie de novo)
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
+          {strategicDoc && (
+            <div className="text-xs font-medium text-emerald-700 space-y-1">
+              <p>✓ {strategicDoc.title}</p>
+              <p className="font-normal text-slate-600">
+                {strategicDoc.parsed_tables?.parse_stats?.subjects ?? 0} matérias ·{" "}
+                {strategicDoc.parsed_tables?.parse_stats?.topics ?? 0} tópicos ·{" "}
+                {strategicDoc.parsed_tables?.parse_stats?.rows_inserted_db ?? 0} linhas no banco
+              </p>
+            </div>
+          )}
 
-          {(incidenceWorkbook?.parsed_tables?.merge_warnings?.length ?? 0) > 0 && (
+          {(slugMappings?.merge_warnings?.length ?? 0) > 0 && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <p className="font-medium">Blocos somados na mesma matéria</p>
+              <p className="font-medium">Vários slugs → mesma matéria sua</p>
               <ul className="mt-1 list-inside list-disc">
-                {incidenceWorkbook!.parsed_tables!.merge_warnings!.map((w) => (
+                {slugMappings!.merge_warnings!.map((w) => (
                   <li key={w.subject_id}>
-                    <strong>{w.subject_name}</strong>: {w.excel_labels.length} blocos
-                    ({w.excel_labels.join(", ")}) — assuntos serão unidos.
+                    <strong>{w.subject_name}</strong>: {w.slugs.join(", ")}
                   </li>
                 ))}
               </ul>
             </div>
           )}
 
-          {mappings?.by_block && mappings.by_block.length > 0 && (
+          {slugMappings?.by_slug && slugMappings.by_slug.length > 0 && (
             <div className="space-y-2 border-t border-slate-200 pt-4">
-              <p className="text-sm font-medium text-slate-800">
-                Vínculo Excel → suas matérias
-              </p>
+              <p className="text-sm font-medium text-slate-800">Vínculo MD → suas matérias</p>
               <p className="text-xs text-slate-600">
-                Ajuste no menu da coluna &quot;Sua matéria&quot; quando o
-                automático errar. Vários blocos na mesma matéria são somados.
+                Associe cada matéria do edital (slug) à sua matéria no app. Salva na hora.
               </p>
               <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 bg-white">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-50">
                     <tr className="text-left text-slate-500">
-                      <th className="px-3 py-2">No Excel</th>
+                      <th className="px-3 py-2">No MD</th>
+                      <th className="px-3 py-2">slug</th>
                       <th className="min-w-[200px] px-3 py-2">Sua matéria</th>
-                      <th className="px-3 py-2">Agrup.</th>
+                      <th className="px-3 py-2">Tópicos</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {mappings.by_block.map((row) => (
+                    {slugMappings.by_slug.map((row) => (
                       <tr
-                        key={row.excel_label}
+                        key={row.slug}
                         className={`border-t border-slate-100 ${
                           row.subject_id ? "" : "bg-amber-50/80"
                         }`}
                       >
                         <td className="px-3 py-1.5 align-top">
-                          <span className="line-clamp-2">{row.excel_label}</span>
+                          <span className="line-clamp-2">{row.md_name}</span>
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-[10px] text-slate-500">
+                          {row.slug}
                         </td>
                         <td className="px-3 py-1.5">
                           <div className="flex flex-wrap items-center gap-1">
                             <select
                               value={row.subject_id ?? ""}
-                              disabled={
-                                savingMapping === row.excel_label || !subjects.length
-                              }
+                              disabled={savingMapping === row.slug || !subjects.length}
                               onChange={(e) => {
                                 const v = e.target.value
-                                updateIncidenceMapping(
-                                  row.excel_label,
-                                  v === "" ? null : v
-                                )
+                                updateSlugMapping(row.slug, v === "" ? null : v)
                               }}
-                              className="max-w-full min-w-[160px] flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-50"
+                              className="max-w-full min-w-[160px] flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
                             >
                               <option value="">— sem vínculo —</option>
                               {subjects.map((s) => (
@@ -548,73 +435,50 @@ export default function CoachEditaisPage() {
                                 </option>
                               ))}
                             </select>
-                            {savingMapping === row.excel_label && (
-                              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-400" />
-                            )}
-                            {row.manual && (
-                              <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-800">
-                                editado
-                              </span>
+                            {savingMapping === row.slug && (
+                              <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-1.5 align-top">{row.group_count}</td>
+                        <td className="px-3 py-1.5">{row.topic_count}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {(mappings.unmapped_subjects?.length ?? 0) > 0 && (
-                <p className="text-xs text-amber-800">
-                  Matérias suas sem bloco no Excel:{" "}
-                  {mappings.unmapped_subjects!.map((s) => s.name).join(", ")}
-                </p>
-              )}
             </div>
-          )}
-
-          {legacyIncidenceDocs.length > 0 && !incidenceWorkbook && (
-            <p className="text-xs text-slate-500 border-t border-slate-200 pt-2">
-              Você ainda tem {legacyIncidenceDocs.length} Excel(s) antigos por
-              matéria — envie o arquivo completo acima para unificar.
-            </p>
           )}
 
           <button
             type="button"
             onClick={generatePlan}
-            disabled={planning || !editalDoc}
-            className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800 disabled:opacity-50"
+            disabled={planning || !strategicDoc}
+            className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-50"
           >
-            {planning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            Gerar plano da prova (coach edital)
+            {planning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            Gerar plano semanal
           </button>
-          {!editalDoc && (
-            <p className="text-xs text-amber-700">
-              Envie o PDF do edital antes de gerar o plano.
-            </p>
-          )}
         </div>
       ) : (
         targets.length > 0 && (
-          <p className="text-sm text-slate-500">
-            Clique em uma prova na lista para enviar documentos.
-          </p>
+          <p className="text-sm text-slate-500">Clique em uma prova para importar o MD.</p>
         )
       )}
 
-      {active && userId && (
+      {active && userId && strategicDoc && (
         <>
+          <StrategicExamDashboard
+            key={dashboardKey}
+            userId={userId}
+            examTargetId={active.id}
+            onEnrich={enrichWithAi}
+            enriching={enriching}
+          />
           <EditalPrioritiesPanel
             userId={userId}
             examTargetId={active.id}
             examName={active.name}
-            hasEdital={!!editalDoc}
-            hasIncidence={!!incidenceWorkbook}
+            hasStrategicMd={!!strategicDoc}
           />
           <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 md:p-6">
             <ExamStrategyBoardPanel
@@ -628,15 +492,10 @@ export default function CoachEditaisPage() {
 
       {reports.length > 0 && (
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">
-            Planos gerados
-          </h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">Planos gerados</h3>
           <ul className="space-y-3">
             {reports.map((r) => (
-              <li
-                key={r.id}
-                className="rounded-xl border border-slate-200 bg-white p-4"
-              >
+              <li key={r.id} className="rounded-xl border border-slate-200 bg-white p-4">
                 <ExamPlanReportCard
                   createdAt={r.created_at}
                   structured={r.structured ?? {}}
