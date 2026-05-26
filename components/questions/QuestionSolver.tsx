@@ -39,6 +39,15 @@ type Question = {
 
 type Option = { label: string; text: string }
 
+type SubmitAnswerResult =
+  | {
+      is_correct: boolean
+      correct_answer: string
+      tec_url: string
+      outcome_category?: string
+    }
+  | { error: string; is_correct: null }
+
 type NavOpts = { nav?: NavMode }
 
 type Props = {
@@ -60,12 +69,7 @@ type Props = {
     tec_id: number
     notebook_id?: string
     confidence_level: ConfidenceLevel
-  }) => Promise<{
-    is_correct: boolean
-    correct_answer: string
-    tec_url: string
-    outcome_category?: string
-  }>
+  }) => Promise<SubmitAnswerResult>
   mapping?: { subject_id: string; topic_id: string } | null
   onCreateWrongNotebook?: () => Promise<void>
   creatingWrongNotebook?: boolean
@@ -362,7 +366,7 @@ export default function QuestionSolver({
         notebook_id: current.notebook_id,
         confidence_level: confidence,
       })
-      if (res.error && res.is_correct == null) {
+      if ("error" in res) {
         setResolveError(res.error)
         return
       }
@@ -434,6 +438,7 @@ export default function QuestionSolver({
         notebook_id: draft.notebook_id ?? current.notebook_id,
         confidence_level: draft.confidence,
       })
+      if ("error" in res) continue
       setDraft(scopeKey, qid, {
         ...draft,
         resolved: true,
