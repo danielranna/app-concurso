@@ -19,9 +19,15 @@ export type WrongAttemptRow = {
   duration_ms: number | null
   outcome_category: string | null
   confidence_level: string | null
+  selected_answer: string
+  correct_answer: string
   tec_id: number
   tec_topic: string
   statement: string
+  banca: string | null
+  ano: number | null
+  orgao: string | null
+  user_note: string
   notes: string[]
   prior_correct_count: number
   priority_score: number
@@ -122,8 +128,8 @@ export async function fetchWrongAttemptsForNotebook(
     .from("question_attempts")
     .select(
       `
-      id, question_id, duration_ms, outcome_category, confidence_level, is_correct,
-      questions ( tec_id, tec_topic, statement )
+      id, question_id, duration_ms, outcome_category, confidence_level, is_correct, selected_answer,
+      questions ( tec_id, tec_topic, statement, correct_answer, banca, ano, orgao )
     `
     )
     .eq("user_id", userId)
@@ -134,6 +140,20 @@ export async function fetchWrongAttemptsForNotebook(
   const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
   const weights = await loadWeightContext(userId, subjectId)
 
+  const questionIds = [...new Set((attempts ?? []).map((a) => a.question_id))]
+  const notesByQuestion = new Map<string, string>()
+  if (questionIds.length) {
+    const { data: notes } = await supabaseServer
+      .from("question_notes")
+      .select("question_id, note")
+      .eq("user_id", userId)
+      .in("question_id", questionIds)
+    for (const n of notes ?? []) {
+      const text = String(n.note ?? "").trim()
+      if (text) notesByQuestion.set(n.question_id, text)
+    }
+  }
+
   const rows: WrongAttemptRow[] = []
   const seenQ = new Set<string>()
 
@@ -142,10 +162,28 @@ export async function fetchWrongAttemptsForNotebook(
     seenQ.add(a.question_id)
 
     const q = a.questions as
-      | { tec_id: number; tec_topic: string; statement: string }
-      | { tec_id: number; tec_topic: string; statement: string }[]
+      | {
+          tec_id: number
+          tec_topic: string
+          statement: string
+          correct_answer: string
+          banca: string | null
+          ano: number | null
+          orgao: string | null
+        }
+      | {
+          tec_id: number
+          tec_topic: string
+          statement: string
+          correct_answer: string
+          banca: string | null
+          ano: number | null
+          orgao: string | null
+        }[]
     const qu = Array.isArray(q) ? q[0] : q
     if (!qu) continue
+
+    const userNote = notesByQuestion.get(a.question_id) ?? ""
 
     const { count: priorCorrect } = await supabaseServer
       .from("question_attempts")
@@ -169,10 +207,16 @@ export async function fetchWrongAttemptsForNotebook(
       duration_ms: a.duration_ms,
       outcome_category: a.outcome_category,
       confidence_level: a.confidence_level,
+      selected_answer: a.selected_answer ?? "",
+      correct_answer: qu.correct_answer ?? "",
       tec_id: qu.tec_id,
       tec_topic: topic,
       statement: qu.statement ?? "",
-      notes: [],
+      banca: qu.banca,
+      ano: qu.ano,
+      orgao: qu.orgao,
+      user_note: userNote,
+      notes: userNote ? [userNote] : [],
       prior_correct_count: priorCorrect ?? 0,
       priority_score: 0,
     })
@@ -191,10 +235,16 @@ export async function fetchWrongAttemptsForNotebook(
       duration_ms: a.duration_ms,
       outcome_category: a.outcome_category,
       confidence_level: a.confidence_level,
+      selected_answer: a.selected_answer ?? "",
+      correct_answer: qu.correct_answer ?? "",
       tec_id: qu.tec_id,
       tec_topic: topic,
-      statement: (qu.statement ?? "").slice(0, 500),
-      notes: [],
+      statement: (qu.statement ?? "").slice(0, 800),
+      banca: qu.banca,
+      ano: qu.ano,
+      orgao: qu.orgao,
+      user_note: userNote,
+      notes: userNote ? [userNote] : [],
       prior_correct_count: priorCorrect ?? 0,
       priority_score,
       incidence_weight: incidenceWeight,
@@ -258,6 +308,13 @@ export async function classifyWrongAttempts(
       specific_mistake,
       evidence,
       brain_topic_status: brainEntry?.status,
+      marked_answer: row.selected_answer,
+      correct_answer: row.correct_answer,
+      user_note: row.user_note || undefined,
+      statement_excerpt: row.statement.slice(0, 400),
+      outcome_category: row.outcome_category ?? undefined,
+      confidence_level: row.confidence_level ?? undefined,
+      zone: "red",
     }
 
     prepared.push({ row, item, errorDetail })

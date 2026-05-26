@@ -51,11 +51,16 @@ export async function POST(
   const { justCompleted } = await refreshNotebookProgress(notebook_id, user_id)
 
   if (justCompleted) {
-    import("@/lib/ai/notebook-report")
-      .then(({ enqueueNotebookReport }) =>
-        enqueueNotebookReport(notebook_id, user_id)
-      )
-      .catch((err) => console.error("notebook_report:", err))
+    void (async () => {
+      try {
+        const { enqueueNotebookReport } = await import("@/lib/ai/notebook-report")
+        const { runJobWorker } = await import("@/lib/ai/jobs/worker")
+        await enqueueNotebookReport(notebook_id, user_id)
+        await runJobWorker(3)
+      } catch (err) {
+        console.error("notebook_report:", err)
+      }
+    })()
   }
 
   return NextResponse.json({

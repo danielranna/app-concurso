@@ -68,6 +68,8 @@ export type TeacherCitation = {
   page?: number | null
 }
 
+export type AuditZone = "red" | "yellow" | "green"
+
 export type PerQuestionError = {
   question_id: string
   attempt_id?: string
@@ -76,6 +78,7 @@ export type PerQuestionError = {
   error_taxonomy: ErrorTaxonomy
   priority_score?: number
   specific_mistake?: string
+  misconception?: string
   explanation?: string
   explanation_source?: "material" | "ai_generated"
   explanation_citations?: TeacherCitation[]
@@ -83,6 +86,64 @@ export type PerQuestionError = {
   topic_group_size?: number
   brain_topic_status?: string
   evidence?: string[]
+  question_index?: number
+  header_label?: string
+  statement_excerpt?: string
+  marked_answer?: string
+  correct_answer?: string
+  user_note?: string
+  zone?: AuditZone
+  outcome_category?: string
+  confidence_level?: string
+  feedback_detailed?: string
+}
+
+export type BehavioralAuditQuestionItem = {
+  question_index: number
+  question_id: string
+  header_label: string
+  statement_excerpt: string
+  marked: string
+  answer_key: string
+  user_note?: string
+  outcome_category?: string
+  confidence_level?: string
+  feedback: string
+  misconception?: string
+  error_taxonomy?: ErrorTaxonomy
+}
+
+export type BehavioralAudit = {
+  performance_summary: {
+    correct: number
+    total: number
+    pct: number
+    avg_duration_ms?: number
+    groups: { red: number; yellow: number; green: number }
+  }
+  red_zone: BehavioralAuditQuestionItem[]
+  yellow_zone: BehavioralAuditQuestionItem[]
+  green_zone: {
+    mastered_indexes: number[]
+    theory_balance: string
+  }
+  model_used?: string
+  generated_at?: string
+}
+
+export type NotebookReportStructured = {
+  headline: string
+  strengths: { topic: string; evidence: string }[]
+  weaknesses: { topic: string; evidence: string; severity: string }[]
+  time_insights: { topic: string; pattern: string; evidence: string }[]
+  metacognition_patterns: { pattern: string; count: number; advice: string }[]
+  recurring_failures: { tec_id: number; attempts: number; advice: string }[]
+  consolidated_topics: string[]
+  actions_next_7_days: { action: string; priority: number; minutes_estimate: number }[]
+  executable_actions: ExecutableAction[]
+  per_question_errors?: PerQuestionError[]
+  behavioral_audit?: BehavioralAudit
+  confidence_in_analysis: string
 }
 
 export type TopicBrainEntry = {
@@ -98,6 +159,8 @@ export type TopicBrainEntry = {
   estabilidade: number
   retencao: number
   predominant_error?: ErrorTaxonomy
+  /** Último equívoco específico detectado no relatório */
+  last_insight?: string
   /** Nome exibível do tópico (tec_topic original) */
   label?: string
 }
@@ -160,20 +223,6 @@ export type DailyStudyPlan = {
   combined_question_count?: number
   user_pinned?: boolean
   completed_block_keys?: string[]
-}
-
-export type NotebookReportStructured = {
-  headline: string
-  strengths: { topic: string; evidence: string }[]
-  weaknesses: { topic: string; evidence: string; severity: string }[]
-  time_insights: { topic: string; pattern: string; evidence: string }[]
-  metacognition_patterns: { pattern: string; count: number; advice: string }[]
-  recurring_failures: { tec_id: number; attempts: number; advice: string }[]
-  consolidated_topics: string[]
-  actions_next_7_days: { action: string; priority: number; minutes_estimate: number }[]
-  executable_actions: ExecutableAction[]
-  per_question_errors?: PerQuestionError[]
-  confidence_in_analysis: string
 }
 
 export type EditalSubjectRankRow = {

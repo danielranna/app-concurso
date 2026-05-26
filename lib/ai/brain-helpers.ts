@@ -66,6 +66,22 @@ export function mergeReportIntoBrain(params: {
       if ((eq.priority_score ?? 0) > 50) entry.status = "critico"
       merged = true
     }
+    const insight = eq.misconception ?? eq.specific_mistake ?? eq.feedback_detailed
+    if (entry && insight) {
+      entry.last_insight = insight.slice(0, 280)
+      merged = true
+    } else if (!entry && insight) {
+      params.topic_map[key] = {
+        label: topic,
+        status: "fraco",
+        dominio: 0.4,
+        estabilidade: 0.35,
+        retencao: 0.35,
+        predominant_error: eq.error_taxonomy,
+        last_insight: insight.slice(0, 280),
+      }
+      merged = true
+    }
   }
 
   return merged

@@ -403,7 +403,7 @@ export default function CoachInsightsPage() {
                   <th className="px-3 py-2">Domínio</th>
                   <th className="px-3 py-2">Estab.</th>
                   <th className="px-3 py-2">Retenção</th>
-                  <th className="px-3 py-2">Erro típico</th>
+                  <th className="px-3 py-2">Último equívoco / erro</th>
                 </tr>
               </thead>
               <tbody>
@@ -438,9 +438,16 @@ export default function CoachInsightsPage() {
                         {Math.round(entry.retencao * 100)}%
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {entry.predominant_error
-                          ? ERROR_TAXONOMY_LABELS[entry.predominant_error]
-                          : "—"}
+                        {entry.last_insight ? (
+                          <span title={entry.last_insight}>
+                            {entry.last_insight.slice(0, 80)}
+                            {entry.last_insight.length > 80 ? "…" : ""}
+                          </span>
+                        ) : entry.predominant_error ? (
+                          ERROR_TAXONOMY_LABELS[entry.predominant_error]
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}

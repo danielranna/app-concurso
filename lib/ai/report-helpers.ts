@@ -222,6 +222,7 @@ export function mergeStructuredReport(
     per_question_errors: base.per_question_errors?.length
       ? base.per_question_errors
       : llm.per_question_errors,
+    behavioral_audit: base.behavioral_audit ?? llm.behavioral_audit,
     confidence_in_analysis: llm.confidence_in_analysis ?? base.confidence_in_analysis,
   }
 }

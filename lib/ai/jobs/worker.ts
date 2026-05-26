@@ -38,6 +38,10 @@ export async function processJob(job: {
           .maybeSingle()
 
         if (existing && !force) {
+          await supabaseServer
+            .from("notebooks")
+            .update({ report_pending: false })
+            .eq("id", notebookId)
           await completeJob(job.id, { skipped: true, report_id: existing.id })
           return
         }

@@ -1,6 +1,10 @@
 import { supabaseServer } from "../supabase-server"
 import type { NotebookReportStructured, PerQuestionError } from "../coach-types"
 import { classifyWrongAttempts } from "./error-classifier"
+import {
+  mergeBehavioralAuditIntoErrors,
+  runBehavioralAuditForNotebook,
+} from "./agents/behavioral-audit"
 import { runReportAgent } from "./agents/report"
 import { loadSubjectBrain } from "./context-builder"
 import { getEffectiveReportPreferences } from "./context-builder"
@@ -119,12 +123,13 @@ export async function buildNotebookReportSnapshot(
   if (qIds.length) {
     const { data: notes } = await supabaseServer
       .from("question_notes")
-      .select("content, question_id")
+      .select("note, question_id")
       .eq("user_id", userId)
       .in("question_id", qIds.slice(0, 50))
       .limit(10)
     notes_sample = (notes ?? []).map((n) => ({
-      content: String(n.content ?? "").slice(0, 200),
+      content: String(n.note ?? "").slice(0, 200),
+      question_id: n.question_id,
     }))
   }
 
@@ -235,6 +240,7 @@ export function buildRuleBasedReport(
     useLlm: boolean
     perQuestionErrors: PerQuestionError[]
     learningSignals?: { type: string; entity: string; score: number }[]
+    behavioralAudit?: import("../coach-types").BehavioralAudit
   }
 ): NotebookReportStructured {
   const byTopic =
@@ -308,6 +314,7 @@ export function buildRuleBasedReport(
       subjectId
     ),
     per_question_errors: options.perQuestionErrors,
+    behavioral_audit: options.behavioralAudit,
     confidence_in_analysis: options.useLlm ? "media" : "alta",
   }
 }
@@ -336,11 +343,26 @@ export async function generateNotebookReport(
   const subjectId = nb?.subject_id ?? null
   const prefs = await getEffectiveReportPreferences(userId, subjectId)
 
-  const perQuestionErrors = await classifyWrongAttempts(
+  let perQuestionErrors = await classifyWrongAttempts(
     userId,
     notebookId,
     subjectId,
     { explain: prefs.explain_wrong }
+  )
+
+  const reportsToday = await countReportLlmRunsToday(userId)
+  const skipAuditLlm = reportsToday >= prefs.max_llm_explanations_per_day
+
+  const auditResult = await runBehavioralAuditForNotebook(
+    notebookId,
+    userId,
+    subjectId,
+    { skipLlm: skipAuditLlm }
+  )
+  perQuestionErrors = mergeBehavioralAuditIntoErrors(
+    perQuestionErrors,
+    auditResult.audit,
+    auditResult.payload
   )
 
   const snapshot = await buildNotebookReportSnapshot(notebookId, userId)
@@ -354,14 +376,18 @@ export async function generateNotebookReport(
     useLlm: true,
     perQuestionErrors,
     learningSignals,
+    behavioralAudit: auditResult.audit,
   })
 
   const brain = subjectId
     ? ((snapshot.subject_brain as Record<string, unknown> | null) ?? null)
     : null
 
-  const reportsToday = await countReportLlmRunsToday(userId)
-  const skipLlm = reportsToday >= prefs.max_llm_explanations_per_day
+  const skipLlm =
+    skipAuditLlm ||
+    (auditResult.usedLlm
+      ? reportsToday + 1 >= prefs.max_llm_explanations_per_day
+      : reportsToday >= prefs.max_llm_explanations_per_day)
 
   const materialHints: { topic: string; document_title: string; excerpt: string }[] =
     []
@@ -394,17 +420,85 @@ export async function generateNotebookReport(
     materialHints,
   })
 
+  const structured = {
+    ...result.structured,
+    behavioral_audit: auditResult.audit,
+    per_question_errors: perQuestionErrors,
+  }
+
   return {
-    structured: result.structured,
+    structured,
     summaryMd: result.summaryMd,
     snapshot: snapshot as Record<string, unknown>,
-    modelUsed: result.modelUsed,
-    tokensIn: result.tokensIn,
-    tokensOut: result.tokensOut,
-    costUsd: result.costUsd,
+    modelUsed: auditResult.usedLlm
+      ? `${result.modelUsed}+audit:${auditResult.modelUsed}`
+      : result.modelUsed,
+    tokensIn: result.tokensIn + auditResult.tokensIn,
+    tokensOut: result.tokensOut + auditResult.tokensOut,
+    costUsd: result.costUsd + auditResult.costUsd,
     perQuestionCount: perQuestionErrors.length,
-    usedLlm: result.usedLlm,
+    usedLlm: result.usedLlm || auditResult.usedLlm,
   }
+}
+
+export async function regenerateBehavioralAuditOnly(
+  reportId: string,
+  userId: string
+): Promise<{
+  structured: import("../coach-types").NotebookReportStructured
+  auditModelUsed: string
+}> {
+  const { data: existing } = await supabaseServer
+    .from("subject_notebook_reports")
+    .select("id, notebook_id, subject_id, structured")
+    .eq("id", reportId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (!existing?.notebook_id) throw new Error("Relatório não encontrado")
+
+  const prior = (existing.structured ?? {}) as import("../coach-types").NotebookReportStructured
+  const perQuestionErrors = prior.per_question_errors ?? []
+
+  const auditResult = await runBehavioralAuditForNotebook(
+    existing.notebook_id,
+    userId,
+    existing.subject_id,
+    { skipLlm: false }
+  )
+
+  const merged = mergeBehavioralAuditIntoErrors(
+    perQuestionErrors,
+    auditResult.audit,
+    auditResult.payload
+  )
+
+  const structured: import("../coach-types").NotebookReportStructured = {
+    ...prior,
+    behavioral_audit: auditResult.audit,
+    per_question_errors: merged,
+  }
+
+  await supabaseServer
+    .from("subject_notebook_reports")
+    .update({ structured })
+    .eq("id", reportId)
+
+  if (existing.subject_id) {
+    const { enqueueJob } = await import("./jobs/queue")
+    await enqueueJob({
+      userId,
+      jobType: "brain_ingest_report",
+      idempotencyKey: `brain:audit:${reportId}:${Date.now()}`,
+      payload: {
+        subject_id: existing.subject_id,
+        report_id: reportId,
+      },
+      priority: 8,
+    })
+  }
+
+  return { structured, auditModelUsed: auditResult.modelUsed }
 }
 
 export async function enqueueNotebookReport(

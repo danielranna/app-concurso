@@ -27,6 +27,7 @@ export default function CoachReportDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [regenerating, setRegenerating] = useState(false)
+  const [regeneratingAudit, setRegeneratingAudit] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -57,6 +58,13 @@ export default function CoachReportDetailPage() {
     return <p className="text-sm text-slate-500">Carregando relatório…</p>
   }
 
+  async function reloadReport() {
+    if (!userId) return
+    const r = await fetch(`/api/coach/reports/${id}?user_id=${userId}`)
+    const refreshed = await r.json()
+    if (r.ok) setReport(refreshed)
+  }
+
   async function regenerate() {
     if (!userId) return
     setRegenerating(true)
@@ -68,13 +76,30 @@ export default function CoachReportDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) alert(data.error ?? "Erro ao regenerar")
-      else {
-        const r = await fetch(`/api/coach/reports/${id}?user_id=${userId}`)
-        const refreshed = await r.json()
-        if (r.ok) setReport(refreshed)
-      }
+      else await reloadReport()
     } finally {
       setRegenerating(false)
+    }
+  }
+
+  async function regenerateAudit() {
+    if (!userId) return
+    setRegeneratingAudit(true)
+    try {
+      const res = await fetch(`/api/coach/reports/${id}/regenerate-audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const data = await res.json()
+      if (!res.ok) alert(data.error ?? "Erro ao regenerar auditoria")
+      else if (data.structured) {
+        setReport((prev) =>
+          prev ? { ...prev, structured: data.structured } : prev
+        )
+      } else await reloadReport()
+    } finally {
+      setRegeneratingAudit(false)
     }
   }
 
@@ -88,7 +113,12 @@ export default function CoachReportDetailPage() {
       >
         {regenerating ? "Regenerando…" : "Regenerar relatório"}
       </button>
-      <NotebookReportDetail report={report} backHref="/coach" />
+      <NotebookReportDetail
+        report={report}
+        backHref="/coach"
+        onRegenerateAudit={regenerateAudit}
+        regeneratingAudit={regeneratingAudit}
+      />
     </div>
   )
 }
