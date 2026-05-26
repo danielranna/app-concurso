@@ -45,7 +45,8 @@ export default function ResolverCadernoPage() {
     total: 0,
     pending: 0,
   })
-  const [timerPaused, setTimerPaused] = useState(false)
+  const [notebookCompletePaused, setNotebookCompletePaused] = useState(false)
+  const [timersPaused, setTimersPaused] = useState(false)
 
   function reloadNotebook() {
     fetch(`/api/notebooks/${notebookId}`)
@@ -77,14 +78,14 @@ export default function ResolverCadernoPage() {
           setTimerReady(true)
           if (d.stats) {
             setLastStats(d.stats)
-            if (d.stats.pending === 0 && d.stats.total > 0) setTimerPaused(true)
+            if (d.stats.pending === 0 && d.stats.total > 0) setNotebookCompletePaused(true)
           }
         })
     })
   }, [notebookId, router])
 
   const handleNotebookComplete = useCallback(() => {
-    setTimerPaused(true)
+    setNotebookCompletePaused(true)
   }, [])
 
   useEffect(() => {
@@ -221,7 +222,8 @@ export default function ResolverCadernoPage() {
         setElapsedMs(0)
         setTimerKey((k) => k + 1)
       }
-      setTimerPaused(false)
+      setNotebookCompletePaused(false)
+      setTimersPaused(false)
       setRefreshKey((k) => k + 1)
       const qRes = await fetch(`/api/notebooks/${notebookId}/queue?user_id=${userId}`)
       const qData = await qRes.json()
@@ -285,7 +287,8 @@ export default function ResolverCadernoPage() {
                 key={timerKey}
                 initialMs={elapsedMs}
                 onPersist={persistElapsed}
-                paused={timerPaused}
+                paused={notebookCompletePaused}
+                onPauseChange={setTimersPaused}
               />
             )}
           </div>
@@ -342,6 +345,7 @@ export default function ResolverCadernoPage() {
           userId={userId}
           mode="notebook"
           notebookId={notebookId}
+          timerPaused={timersPaused}
           fetchQueue={fetchQueueSimple}
           submitAnswer={submitAnswer}
           mapping={mapping}

@@ -79,6 +79,8 @@ type Props = {
   onEditQuestion?: (questionId: string) => void
   refreshKey?: number
   onNotebookComplete?: () => void
+  /** Pausa o timer da questão (ex.: quando o cronômetro do caderno está pausado). */
+  timerPaused?: boolean
 }
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -130,6 +132,7 @@ export default function QuestionSolver({
   onEditQuestion,
   refreshKey,
   onNotebookComplete,
+  timerPaused = false,
 }: Props) {
   const scopeId = mode === "notebook" ? notebookId! : studySessionId!
   const scopeKey = draftScopeKey(mode, scopeId)
@@ -164,6 +167,7 @@ export default function QuestionSolver({
   const [timerTick, setTimerTick] = useState(0)
 
   const questionStartedAt = useRef(Date.now())
+  const timerWasPaused = useRef(false)
   const currentQuestionId = useRef<string | null>(null)
   const navigateRef = useRef<(nav: NavMode) => void>(() => {})
   const resolveRef = useRef<() => void>(() => {})
@@ -288,10 +292,24 @@ export default function QuestionSolver({
   }, [refreshKey])
 
   useEffect(() => {
-    if (result) return
+    if (timerPaused && !timerWasPaused.current) {
+      if (currentQuestionId.current) flushQuestionTime(currentQuestionId.current)
+      const draft = currentQuestionId.current
+        ? getDraft(scopeKey, currentQuestionId.current)
+        : null
+      if (draft) setQuestionMs(draft.durationMsAccumulated)
+      timerWasPaused.current = true
+    } else if (!timerPaused && timerWasPaused.current) {
+      questionStartedAt.current = Date.now()
+      timerWasPaused.current = false
+    }
+  }, [timerPaused, flushQuestionTime, scopeKey])
+
+  useEffect(() => {
+    if (result || timerPaused) return
     const id = window.setInterval(() => setTimerTick((t) => t + 1), 1000)
     return () => clearInterval(id)
-  }, [result])
+  }, [result, timerPaused])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -540,7 +558,11 @@ export default function QuestionSolver({
           </p>
           {timerTick >= 0 && (
             <QuestionTimerDisplay
-              ms={questionMs + (locked ? 0 : Date.now() - questionStartedAt.current)}
+              ms={
+                questionMs +
+                (locked || timerPaused ? 0 : Date.now() - questionStartedAt.current)
+              }
+              paused={timerPaused}
             />
           )}
         </div>

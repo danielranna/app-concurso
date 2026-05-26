@@ -19,6 +19,7 @@ export default function EstudoCombinadoPage() {
   const [sessionName, setSessionName] = useState("")
   const [elapsedMs, setElapsedMs] = useState(0)
   const [timerReady, setTimerReady] = useState(false)
+  const [timersPaused, setTimersPaused] = useState(false)
   const [childProgress, setChildProgress] = useState<
     {
       notebook_id: string
@@ -161,7 +162,11 @@ export default function EstudoCombinadoPage() {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-bold">{sessionName}</h1>
           {timerReady && (
-            <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />
+            <StudyTimer
+              initialMs={elapsedMs}
+              onPersist={persistElapsed}
+              onPauseChange={setTimersPaused}
+            />
           )}
         </div>
         <button
@@ -189,6 +194,7 @@ export default function EstudoCombinadoPage() {
           userId={userId}
           mode="study"
           studySessionId={sessionId}
+          timerPaused={timersPaused}
           fetchQueue={fetchQueue}
           submitAnswer={submitAnswer}
           mapping={mapping}

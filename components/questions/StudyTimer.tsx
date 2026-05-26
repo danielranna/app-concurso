@@ -20,6 +20,8 @@ type Props = {
   paused?: boolean
   /** Exibe botão de pausar/retomar (pausa manual do usuário). */
   showPauseControl?: boolean
+  /** Chamado quando o cronômetro entra ou sai de pausa (manual ou forçada). */
+  onPauseChange?: (paused: boolean) => void
 }
 
 /**
@@ -32,6 +34,7 @@ export default function StudyTimer({
   persistIntervalMs = 15000,
   paused = false,
   showPauseControl = true,
+  onPauseChange,
 }: Props) {
   const [elapsed, setElapsed] = useState(initialMs)
   const [userPaused, setUserPaused] = useState(false)
@@ -54,6 +57,10 @@ export default function StudyTimer({
       setElapsed(initialMs)
     }
   }, [initialMs])
+
+  useEffect(() => {
+    onPauseChange?.(effectivePaused)
+  }, [effectivePaused, onPauseChange])
 
   useEffect(() => {
     if (effectivePaused) {
@@ -135,10 +142,20 @@ function formatQuestionMs(ms: number): string {
   return `${s}s`
 }
 
-export function QuestionTimerDisplay({ ms }: { ms: number }) {
+export function QuestionTimerDisplay({
+  ms,
+  paused = false,
+}: {
+  ms: number
+  paused?: boolean
+}) {
   return (
-    <span className="text-xs text-slate-400" title="Tempo nesta questão">
+    <span
+      className={`text-xs tabular-nums ${paused ? "text-slate-300" : "text-slate-400"}`}
+      title={paused ? "Timer da questão pausado" : "Tempo nesta questão"}
+    >
       questão: {formatQuestionMs(ms)}
+      {paused ? " (pausado)" : ""}
     </span>
   )
 }
