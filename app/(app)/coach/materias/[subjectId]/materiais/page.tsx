@@ -5,6 +5,11 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
+  getCoachUploadMaxLabel,
+  uploadCoachStudyMaterials,
+  usesExternalCoachUpload,
+} from "@/lib/coach-upload-client"
+import {
   ArrowLeft,
   Loader2,
   RefreshCw,
@@ -111,51 +116,38 @@ export default function CoachMateriaisBibliotecaPage() {
     return () => clearInterval(t)
   }, [userId, docs, loadDocs])
 
-  const UPLOAD_MAX_BYTES = 4 * 1024 * 1024
+  const uploadMaxLabel = getCoachUploadMaxLabel()
+  const externalUpload = usesExternalCoachUpload()
 
   async function onUpload(files: FileList | null) {
     if (!userId || !files?.length) return
     setUploading(true)
     setUploadErrors([])
     const list = Array.from(files)
-    let okCount = 0
     const errs: string[] = []
 
     try {
-      for (let i = 0; i < list.length; i++) {
-        const file = list[i]!
-        setUploadProgress({ current: i + 1, total: list.length, name: file.name })
+      setUploadProgress({
+        current: 0,
+        total: externalUpload ? 1 : list.length,
+        name: externalUpload
+          ? `${list.length} arquivo(s)`
+          : list[0]?.name ?? "",
+      })
 
-        if (file.size > UPLOAD_MAX_BYTES) {
-          errs.push(
-            `${file.name}: maior que 4 MB — comprima ou divida o PDF (limite da Vercel por envio).`
-          )
-          continue
-        }
+      const { okCount, errors } = await uploadCoachStudyMaterials({
+        files: list,
+        userId,
+        subjectId,
+      })
+      errs.push(...errors)
 
-        const form = new FormData()
-        form.append("user_id", userId)
-        form.append("subject_id", subjectId)
-        form.append("doc_type", "study_material")
-        form.append("file", file)
-
-        const res = await fetch("/api/coach/documents/upload", {
-          method: "POST",
-          body: form,
+      if (!externalUpload && list.length > 1) {
+        setUploadProgress({
+          current: list.length,
+          total: list.length,
+          name: list[list.length - 1]!.name,
         })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          errs.push(
-            `${file.name}: ${data.error ?? (res.status === 413 ? "arquivo grande demais (máx. 4 MB)" : "erro no upload")}`
-          )
-          continue
-        }
-        if (data.errors?.length) {
-          for (const e of data.errors as { file: string; error: string }[]) {
-            errs.push(`${e.file}: ${e.error}`)
-          }
-        }
-        okCount++
       }
 
       if (okCount > 0) {
@@ -272,8 +264,11 @@ export default function CoachMateriaisBibliotecaPage() {
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-slate-900">Enviar PDFs de estudo</h3>
             <p className="text-sm text-slate-600">
-              Selecione vários PDFs — cada um é enviado separadamente (máx. 4 MB por
-              arquivo na Vercel). A indexação roda em segundo plano.
+              Selecione vários PDFs
+              {externalUpload
+                ? ` (até ${uploadMaxLabel} cada, envio pela sua VPS).`
+                : ` — cada um é enviado separadamente (máx. ${uploadMaxLabel} por arquivo na Vercel).`}{" "}
+              A indexação roda em segundo plano.
             </p>
             {uploadProgress && (
               <p className="mt-2 text-xs font-medium text-violet-800">

@@ -1,0 +1,311 @@
+# upload-supabase — API de upload na VPS (Hostinger)
+
+Serviço **separado do bot WhatsApp**. Recebe PDFs grandes do app Coach e grava no Supabase.
+
+---
+
+## O que você precisa antes de começar
+
+1. **Acesso SSH** à VPS Hostinger (painel mostra algo como `ssh root@SEU_IP`).
+2. **Chaves do Supabase** (mesmas do projeto na Vercel):
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_ANON_KEY` (= `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
+3. **URL do app na Vercel** (ex.: `https://seu-app.vercel.app`) para CORS.
+4. **Um subdomínio** apontando para o IP da VPS (ex.: `upload.seudominio.com`) — **obrigatório para HTTPS** (o app na Vercel é HTTPS; o navegador bloqueia chamadas HTTP).
+
+---
+
+## Visão geral (3 etapas)
+
+| Etapa | Onde | O quê |
+|-------|------|--------|
+| A | Seu PC (Windows) | Enviar a pasta `upload-supabase` para a VPS |
+| B | VPS (terminal SSH) | Instalar Node, configurar `.env`, subir com PM2 + nginx |
+| C | Vercel | Variável `NEXT_PUBLIC_COACH_UPLOAD_URL` + redeploy |
+
+Sim: **quase tudo é pelo terminal** na VPS. No PC você usa PowerShell só para copiar os arquivos (uma vez).
+
+---
+
+# ETAPA A — Enviar a pasta do seu PC para a VPS
+
+## A1. Abrir PowerShell no Windows
+
+1. Pressione `Win + X` → **Terminal** ou **PowerShell**.
+2. Vá até a pasta do projeto:
+
+```powershell
+cd "C:\Users\Daniel Ranna\Desktop\Concurso\app-vercel-next"
+```
+
+(Ajuste o caminho se o seu projeto estiver em outro lugar.)
+
+## A2. Copiar a pasta para a VPS com `scp`
+
+Substitua `SEU_IP` pelo IP da Hostinger (no painel: **Visão geral → Acesso root SSH**, ex. `2.24.88.155`):
+
+```powershell
+scp -r upload-supabase root@SEU_IP:/root/upload-supabase
+```
+
+- Na primeira vez pode pedir `yes` e a **senha root** da VPS.
+- Se der erro de `scp` não encontrado: no Windows 10/11 costuma existir; senão use o **Gerenciador de arquivos SFTP** do painel Hostinger para enviar a pasta `upload-supabase` para `/root/upload-supabase`.
+
+**Alternativa (zip):** compacte `upload-supabase` em `.zip`, envie pelo painel Hostinger, e na VPS:
+
+```bash
+cd /root
+unzip upload-supabase.zip
+# renomeie se precisar para /root/upload-supabase
+```
+
+---
+
+# ETAPA B — Configurar na VPS (terminal SSH)
+
+## B1. Conectar na VPS
+
+No PowerShell (ou no botão **Terminal** do painel Hostinger):
+
+```powershell
+ssh root@SEU_IP
+```
+
+Você deve ver um prompt tipo `root@srv...:~#`.
+
+## B2. Instalar Node.js 20 (se ainda não tiver)
+
+Cole linha por linha:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs
+node -v
+npm -v
+```
+
+Deve mostrar `v20.x` e versão do npm.
+
+## B3. Entrar na pasta e instalar dependências
+
+```bash
+cd /root/upload-supabase
+npm install
+```
+
+## B4. Criar o arquivo `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+No editor `nano`:
+
+- Apague os placeholders e cole seus valores reais do Supabase e da Vercel.
+- Exemplo:
+
+```env
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbG...
+SUPABASE_ANON_KEY=eyJhbG...
+PORT=3099
+MAX_UPLOAD_BYTES=20971520
+ALLOWED_ORIGINS=https://seu-app.vercel.app
+```
+
+Salvar no nano: `Ctrl+O`, Enter, sair: `Ctrl+X`.
+
+**ALLOWED_ORIGINS:** URL exata do app (sem `/` no final). Se tiver preview na Vercel, pode adicionar duas URLs separadas por vírgula:
+
+```env
+ALLOWED_ORIGINS=https://seu-app.vercel.app,https://seu-app-git-main-seu-user.vercel.app
+```
+
+## B5. Testar se o serviço sobe
+
+```bash
+cd /root/upload-supabase
+node src/index.js
+```
+
+Deve aparecer: `[upload-supabase] ouvindo em http://0.0.0.0:3099 ...`
+
+Em **outra** janela SSH (ou outra aba), teste:
+
+```bash
+curl http://127.0.0.1:3099/health
+```
+
+Resposta esperada: `{"ok":true,"service":"upload-supabase"}`
+
+Volte na primeira janela e pare o teste: `Ctrl+C`.
+
+## B6. Instalar PM2 e deixar rodando sempre
+
+```bash
+npm install -g pm2
+cd /root/upload-supabase
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
+```
+
+O comando `pm2 startup` vai imprimir **uma linha** começando com `sudo env ...` — **copie e cole essa linha inteira** e execute.
+
+Confira:
+
+```bash
+pm2 list
+```
+
+Deve aparecer `upload-supabase` com status **online**. O bot WhatsApp (se já existir) continua em outro processo — **não mistura**.
+
+Logs:
+
+```bash
+pm2 logs upload-supabase --lines 50
+```
+
+## B7. Nginx + HTTPS (para o app na Vercel conseguir chamar)
+
+O navegador **não** aceita `http://IP:3099` a partir de um site `https://` na Vercel. Precisa de **HTTPS** em um domínio.
+
+### B7.1 DNS
+
+No painel do seu domínio (Hostinger ou outro), crie um registro:
+
+- Tipo: **A**
+- Nome: `upload` (fica `upload.seudominio.com`)
+- Valor: **IP da VPS** (o mesmo do SSH)
+
+Espere alguns minutos para propagar.
+
+### B7.2 Instalar nginx e certificado
+
+Na VPS:
+
+```bash
+apt-get update
+apt-get install -y nginx certbot python3-certbot-nginx
+```
+
+Crie o arquivo do site (troque o domínio):
+
+```bash
+nano /etc/nginx/sites-available/upload-supabase
+```
+
+Cole (troque `upload.seudominio.com`):
+
+```nginx
+server {
+    listen 80;
+    server_name upload.seudominio.com;
+
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3099;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+Ative o site:
+
+```bash
+ln -sf /etc/nginx/sites-available/upload-supabase /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
+```
+
+Gere o certificado SSL (siga as perguntas do certbot; email válido):
+
+```bash
+certbot --nginx -d upload.seudominio.com
+```
+
+Teste de fora da VPS:
+
+```bash
+curl https://upload.seudominio.com/health
+```
+
+Deve retornar `{"ok":true,...}`.
+
+### B7.3 Firewall Hostinger
+
+No painel Hostinger → **Segurança** / firewall: libere **443** (HTTPS). A porta **3099** não precisa estar aberta na internet (só localhost + nginx).
+
+---
+
+# ETAPA C — Vercel (app Next)
+
+1. Abra o projeto no [dashboard Vercel](https://vercel.com) → **Settings** → **Environment Variables**.
+2. Adicione:
+
+| Nome | Valor |
+|------|--------|
+| `NEXT_PUBLIC_COACH_UPLOAD_URL` | `https://upload.seudominio.com` (sem barra no final) |
+
+3. **Redeploy** o projeto (Deployments → ⋮ → Redeploy).
+
+Opcional (se configurou `COACH_UPLOAD_SHARED_SECRET` no `.env` da VPS):
+
+| Nome | Valor |
+|------|--------|
+| `NEXT_PUBLIC_COACH_UPLOAD_SECRET` | mesmo secret |
+
+---
+
+# Testar no app
+
+1. Faça login no app (produção na Vercel).
+2. Vá em **Coach → Matérias → [matéria] → Materiais**.
+3. Envie um PDF entre 5 e 15 MB (antes dava 413).
+4. O texto da tela deve mencionar envio pela VPS e limite **20 MB**.
+
+Se falhar:
+
+- `pm2 logs upload-supabase`
+- Confira se `ALLOWED_ORIGINS` é **exatamente** a URL que aparece na barra do navegador.
+- Confira `curl https://upload.seudominio.com/health`
+
+---
+
+# Comandos úteis depois
+
+| Ação | Comando |
+|------|---------|
+| Ver status | `pm2 list` |
+| Reiniciar upload | `pm2 restart upload-supabase` |
+| Ver logs | `pm2 logs upload-supabase` |
+| Atualizar código | No PC: `scp -r upload-supabase root@IP:/root/upload-supabase` → na VPS: `cd /root/upload-supabase && npm install && pm2 restart upload-supabase` |
+
+---
+
+# Sem domínio ainda?
+
+Enquanto não tiver HTTPS, o app continua usando a rota da Vercel (4 MB). Não configure `NEXT_PUBLIC_COACH_UPLOAD_URL` até o `https://upload...` estar funcionando.
+
+---
+
+# Estrutura desta pasta
+
+```
+upload-supabase/
+  src/index.js      # servidor Express
+  src/upload.js     # grava PDF no Storage + subject_documents
+  src/enqueue.js    # fila ai_jobs (document_ingest)
+  ecosystem.config.cjs  # PM2
+  .env.example
+```
+
+O processamento do PDF (texto, chunks, embeddings) continua na **Vercel** via `POST /api/coach/jobs/run` após o upload.
