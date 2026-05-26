@@ -48,8 +48,10 @@ export default function QuestionOptions({
           <button
             key={opt.label}
             type="button"
-            disabled={locked || isEliminated}
-            onClick={() => onSelect(opt.label)}
+            disabled={locked}
+            onClick={() => {
+              if (!isEliminated) onSelect(opt.label)
+            }}
             onDoubleClick={(e) => {
               e.preventDefault()
               if (!locked) onToggleEliminated(opt.label)
@@ -89,7 +91,9 @@ export default function QuestionOptions({
         )
       })}
       {!locked && (
-        <p className="text-xs text-slate-400">Clique para selecionar · duplo clique para riscar</p>
+        <p className="text-xs text-slate-400">
+          Clique para selecionar · duplo clique para riscar ou restaurar
+        </p>
       )}
     </div>
   )

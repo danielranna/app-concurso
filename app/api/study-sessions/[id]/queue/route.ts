@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { loadQuestionForStudy } from "@/lib/question-study"
+import { getSessionAnsweredQuestionIds, loadQuestionForStudy } from "@/lib/question-study"
 import {
   defaultPendingTarget,
   pickNavigationTarget,
@@ -36,8 +36,8 @@ export async function GET(
   }
 
   const fullQueue = (session.queue ?? []) as StudyQueueItem[]
-  const answered = new Set(session.answered_tec_ids ?? [])
-  const pending = fullQueue.filter((q) => !answered.has(q.tec_id))
+  const answeredQuestions = await getSessionAnsweredQuestionIds(id, user_id)
+  const pending = fullQueue.filter((q) => !answeredQuestions.has(q.question_id))
 
   let currentId =
     questionIdParam ?? session.active_question_id ?? null
@@ -59,6 +59,15 @@ export async function GET(
     currentId = target?.question_id ?? null
   } else if (!currentId && fullQueue.length > 0) {
     currentId = session.active_question_id ?? fullQueue[0].question_id
+  }
+
+  if (
+    currentId &&
+    answeredQuestions.has(currentId) &&
+    !questionIdParam &&
+    !(navParam && NAV_MODES.has(navParam))
+  ) {
+    currentId = pending[0]?.question_id ?? currentId
   }
 
   if (currentId) {
@@ -106,7 +115,7 @@ export async function GET(
     study_elapsed_ms: session.study_elapsed_ms ?? 0,
     stats: {
       total: fullQueue.length,
-      resolved: answered.size,
+      resolved: answeredQuestions.size,
       correct,
       wrong,
       pending: pending.length,

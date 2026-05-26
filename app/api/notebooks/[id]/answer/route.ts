@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import {
   computeOutcomeCategory,
+  loadQuestionForStudy,
   normalizeAnswer,
   parseConfidenceLevel,
   recordAttempt,
@@ -20,13 +21,8 @@ export async function POST(
     return NextResponse.json({ error: "Campos obrigatórios" }, { status: 400 })
   }
 
-  const { data: question, error: qErr } = await supabaseServer
-    .from("questions")
-    .select("type, correct_answer, tec_url")
-    .eq("id", question_id)
-    .single()
-
-  if (qErr || !question) {
+  const { question } = await loadQuestionForStudy(question_id, user_id)
+  if (!question) {
     return NextResponse.json({ error: "Questão não encontrada" }, { status: 404 })
   }
 

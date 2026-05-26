@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import {
   computeOutcomeCategory,
+  getSessionAnsweredQuestionIds,
+  loadQuestionForStudy,
   normalizeAnswer,
   parseConfidenceLevel,
   recordAttempt,
@@ -39,17 +41,41 @@ export async function POST(
     return NextResponse.json({ error: "Sessão não encontrada" }, { status: 404 })
   }
 
-  const answered = new Set<number>(session.answered_tec_ids ?? [])
-  if (answered.has(tec_id)) {
-    return NextResponse.json({ error: "Questão já respondida nesta sessão" }, { status: 409 })
+  const answeredQuestions = await getSessionAnsweredQuestionIds(study_session_id, user_id)
+  const queue = (session.queue ?? []) as { tec_id: number; question_id: string }[]
+
+  if (answeredQuestions.has(question_id)) {
+    const { data: existing } = await supabaseServer
+      .from("question_attempts")
+      .select("is_correct, confidence_level")
+      .eq("study_session_id", study_session_id)
+      .eq("user_id", user_id)
+      .eq("question_id", question_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const { question } = await loadQuestionForStudy(question_id, user_id)
+    if (!question) {
+      return NextResponse.json({ error: "Questão não encontrada" }, { status: 404 })
+    }
+
+    const confidence = parseConfidenceLevel(existing?.confidence_level)
+    const is_correct = existing?.is_correct ?? false
+    const allDone = answeredQuestions.size >= queue.length
+
+    return NextResponse.json({
+      is_correct,
+      correct_answer: question.correct_answer,
+      tec_url: question.tec_url,
+      confidence_level: confidence,
+      outcome_category: computeOutcomeCategory(confidence, is_correct),
+      session_completed: allDone,
+      already_answered: true,
+    })
   }
 
-  const { data: question } = await supabaseServer
-    .from("questions")
-    .select("type, correct_answer, tec_url")
-    .eq("id", question_id)
-    .single()
-
+  const { question } = await loadQuestionForStudy(question_id, user_id)
   if (!question) {
     return NextResponse.json({ error: "Questão não encontrada" }, { status: 404 })
   }
@@ -95,14 +121,16 @@ export async function POST(
     }
   }
 
-  const newAnsweredTec = [...(session.answered_tec_ids ?? []), tec_id]
-  const queue = session.queue as { tec_id: number }[]
-  const allDone = newAnsweredTec.length >= queue.length
+  answeredQuestions.add(question_id)
+  const tecIdNum = Number(tec_id)
+  const answeredTec = new Set<number>(session.answered_tec_ids ?? [])
+  if (!Number.isNaN(tecIdNum)) answeredTec.add(tecIdNum)
+  const allDone = answeredQuestions.size >= queue.length
 
   await supabaseServer
     .from("study_sessions")
     .update({
-      answered_tec_ids: newAnsweredTec,
+      answered_tec_ids: [...answeredTec],
       current_index: session.current_index + 1,
       status: allDone ? "completed" : "in_progress",
       updated_at: new Date().toISOString(),

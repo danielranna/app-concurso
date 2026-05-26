@@ -23,6 +23,7 @@ type StudySession = {
   shuffle: boolean
   queue: unknown[]
   answered_tec_ids: number[]
+  resolved_count?: number
   study_elapsed_ms?: number
   updated_at: string
 }
@@ -172,7 +173,7 @@ export default function SemanaPage() {
           <ul className="mt-4 space-y-2">
             {openSessions.map((s) => {
               const total = Array.isArray(s.queue) ? s.queue.length : 0
-              const done = (s.answered_tec_ids ?? []).length
+              const done = s.resolved_count ?? (s.answered_tec_ids ?? []).length
               return (
                 <li
                   key={s.id}

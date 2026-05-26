@@ -16,7 +16,40 @@ export async function GET(req: Request) {
     .limit(20)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+
+  const sessions = data ?? []
+  const sessionIds = sessions.map((s) => s.id)
+  const resolvedBySession = new Map<string, number>()
+
+  if (sessionIds.length > 0) {
+    const { data: attempts } = await supabaseServer
+      .from("question_attempts")
+      .select("study_session_id, question_id")
+      .eq("user_id", user_id)
+      .in("study_session_id", sessionIds)
+
+    const uniquePerSession = new Map<string, Set<string>>()
+    for (const row of attempts ?? []) {
+      if (!row.study_session_id) continue
+      let set = uniquePerSession.get(row.study_session_id)
+      if (!set) {
+        set = new Set()
+        uniquePerSession.set(row.study_session_id, set)
+      }
+      set.add(row.question_id)
+    }
+    for (const [sid, set] of uniquePerSession) {
+      resolvedBySession.set(sid, set.size)
+    }
+  }
+
+  return NextResponse.json(
+    sessions.map((s) => ({
+      ...s,
+      resolved_count:
+        resolvedBySession.get(s.id) ?? (s.answered_tec_ids ?? []).length,
+    }))
+  )
 }
 
 export async function POST(req: Request) {

@@ -153,6 +153,7 @@ export default function QuestionSolver({
 
   const [loading, setLoading] = useState(true)
   const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState<string | null>(null)
   const [batchResolving, setBatchResolving] = useState(false)
   const [showPerf, setShowPerf] = useState(false)
   const [showError, setShowError] = useState(false)
@@ -347,6 +348,7 @@ export default function QuestionSolver({
   const handleResolve = useCallback(async () => {
     if (!question || !current || !selected || result || resolving) return
     setResolving(true)
+    setResolveError(null)
     flushQuestionTime(current.question_id)
     const draft = getDraft(scopeKey, current.question_id)
     const duration_ms = draft.durationMsAccumulated
@@ -360,6 +362,10 @@ export default function QuestionSolver({
         notebook_id: current.notebook_id,
         confidence_level: confidence,
       })
+      if (res.error && res.is_correct == null) {
+        setResolveError(res.error)
+        return
+      }
       setResult(res)
       setDraft(scopeKey, current.question_id, {
         ...draft,
@@ -634,6 +640,9 @@ export default function QuestionSolver({
               disabled={locked}
               onChange={handleConfidenceChange}
             />
+            {resolveError && (
+              <p className="mb-3 text-sm text-red-600">{resolveError}</p>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Loader2, Plus, Trash2, X } from "lucide-react"
+import { ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react"
 
 type OptionRow = { label: string; text: string }
 
@@ -32,11 +32,13 @@ export default function EditQuestionModal({
   const [contentAfter, setContentAfter] = useState("")
   const [correctAnswer, setCorrectAnswer] = useState("")
   const [options, setOptions] = useState<OptionRow[]>([])
+  const [showGabarito, setShowGabarito] = useState(false)
 
   useEffect(() => {
     if (!isOpen || !questionId) return
     setLoading(true)
     setError(null)
+    setShowGabarito(false)
     fetch(`/api/questions/${questionId}?user_id=${encodeURIComponent(userId)}`)
       .then((r) => r.json())
       .then((d) => {
@@ -270,27 +272,48 @@ export default function EditQuestionModal({
               )}
             </div>
 
-            <label className="block text-sm">
-              <span className="font-medium">Gabarito</span>
-              {type === "certo_errado" ? (
-                <select
-                  value={correctAnswer}
-                  onChange={(e) => setCorrectAnswer(e.target.value)}
-                  className="mt-1 w-full rounded-lg border px-3 py-2"
-                >
-                  <option value="Certo">Certo</option>
-                  <option value="Errado">Errado</option>
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={correctAnswer}
-                  onChange={(e) => setCorrectAnswer(e.target.value.toUpperCase())}
-                  className="mt-1 w-full rounded-lg border px-3 py-2"
-                  placeholder="A, B, C…"
-                />
+            <div className="rounded-lg border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setShowGabarito((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm"
+              >
+                <span className="font-medium">Gabarito</span>
+                <span className="flex items-center gap-1 text-xs text-slate-500">
+                  {showGabarito ? "Ocultar" : "Mostrar"}
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${showGabarito ? "rotate-180" : ""}`}
+                  />
+                </span>
+              </button>
+              {!showGabarito && (
+                <p className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                  Oculto para não antecipar a resposta enquanto você edita.
+                </p>
               )}
-            </label>
+              {showGabarito && (
+                <div className="border-t border-slate-100 px-3 pb-3 pt-2">
+                  {type === "certo_errado" ? (
+                    <select
+                      value={correctAnswer}
+                      onChange={(e) => setCorrectAnswer(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    >
+                      <option value="Certo">Certo</option>
+                      <option value="Errado">Errado</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={correctAnswer}
+                      onChange={(e) => setCorrectAnswer(e.target.value.toUpperCase())}
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                      placeholder="A, B, C…"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

@@ -210,6 +210,21 @@ export function normalizeStudyOptions(
   return opts
 }
 
+/** Questões já respondidas nesta sessão de estudo (por question_id, não tec_id). */
+export async function getSessionAnsweredQuestionIds(
+  studySessionId: string,
+  userId: string
+): Promise<Set<string>> {
+  const { data, error } = await supabaseServer
+    .from("question_attempts")
+    .select("question_id")
+    .eq("study_session_id", studySessionId)
+    .eq("user_id", userId)
+
+  if (error) throw new Error(error.message)
+  return new Set((data ?? []).map((r) => r.question_id))
+}
+
 export async function loadQuestionForStudy(questionId: string, userId?: string) {
   const { data: question, error } = await supabaseServer
     .from("questions")

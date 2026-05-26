@@ -124,7 +124,11 @@ export default function EstudoCombinadoPage() {
           ...payload,
         }),
       })
-      return res.json()
+      const data = await res.json()
+      if (!res.ok && data.error) {
+        return { error: data.error, is_correct: null as unknown as boolean }
+      }
+      return data
     },
     [sessionId, userId]
   )
