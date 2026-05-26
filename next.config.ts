@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
       "./node_modules/pdf-parse/**/*",
       "./node_modules/xlsx/**/*",
     ],
+    "/api/coach/jobs/run": ["./node_modules/pdf-parse/**/*"],
+    "/api/coach/jobs/run-ingest": ["./node_modules/pdf-parse/**/*"],
   },
   async redirects() {
     return [

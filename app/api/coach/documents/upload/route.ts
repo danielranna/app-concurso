@@ -2,20 +2,13 @@ import { NextResponse } from "next/server"
 import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
 import { COACH_UPLOAD_MAX_BYTES, COACH_UPLOAD_MAX_LABEL } from "@/lib/coach-upload-limits"
 import { supabaseServer } from "@/lib/supabase-server"
-import { enqueueJob } from "@/lib/ai/jobs/queue"
+import {
+  enqueueMaterialParse,
+  enqueueMaterialParses,
+} from "@/lib/ai/jobs/document-enqueue"
 
 export const runtime = "nodejs"
 export const maxDuration = 60
-
-function enqueueMaterialIngest(userId: string, documentId: string) {
-  return enqueueJob({
-    userId,
-    jobType: "document_ingest",
-    idempotencyKey: `ingest:${documentId}:v2`,
-    payload: { document_id: documentId },
-    priority: 6,
-  })
-}
 
 export async function POST(req: Request) {
   try {
@@ -141,15 +134,9 @@ export async function POST(req: Request) {
     }
 
     if (documentIds.length === 1) {
-      await enqueueMaterialIngest(user_id, documentIds[0]!)
+      await enqueueMaterialParse(user_id, documentIds[0]!)
     } else if (documentIds.length > 1) {
-      await enqueueJob({
-        userId: user_id,
-        jobType: "document_batch_ingest",
-        idempotencyKey: `batch:${subject_id}:${Date.now()}`,
-        payload: { document_ids: documentIds, subject_id },
-        priority: 6,
-      })
+      await enqueueMaterialParses(user_id, documentIds)
     }
 
     return NextResponse.json({

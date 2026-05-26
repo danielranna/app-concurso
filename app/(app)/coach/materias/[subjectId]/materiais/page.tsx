@@ -47,12 +47,17 @@ type MaterialDoc = {
 }
 
 const STAGE_LABELS: Record<string, string> = {
-  uploaded: "Enviado",
+  uploaded: "Na fila de indexação",
   parsing: "Extraindo texto",
   chunking: "Indexando",
   embedding: "Vetorizando",
   ready: "Pronto",
   failed: "Falhou",
+}
+
+function docNeedsIngest(d: MaterialDoc): boolean {
+  const stage = d.ingest_stage ?? d.status
+  return ["uploaded", "parsing", "chunking", "embedding"].includes(stage)
 }
 
 export default function CoachMateriaisBibliotecaPage() {
@@ -115,12 +120,7 @@ export default function CoachMateriaisBibliotecaPage() {
 
   useEffect(() => {
     if (!userId) return
-    const pending = docs.some(
-      (d) =>
-        d.ingest_stage &&
-        !["ready", "failed"].includes(d.ingest_stage) &&
-        d.status !== "ready"
-    )
+    const pending = docs.some(docNeedsIngest)
     if (!pending) return
     const t = setInterval(() => loadDocs(userId), 4000)
     return () => clearInterval(t)
@@ -147,50 +147,42 @@ export default function CoachMateriaisBibliotecaPage() {
     )
   }, [])
 
+  const uploadConcurrency = externalUpload ? 3 : 1
+
   const drainUploadQueue = useCallback(async () => {
     if (!userId || uploadProcessingRef.current) return
     uploadProcessingRef.current = true
-    let uploadedSinceJobs = 0
 
     try {
       while (true) {
         const snapshot = await readQueue()
-        const next = snapshot.find((i) => i.status === "pending")
-        if (!next) break
+        const batch = snapshot
+          .filter((i) => i.status === "pending")
+          .slice(0, uploadConcurrency)
+        if (!batch.length) break
 
-        patchQueueItem(next.id, { status: "uploading" })
-
-        const { okCount, errors } = await uploadCoachStudyMaterials({
-          files: [next.file],
-          userId,
-          subjectId,
-        })
-
-        if (okCount > 0) {
-          uploadedSinceJobs++
-          patchQueueItem(next.id, { status: "done" })
-          await loadDocs(userId)
-          if (uploadedSinceJobs % 3 === 0) {
-            await fetch("/api/coach/jobs/run", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ user_id: userId, limit: 3 }),
-            }).catch(() => {})
-          }
-        } else {
-          patchQueueItem(next.id, {
-            status: "error",
-            error: errors[0] ?? "Falha no envio",
-          })
+        for (const item of batch) {
+          patchQueueItem(item.id, { status: "uploading" })
         }
-      }
 
-      if (uploadedSinceJobs > 0) {
-        await fetch("/api/coach/jobs/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, limit: 8 }),
-        }).catch(() => {})
+        await Promise.all(
+          batch.map(async (item) => {
+            const { okCount, errors } = await uploadCoachStudyMaterials({
+              files: [item.file],
+              userId,
+              subjectId,
+            })
+            if (okCount > 0) {
+              patchQueueItem(item.id, { status: "done" })
+            } else {
+              patchQueueItem(item.id, {
+                status: "error",
+                error: errors[0] ?? "Falha no envio",
+              })
+            }
+          })
+        )
+
         await loadDocs(userId)
       }
     } finally {
@@ -200,7 +192,14 @@ export default function CoachMateriaisBibliotecaPage() {
         void drainUploadQueue()
       }
     }
-  }, [userId, subjectId, loadDocs, readQueue, patchQueueItem])
+  }, [
+    userId,
+    subjectId,
+    loadDocs,
+    readQueue,
+    patchQueueItem,
+    uploadConcurrency,
+  ])
 
   function onFilesPicked(files: FileList | null) {
     if (!files?.length) return
@@ -246,10 +245,10 @@ export default function CoachMateriaisBibliotecaPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId }),
     })
-    await fetch("/api/coach/jobs/run", {
+    await fetch("/api/coach/jobs/run-ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, limit: 2 }),
+      body: JSON.stringify({ user_id: userId }),
     }).catch(() => {})
     await loadDocs(userId)
   }
@@ -328,8 +327,9 @@ export default function CoachMateriaisBibliotecaPage() {
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-slate-900">Enviar PDFs de estudo</h3>
             <p className="text-sm text-slate-600">
-              Escolha os PDFs: cada um entra na fila abaixo (enviando → pronto). Pode adicionar
-              mais a qualquer momento
+              Escolha os PDFs: a fila abaixo só envia o arquivo (rápido). Ler o PDF e vetorizar
+              entra numa fila global (um por vez, todas as matérias) na lista &quot;Arquivos&quot;.
+              Pode subir tudo de uma vez em várias matérias/abas
               {externalUpload
                 ? ` (até ${uploadMaxLabel} cada, pela VPS).`
                 : ` (máx. ${uploadMaxLabel} por arquivo na Vercel).`}
@@ -396,7 +396,7 @@ export default function CoachMateriaisBibliotecaPage() {
                   {item.status === "done" && (
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      Pronto
+                      Enviado
                     </span>
                   )}
                   {item.status === "error" && (
@@ -430,6 +430,11 @@ export default function CoachMateriaisBibliotecaPage() {
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Arquivos
           </h3>
+          {docs.some(docNeedsIngest) && (
+            <p className="mt-1 text-xs text-violet-700">
+              Na fila global de indexação (um arquivo por vez) — pode continuar enviando PDFs.
+            </p>
+          )}
         </div>
         {!docs.length ? (
           <p className="px-4 py-8 text-center text-sm text-slate-500">

@@ -6,8 +6,8 @@ import { loadConfig } from "./config.js"
 import { resolveUserFromRequest } from "./auth.js"
 import { uploadStudyMaterialPdf } from "./upload.js"
 import {
-  enqueueMaterialIngest,
-  enqueueBatchIngest,
+  enqueueMaterialParse,
+  enqueueMaterialParses,
 } from "./enqueue.js"
 
 const config = loadConfig()
@@ -113,9 +113,9 @@ app.post(
       }
 
       if (documentIds.length === 1) {
-        await enqueueMaterialIngest(config, userId, documentIds[0])
+        await enqueueMaterialParse(config, userId, documentIds[0])
       } else if (documentIds.length > 1) {
-        await enqueueBatchIngest(config, userId, documentIds, subjectId)
+        await enqueueMaterialParses(config, userId, documentIds)
       }
 
       return res.json({

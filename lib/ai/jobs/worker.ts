@@ -14,7 +14,7 @@ import {
   parseDocumentFromStorage,
 } from "../document-ingest"
 import { generateRemediationDrafts } from "../remediation-drafts"
-import { claimPendingJobs, completeJob, enqueueJob } from "./queue"
+import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
   id: string
@@ -366,8 +366,11 @@ export async function processJob(job: {
   }
 }
 
-export async function runJobWorker(limit = 5) {
-  const jobs = await claimPendingJobs(limit)
+export async function runJobWorker(
+  limit = 5,
+  options?: { userId?: string; jobTypes?: JobType[] }
+) {
+  const jobs = await claimPendingJobs(limit, options)
   const results = []
   for (const job of jobs) {
     try {

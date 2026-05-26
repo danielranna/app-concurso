@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { deleteCoachDocument } from "@/lib/coach-documents"
-import { enqueueJob } from "@/lib/ai/jobs/queue"
+import { enqueueMaterialParse } from "@/lib/ai/jobs/document-enqueue"
 
 export async function DELETE(
   req: Request,
@@ -33,13 +33,7 @@ export async function POST(
       return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
     }
 
-    await enqueueJob({
-      userId: user_id,
-      jobType: "document_ingest",
-      idempotencyKey: `ingest:${id}:reprocess:${Date.now()}`,
-      payload: { document_id: id },
-      priority: 7,
-    })
+    await enqueueMaterialParse(user_id, id, { force: true })
 
     return NextResponse.json({ ok: true, queued: true })
   } catch (e) {

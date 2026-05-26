@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { enqueueJob } from "@/lib/ai/jobs/queue"
+import { enqueueMaterialParse } from "@/lib/ai/jobs/document-enqueue"
 
 export async function POST(
   req: Request,
@@ -14,13 +14,7 @@ export async function POST(
       return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
     }
 
-    await enqueueJob({
-      userId: user_id,
-      jobType: "document_ingest",
-      idempotencyKey: `ingest:${id}:v2:${Date.now()}`,
-      payload: { document_id: id },
-      priority: 6,
-    })
+    await enqueueMaterialParse(user_id, id, { force: true })
 
     return NextResponse.json({ ok: true, queued: true })
   } catch (e) {

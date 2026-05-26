@@ -58,12 +58,24 @@ export async function enqueueNotebookPipeline(
   })
 }
 
-export async function claimPendingJobs(limit = 5) {
-  const { data: pending } = await supabaseServer
+export async function claimPendingJobs(
+  limit = 5,
+  options?: { userId?: string; jobTypes?: JobType[] }
+) {
+  let query = supabaseServer
     .from("ai_jobs")
     .select("*")
     .eq("status", "pending")
     .lte("scheduled_at", new Date().toISOString())
+
+  if (options?.userId) {
+    query = query.eq("user_id", options.userId)
+  }
+  if (options?.jobTypes?.length) {
+    query = query.in("job_type", options.jobTypes)
+  }
+
+  const { data: pending } = await query
     .order("priority", { ascending: false })
     .order("scheduled_at", { ascending: true })
     .limit(limit)
