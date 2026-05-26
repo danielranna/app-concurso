@@ -41,6 +41,7 @@ export default function ResolverCadernoPage() {
     correct: 0,
     total: 0,
   })
+  const [timerPaused, setTimerPaused] = useState(false)
 
   function reloadNotebook() {
     fetch(`/api/notebooks/${notebookId}`)
@@ -70,10 +71,17 @@ export default function ResolverCadernoPage() {
         .then((d) => {
           setElapsedMs(d.study_elapsed_ms ?? 0)
           setTimerReady(true)
-          if (d.stats) setLastStats(d.stats)
+          if (d.stats) {
+            setLastStats(d.stats)
+            if (d.stats.pending === 0 && d.stats.total > 0) setTimerPaused(true)
+          }
         })
     })
   }, [notebookId, router])
+
+  const handleNotebookComplete = useCallback(() => {
+    setTimerPaused(true)
+  }, [])
 
   useEffect(() => {
     if (searchParams.get("save") === "1" && notebook?.library_saved === false) {
@@ -223,7 +231,11 @@ export default function ResolverCadernoPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-bold">{notebook?.name ?? "Caderno"}</h1>
             {timerReady && (
-              <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />
+              <StudyTimer
+                initialMs={elapsedMs}
+                onPersist={persistElapsed}
+                paused={timerPaused}
+              />
             )}
           </div>
           <div className="flex flex-wrap gap-2">
@@ -267,6 +279,7 @@ export default function ResolverCadernoPage() {
           completedNotebookName={notebook?.name}
           onEditQuestion={openEditForCurrent}
           refreshKey={refreshKey}
+          onNotebookComplete={handleNotebookComplete}
         />
       </div>
 

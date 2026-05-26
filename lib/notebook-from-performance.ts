@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { isMissingLibrarySavedColumn } from "./notebook-library-saved"
 import { loadMappings } from "./tec-mapping"
 
 type QMeta = {
@@ -132,20 +133,33 @@ export async function createNotebookFromQuestionIds(
   folderId?: string | null,
   librarySaved = true
 ) {
-  const { data: notebook, error: nbErr } = await supabaseServer
+  const row = {
+    user_id: userId,
+    name,
+    subject_id: subjectId,
+    folder_id: folderId ?? null,
+    question_count: questionIds.length,
+    library_saved: librarySaved,
+  }
+
+  let { data: notebook, error: nbErr } = await supabaseServer
     .from("notebooks")
-    .insert({
-      user_id: userId,
-      name,
-      subject_id: subjectId,
-      folder_id: folderId ?? null,
-      question_count: questionIds.length,
-      library_saved: librarySaved,
-    })
+    .insert(row)
     .select("id")
     .single()
 
-  if (nbErr) throw new Error(nbErr.message)
+  if (nbErr && isMissingLibrarySavedColumn(nbErr)) {
+    const { library_saved: _drop, ...withoutCol } = row
+    const retry = await supabaseServer
+      .from("notebooks")
+      .insert(withoutCol)
+      .select("id")
+      .single()
+    notebook = retry.data
+    nbErr = retry.error
+  }
+
+  if (nbErr || !notebook) throw new Error(nbErr?.message ?? "Falha ao criar caderno")
 
   for (let i = 0; i < questionIds.length; i++) {
     await supabaseServer.from("notebook_questions").insert({

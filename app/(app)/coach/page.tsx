@@ -33,6 +33,7 @@ export default function CoachHubPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [hub, setHub] = useState<HubData | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [processMessage, setProcessMessage] = useState<string | null>(null)
 
   function load(uid: string) {
     fetch(`/api/coach/hub?user_id=${uid}`)
@@ -63,21 +64,36 @@ export default function CoachHubPage() {
   async function processPendingReports() {
     if (!userId) return
     setProcessing(true)
-    const { data: notebooks } = await supabase
-      .from("notebooks")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("report_pending", true)
-
-    for (const nb of notebooks ?? []) {
-      await fetch("/api/coach/reports", {
+    setProcessMessage(null)
+    try {
+      const res = await fetch("/api/coach/reports/process-pending", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, notebook_id: nb.id }),
+        body: JSON.stringify({ user_id: userId }),
       })
+      const data = await res.json()
+      if (!res.ok) {
+        setProcessMessage(data.error ?? "Erro ao gerar relatórios")
+        return
+      }
+      if (data.still_pending > 0) {
+        setProcessMessage(
+          `Processados ${data.jobs_processed} job(s). Ainda há ${data.still_pending} na fila — tente de novo em instantes.`
+        )
+      } else if (data.latest_report_id) {
+        setProcessMessage("Relatório pronto!")
+        router.push(`/coach/relatorios/${data.latest_report_id}`)
+      } else if (data.notebooks_found === 0) {
+        setProcessMessage("Nenhum caderno pendente de relatório.")
+      } else {
+        setProcessMessage("Processamento concluído. Veja em Relatórios recentes abaixo.")
+      }
+      load(userId)
+    } catch {
+      setProcessMessage("Falha de rede ao gerar relatórios.")
+    } finally {
+      setProcessing(false)
     }
-    setProcessing(false)
-    load(userId)
   }
 
   return (
@@ -122,15 +138,18 @@ export default function CoachHubPage() {
             {hub?.pending_reports ?? 0}
           </p>
           <p className="text-sm text-slate-500">Relatórios na fila</p>
-          {(hub?.pending_reports ?? 0) > 0 && userId && (
+          {userId && (
             <button
               type="button"
               onClick={processPendingReports}
               disabled={processing}
-              className="mt-2 text-xs font-medium text-violet-700 hover:underline"
+              className="mt-2 rounded-lg bg-violet-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-800 disabled:opacity-50"
             >
               {processing ? "Gerando…" : "Gerar relatórios agora"}
             </button>
+          )}
+          {processMessage && (
+            <p className="mt-2 text-xs text-slate-600">{processMessage}</p>
           )}
         </div>
 

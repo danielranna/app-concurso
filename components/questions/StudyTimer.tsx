@@ -15,6 +15,8 @@ type Props = {
   initialMs: number
   onPersist: (ms: number) => void
   persistIntervalMs?: number
+  /** Para o cronômetro (ex.: caderno concluído). */
+  paused?: boolean
 }
 
 /**
@@ -25,6 +27,7 @@ export default function StudyTimer({
   initialMs,
   onPersist,
   persistIntervalMs = 15000,
+  paused = false,
 }: Props) {
   const [elapsed, setElapsed] = useState(initialMs)
   const baseMs = useRef(initialMs)
@@ -47,29 +50,41 @@ export default function StudyTimer({
   }, [initialMs])
 
   useEffect(() => {
+    if (paused) {
+      const frozen = Date.now() - startedAt.current
+      setElapsed(frozen)
+      onPersist(frozen)
+      return
+    }
     const tick = window.setInterval(() => {
       setElapsed(Date.now() - startedAt.current)
     }, 1000)
     return () => clearInterval(tick)
-  }, [])
+  }, [paused, onPersist])
 
   useEffect(() => {
+    if (paused) return
     const save = window.setInterval(() => {
-      const now = Date.now() - startedAt.current
-      onPersist(now)
+      onPersist(Date.now() - startedAt.current)
     }, persistIntervalMs)
     return () => clearInterval(save)
-  }, [onPersist, persistIntervalMs])
+  }, [onPersist, persistIntervalMs, paused])
 
   useEffect(() => {
-    const flush = () => onPersist(Date.now() - startedAt.current)
+    const flush = () => {
+      if (!paused) onPersist(Date.now() - startedAt.current)
+    }
     window.addEventListener("beforeunload", flush)
     return () => window.removeEventListener("beforeunload", flush)
-  }, [onPersist])
+  }, [onPersist, paused])
 
   return (
-    <span className="font-mono text-sm tabular-nums text-slate-500" title="Tempo no caderno">
+    <span
+      className={`font-mono text-sm tabular-nums ${paused ? "text-slate-400" : "text-slate-500"}`}
+      title={paused ? "Caderno concluído — tempo final" : "Tempo no caderno"}
+    >
       · {formatElapsed(elapsed)}
+      {paused ? " (parado)" : ""}
     </span>
   )
 }

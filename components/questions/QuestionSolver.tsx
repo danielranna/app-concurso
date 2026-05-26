@@ -72,6 +72,7 @@ type Props = {
   completedNotebookName?: string
   onEditQuestion?: () => void
   refreshKey?: number
+  onNotebookComplete?: () => void
 }
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -120,6 +121,7 @@ export default function QuestionSolver({
   completedNotebookName,
   onEditQuestion,
   refreshKey,
+  onNotebookComplete,
 }: Props) {
   const scopeId = mode === "notebook" ? notebookId! : studySessionId!
   const scopeKey = draftScopeKey(mode, scopeId)
@@ -240,10 +242,21 @@ export default function QuestionSolver({
         setConfidence("seguro")
         setQuestionMs(0)
         setResult(null)
+        if (mode === "notebook" && data.stats.pending === 0 && data.stats.total > 0) {
+          onNotebookComplete?.()
+        }
       }
       setLoading(false)
     },
-    [fetchQueue, scopeKey, applyDraft, saveCurrentDraft, refreshKey]
+    [
+      fetchQueue,
+      scopeKey,
+      applyDraft,
+      saveCurrentDraft,
+      refreshKey,
+      mode,
+      onNotebookComplete,
+    ]
   )
 
   const navigate = useCallback(
@@ -358,13 +371,19 @@ export default function QuestionSolver({
           outcome_category: res.outcome_category,
         },
       })
-      setStats((s) => ({
-        ...s,
-        resolved: s.resolved + 1,
-        correct: s.correct + (res.is_correct ? 1 : 0),
-        wrong: s.wrong + (res.is_correct ? 0 : 1),
-        pending: Math.max(0, s.pending - 1),
-      }))
+      setStats((s) => {
+        const next = {
+          ...s,
+          resolved: s.resolved + 1,
+          correct: s.correct + (res.is_correct ? 1 : 0),
+          wrong: s.wrong + (res.is_correct ? 0 : 1),
+          pending: Math.max(0, s.pending - 1),
+        }
+        if (mode === "notebook" && next.pending === 0 && next.total > 0) {
+          onNotebookComplete?.()
+        }
+        return next
+      })
     } finally {
       setResolving(false)
     }
@@ -379,6 +398,8 @@ export default function QuestionSolver({
     confidence,
     flushQuestionTime,
     submitAnswer,
+    mode,
+    onNotebookComplete,
   ])
 
   resolveRef.current = handleResolve

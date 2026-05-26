@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { Loader2, Send } from "lucide-react"
 
 type Props = {
   questionId: string
@@ -10,35 +11,84 @@ type Props = {
 export default function QuickNote({ questionId, userId }: Props) {
   const [note, setNote] = useState("")
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    setSaved(false)
+    setError(null)
     fetch(`/api/questions/${questionId}/note?user_id=${userId}`)
       .then((r) => r.json())
       .then((d) => setNote(d.note ?? ""))
   }, [questionId, userId])
 
-  async function save() {
+  const save = useCallback(async () => {
+    const trimmed = note.trim()
+    if (!trimmed) {
+      setError("Escreva algo antes de enviar")
+      return
+    }
     setSaving(true)
-    await fetch(`/api/questions/${questionId}/note`, {
+    setError(null)
+    setSaved(false)
+    const res = await fetch(`/api/questions/${questionId}/note`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, note }),
+      body: JSON.stringify({ user_id: userId, note: trimmed }),
     })
+    const data = await res.json()
     setSaving(false)
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao salvar")
+      return
+    }
+    setNote(trimmed)
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 2500)
+  }, [note, questionId, userId])
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault()
+      void save()
+    }
   }
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="mb-2 text-xs font-semibold text-slate-500">Nota rápida</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-slate-500">Nota rápida</p>
+        {saved && <span className="text-xs text-green-600">Salva!</span>}
+      </div>
       <textarea
         value={note}
-        onChange={(e) => setNote(e.target.value)}
-        onBlur={save}
+        onChange={(e) => {
+          setNote(e.target.value)
+          setSaved(false)
+          setError(null)
+        }}
+        onKeyDown={handleKeyDown}
         rows={4}
         placeholder="Dúvida, conceito a revisar..."
         className="w-full resize-none rounded border border-slate-200 bg-white px-2 py-1 text-sm"
       />
-      {saving && <p className="mt-1 text-xs text-slate-400">Salvando...</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || !note.trim()}
+          className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Send className="h-3.5 w-3.5" />
+          )}
+          Enviar
+        </button>
+        <span className="text-xs text-slate-400">Ctrl+Enter</span>
+      </div>
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { isMissingLibrarySavedColumn } from "@/lib/notebook-library-saved"
 
 export async function GET(
   _req: Request,
@@ -43,12 +44,24 @@ export async function PUT(
   if (subject_id !== undefined) update.subject_id = subject_id
   if (library_saved !== undefined) update.library_saved = library_saved
 
-  const { data, error } = await supabaseServer
+  let { data, error } = await supabaseServer
     .from("notebooks")
     .update(update)
     .eq("id", id)
     .select()
     .single()
+
+  if (error && library_saved !== undefined && isMissingLibrarySavedColumn(error)) {
+    const { library_saved: _drop, ...withoutCol } = update
+    const retry = await supabaseServer
+      .from("notebooks")
+      .update(withoutCol)
+      .eq("id", id)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)

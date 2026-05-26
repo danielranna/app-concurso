@@ -1,5 +1,21 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import {
+  filterNotebooksByLibrarySaved,
+  isMissingLibrarySavedColumn,
+  librarySavedFilterFromParams,
+  type LibrarySavedFilter,
+} from "@/lib/notebook-library-saved"
+
+function applyLibraryFilterToQuery(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filter: LibrarySavedFilter
+) {
+  if (filter === "ephemeral_only") return query.eq("library_saved", false)
+  if (filter === "saved_only") return query.eq("library_saved", true)
+  return query
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -11,27 +27,43 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  let query = supabaseServer
-    .from("notebooks")
-    .select("*")
-    .eq("user_id", user_id)
-    .order("last_accessed_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
+  const libraryFilter = librarySavedFilterFromParams(searchParams)
 
-  if (searchParams.get("unassigned") === "1") query = query.is("subject_id", null)
-  else if (subject_id) query = query.eq("subject_id", subject_id)
-  if (folder_id) query = query.eq("folder_id", folder_id)
-  if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
-  if (searchParams.get("ephemeral") === "1") {
-    query = query.eq("library_saved", false)
-  } else if (searchParams.get("include_ephemeral") !== "1") {
-    query = query.eq("library_saved", true)
+  function buildBaseQuery() {
+    let query = supabaseServer
+      .from("notebooks")
+      .select("*")
+      .eq("user_id", user_id)
+      .order("last_accessed_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+
+    if (searchParams.get("unassigned") === "1") query = query.is("subject_id", null)
+    else if (subject_id) query = query.eq("subject_id", subject_id)
+    if (folder_id) query = query.eq("folder_id", folder_id)
+    if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
+    return query
   }
 
-  const { data, error } = await query
+  let { data, error } = await applyLibraryFilterToQuery(
+    buildBaseQuery(),
+    libraryFilter
+  )
+
+  if (error && libraryFilter !== "all" && isMissingLibrarySavedColumn(error)) {
+    const fallback = await buildBaseQuery()
+    if (fallback.error) {
+      return NextResponse.json({ error: fallback.error.message }, { status: 500 })
+    }
+    data = filterNotebooksByLibrarySaved(fallback.data ?? [], libraryFilter)
+    error = null
+  }
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  let rows = data ?? []
+  let rows = (data ?? []) as {
+    answered_count?: number
+    question_count?: number
+  }[]
   if (searchParams.get("incomplete") === "1") {
     rows = rows.filter((nb) => (nb.answered_count ?? 0) < (nb.question_count ?? 0))
   }
