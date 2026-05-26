@@ -321,8 +321,87 @@ export async function refreshNotebookProgress(
   if (totalCount > 0 && answered_count >= totalCount) {
     update.completed_at = before?.completed_at ?? new Date().toISOString()
     if (willComplete) update.report_pending = true
+  } else if (totalCount > 0 && answered_count < totalCount) {
+    update.completed_at = null
+    update.report_pending = false
   }
 
   await supabaseServer.from("notebooks").update(update).eq("id", notebookId)
   return { justCompleted: willComplete }
+}
+
+export async function resetNotebookProgress(
+  notebookId: string,
+  userId: string,
+  mode: "all" | "wrong",
+  opts?: { resetTimer?: boolean }
+): Promise<{ deletedCount: number; wrongRemaining: number }> {
+  const { data: nb, error: nbErr } = await supabaseServer
+    .from("notebooks")
+    .select("user_id")
+    .eq("id", notebookId)
+    .single()
+
+  if (nbErr || !nb) throw new Error("Caderno não encontrado")
+  if (nb.user_id !== userId) throw new Error("Não autorizado")
+
+  let questionIds: string[] | null = null
+  if (mode === "wrong") {
+    questionIds = await pickWrongIdsFromNotebook(notebookId, userId)
+    if (!questionIds.length) {
+      return { deletedCount: 0, wrongRemaining: 0 }
+    }
+  }
+
+  let deleteQuery = supabaseServer
+    .from("question_attempts")
+    .delete()
+    .eq("user_id", userId)
+    .eq("notebook_id", notebookId)
+
+  if (questionIds) {
+    deleteQuery = deleteQuery.in("question_id", questionIds)
+  }
+
+  const { error: delErr } = await deleteQuery
+  if (delErr) throw new Error(delErr.message)
+  const deletedCount = questionIds?.length ?? 0
+
+  const resetTimer = mode === "all" && (opts?.resetTimer ?? true)
+  const notebookUpdate: Record<string, unknown> = {
+    active_question_id: null,
+    updated_at: new Date().toISOString(),
+  }
+  if (resetTimer) {
+    notebookUpdate.study_elapsed_ms = 0
+  }
+  if (mode === "all") {
+    notebookUpdate.answered_count = 0
+    notebookUpdate.completed_at = null
+    notebookUpdate.report_pending = false
+  }
+
+  await supabaseServer.from("notebooks").update(notebookUpdate).eq("id", notebookId)
+
+  if (mode === "wrong") {
+    await refreshNotebookProgress(notebookId, userId)
+  }
+
+  if (mode === "all") {
+    const { count: total } = await supabaseServer
+      .from("notebook_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("notebook_id", notebookId)
+    const stats = await getNotebookAttemptStats(notebookId, userId)
+    return {
+      deletedCount: total ?? 0,
+      wrongRemaining: stats.wrong,
+    }
+  }
+
+  const stats = await getNotebookAttemptStats(notebookId, userId)
+  return {
+    deletedCount,
+    wrongRemaining: stats.wrong,
+  }
 }

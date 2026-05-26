@@ -69,6 +69,8 @@ type Props = {
   mapping?: { subject_id: string; topic_id: string } | null
   onCreateWrongNotebook?: () => Promise<void>
   creatingWrongNotebook?: boolean
+  onResetNotebook?: (mode: "all" | "wrong") => Promise<void>
+  resettingNotebook?: boolean
   completedNotebookName?: string
   onEditQuestion?: () => void
   refreshKey?: number
@@ -118,6 +120,8 @@ export default function QuestionSolver({
   mapping,
   onCreateWrongNotebook,
   creatingWrongNotebook,
+  onResetNotebook,
+  resettingNotebook,
   completedNotebookName,
   onEditQuestion,
   refreshKey,
@@ -458,12 +462,32 @@ export default function QuestionSolver({
           {stats.correct} acertos · {stats.wrong} erros de {stats.total} questões
         </p>
         <div className="flex flex-wrap justify-center gap-3 pt-2">
+          {mode === "notebook" && onResetNotebook && (
+            <button
+              type="button"
+              onClick={() => onResetNotebook("all")}
+              disabled={resettingNotebook}
+              className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {resettingNotebook ? "Zerando..." : "Refazer caderno (zerar tudo)"}
+            </button>
+          )}
+          {mode === "notebook" && onResetNotebook && wrongN > 0 && (
+            <button
+              type="button"
+              onClick={() => onResetNotebook("wrong")}
+              disabled={resettingNotebook}
+              className="rounded-lg border border-green-400 bg-white px-5 py-2.5 text-sm font-medium text-green-900 disabled:opacity-50 hover:bg-green-100"
+            >
+              {resettingNotebook ? "Zerando..." : `Refazer só erradas (${wrongN})`}
+            </button>
+          )}
           {mode === "notebook" && onCreateWrongNotebook && wrongN > 0 && (
             <button
               type="button"
               onClick={() => onCreateWrongNotebook()}
-              disabled={creatingWrongNotebook}
-              className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+              disabled={creatingWrongNotebook || resettingNotebook}
+              className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm text-slate-800 disabled:opacity-50 hover:bg-slate-50"
             >
               {creatingWrongNotebook
                 ? "Criando..."

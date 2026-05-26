@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Bookmark, Pencil, Trash2 } from "lucide-react"
+import { ArrowLeft, Bookmark, Pencil, RotateCcw, Trash2 } from "lucide-react"
+import { clearDraftScope, draftScopeKey } from "@/lib/question-draft-cache"
 import QuestionSolver from "@/components/questions/QuestionSolver"
 import StudyTimer from "@/components/questions/StudyTimer"
 import SaveNotebookModal from "@/components/questions/SaveNotebookModal"
@@ -36,10 +37,13 @@ export default function ResolverCadernoPage() {
   const [editQuestionId, setEditQuestionId] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [creatingWrong, setCreatingWrong] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [timerKey, setTimerKey] = useState(0)
   const [lastStats, setLastStats] = useState({
     wrong: 0,
     correct: 0,
     total: 0,
+    pending: 0,
   })
   const [timerPaused, setTimerPaused] = useState(false)
 
@@ -185,6 +189,50 @@ export default function ResolverCadernoPage() {
     else alert(data.error ?? "Erro ao criar caderno")
   }
 
+  const resetNotebook = useCallback(
+    async (mode: "all" | "wrong") => {
+      if (!userId || resetting) return
+      const labels = {
+        all: "Zerar o cronômetro e todas as respostas deste caderno? Você poderá refazê-lo do zero.",
+        wrong: `Zerar apenas as ${lastStats.wrong} questão(ões) errada(s)? As acertadas permanecem.`,
+      }
+      if (!confirm(labels[mode])) return
+
+      setResetting(true)
+      const res = await fetch(`/api/notebooks/${notebookId}/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          mode,
+          reset_timer: mode === "all",
+        }),
+      })
+      const data = await res.json()
+      setResetting(false)
+
+      if (!res.ok) {
+        alert(data.error ?? "Erro ao zerar caderno")
+        return
+      }
+
+      clearDraftScope(draftScopeKey("notebook", notebookId))
+      if (mode === "all") {
+        setElapsedMs(0)
+        setTimerKey((k) => k + 1)
+      }
+      setTimerPaused(false)
+      setRefreshKey((k) => k + 1)
+      const qRes = await fetch(`/api/notebooks/${notebookId}/queue?user_id=${userId}`)
+      const qData = await qRes.json()
+      if (qData.stats) setLastStats(qData.stats)
+      if (mode === "all" && qData.study_elapsed_ms != null) {
+        setElapsedMs(qData.study_elapsed_ms)
+      }
+    },
+    [userId, notebookId, resetting, lastStats.wrong]
+  )
+
   function openEditForCurrent() {
     fetch(`/api/notebooks/${notebookId}/queue?user_id=${userId}`)
       .then((r) => r.json())
@@ -232,6 +280,7 @@ export default function ResolverCadernoPage() {
             <h1 className="text-xl font-bold">{notebook?.name ?? "Caderno"}</h1>
             {timerReady && (
               <StudyTimer
+                key={timerKey}
                 initialMs={elapsedMs}
                 onPersist={persistElapsed}
                 paused={timerPaused}
@@ -246,6 +295,26 @@ export default function ResolverCadernoPage() {
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
               >
                 <Bookmark className="h-4 w-4" /> Salvar
+              </button>
+            )}
+            {lastStats.wrong > 0 && (
+              <button
+                type="button"
+                onClick={() => resetNotebook("wrong")}
+                disabled={resetting}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" /> Zerar erradas ({lastStats.wrong})
+              </button>
+            )}
+            {(lastStats.correct + lastStats.wrong > 0 || elapsedMs > 0) && (
+              <button
+                type="button"
+                onClick={() => resetNotebook("all")}
+                disabled={resetting}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" /> Zerar tudo
               </button>
             )}
             <button
@@ -276,6 +345,8 @@ export default function ResolverCadernoPage() {
           mapping={mapping}
           onCreateWrongNotebook={createWrongNotebook}
           creatingWrongNotebook={creatingWrong}
+          onResetNotebook={resetNotebook}
+          resettingNotebook={resetting}
           completedNotebookName={notebook?.name}
           onEditQuestion={openEditForCurrent}
           refreshKey={refreshKey}

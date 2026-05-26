@@ -84,3 +84,15 @@ export function listResolvableDrafts(
 export function draftScopeKey(mode: "notebook" | "study", id: string): string {
   return mode === "notebook" ? `draft:notebook:${id}` : `draft:session:${id}`
 }
+
+export function clearDraftScope(scopeKey: string): void {
+  if (typeof window === "undefined") {
+    memoryStore.delete(scopeKey)
+    return
+  }
+  try {
+    sessionStorage.removeItem(scopeKey)
+  } catch {
+    memoryStore.delete(scopeKey)
+  }
+}
