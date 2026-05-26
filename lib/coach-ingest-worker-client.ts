@@ -1,5 +1,10 @@
 /** Fila global — controle manual (botão), sem polling automático de processamento. */
 
+import {
+  getCoachUploadAuthHeaders,
+  getCoachUploadBaseUrl,
+} from "@/lib/coach-upload-client"
+
 export type IngestQueueItemView = {
   id: string
   title: string
@@ -54,7 +59,7 @@ export async function fetchIngestQueueDetails(
 }
 
 export type ProcessNextResult = {
-  status: "ready" | "failed" | "idle"
+  status: "ready" | "failed" | "idle" | "retry"
   document_id?: string
   title?: string
   error?: string
@@ -66,12 +71,24 @@ export async function processNextIngest(
   userId: string,
   options?: { random?: boolean }
 ): Promise<ProcessNextResult> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 120_000)
+  const external = getCoachUploadBaseUrl()
+  const headers = external ? await getCoachUploadAuthHeaders() : null
 
-  const res = await fetch("/api/coach/jobs/process-next", {
+  if (external && !headers) {
+    throw new Error("Faça login de novo para indexar arquivos.")
+  }
+
+  const controller = new AbortController()
+  const timeoutMs = external ? 600_000 : 120_000
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  const url = external
+    ? `${external}/coach/jobs/process-next`
+    : "/api/coach/jobs/process-next"
+
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: headers ?? { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, random: options?.random ?? false }),
     cache: "no-store",
     signal: controller.signal,

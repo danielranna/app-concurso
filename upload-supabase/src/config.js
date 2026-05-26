@@ -15,6 +15,12 @@ export function loadConfig() {
     .map((s) => s.trim())
     .filter(Boolean)
   const sharedSecret = process.env.COACH_UPLOAD_SHARED_SECRET?.trim() || null
+  const aiCredentialsSecret =
+    process.env.AI_CREDENTIALS_SECRET?.trim() || null
+  const ingestTimeoutRaw = process.env.INGEST_PDF_TIMEOUT_MS?.trim()
+  const ingestPdfTimeoutMs = ingestTimeoutRaw
+    ? Number(ingestTimeoutRaw)
+    : 0
 
   if (!allowedOrigins.length) {
     console.warn(
@@ -30,6 +36,11 @@ export function loadConfig() {
     maxUploadBytes,
     allowedOrigins,
     sharedSecret,
+    aiCredentialsSecret,
+    ingestPdfTimeoutMs:
+      Number.isFinite(ingestPdfTimeoutMs) && ingestPdfTimeoutMs > 0
+        ? ingestPdfTimeoutMs
+        : 0,
     bucket: "coach-documents",
   }
 }

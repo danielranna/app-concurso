@@ -1,6 +1,6 @@
 # upload-supabase — API de upload na VPS (Hostinger)
 
-Serviço **separado do bot WhatsApp**. Recebe PDFs grandes do app Coach e grava no Supabase.
+Serviço **separado do bot WhatsApp**. Recebe PDFs grandes do app Coach, grava no Supabase e **indexa** a fila de materiais (`parse → chunk → embed`) sem o limite de 60s da Vercel.
 
 ---
 
@@ -213,7 +213,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
     }
 }
 ```
@@ -258,6 +259,8 @@ No painel Hostinger → **Segurança** / firewall: libere **443** (HTTPS). A por
 
 3. **Redeploy** o projeto (Deployments → ⋮ → Redeploy).
 
+Com `NEXT_PUBLIC_COACH_UPLOAD_URL` configurado, o botão **Processar próximo / Processar todos** na fila global do Coach chama `POST /coach/jobs/process-next` nesta VPS (não a Vercel). A consulta da fila continua na Vercel (`GET /api/coach/documents/ingest-queue`).
+
 Opcional (se configurou `COACH_UPLOAD_SHARED_SECRET` no `.env` da VPS):
 
 | Nome | Valor |
@@ -272,6 +275,7 @@ Opcional (se configurou `COACH_UPLOAD_SHARED_SECRET` no `.env` da VPS):
 2. Vá em **Coach → Matérias → [matéria] → Materiais**.
 3. Envie um PDF entre 5 e 15 MB (antes dava 413).
 4. O texto da tela deve mencionar envio pela VPS e limite **50 MB** (ou o valor de `NEXT_PUBLIC_COACH_UPLOAD_MAX_MB`).
+5. Abra o painel de **fila de indexação** (layout do Coach) e clique **Processar próximo** — PDFs grandes podem levar vários minutos; o nginx precisa de `proxy_read_timeout 600s`.
 
 Se falhar:
 
@@ -298,15 +302,41 @@ Enquanto não tiver HTTPS, o app continua usando a rota da Vercel (4 MB). Não c
 
 ---
 
+# Indexação na VPS
+
+| Rota | Função |
+|------|--------|
+| `POST /coach/documents/upload` | Upload rápido → `ingest_stage: uploaded` |
+| `POST /coach/jobs/process-next` | Parse + chunk + embed de 1 PDF da fila |
+
+Variáveis no `.env` da VPS:
+
+| Variável | Descrição |
+|----------|-----------|
+| `AI_CREDENTIALS_SECRET` | Mesmo valor da Vercel (para embeddings OpenAI por usuário) |
+| `INGEST_PDF_TIMEOUT_MS` | `0` = sem limite na extração; ou ex. `1800000` (30 min) |
+
+Backfill sem browser (cron):
+
+```bash
+# No .env: INGEST_CRON_USER_IDS=seu-user-uuid
+node scripts/process-queue-once.js
+```
+
+PDFs travados sem chunks: rode `sql-heal-ingest-backlog.sql` no Supabase (na raiz do repo Next).
+
+Avisos `TT: undefined function` e `Buffer() deprecated` no log são **ruído do pdf-parse**, não impedem a indexação.
+
+---
+
 # Estrutura desta pasta
 
 ```
 upload-supabase/
-  src/index.js      # servidor Express
-  src/upload.js     # grava PDF no Storage + subject_documents
-  src/enqueue.js    # fila ai_jobs (document_ingest)
-  ecosystem.config.cjs  # PM2
+  src/index.js           # Express: upload + process-next
+  src/upload.js          # grava PDF no Storage + subject_documents
+  src/ingest/            # pipeline (sync com lib/ai/document-ingest.ts)
+  scripts/process-queue-once.js
+  ecosystem.config.cjs
   .env.example
 ```
-
-O processamento do PDF (texto, chunks, embeddings) continua na **Vercel** via `POST /api/coach/jobs/run` após o upload.

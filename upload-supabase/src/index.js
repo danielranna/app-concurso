@@ -5,6 +5,8 @@ import multer from "multer"
 import { loadConfig } from "./config.js"
 import { resolveUserFromRequest } from "./auth.js"
 import { uploadStudyMaterialPdf } from "./upload.js"
+import { getServiceClient } from "./supabase.js"
+import { processNextIngestDocument } from "./ingest/worker.js"
 
 const config = loadConfig()
 const app = express()
@@ -27,7 +29,36 @@ const upload = multer({
 })
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "upload-supabase" })
+  res.json({ ok: true, service: "upload-supabase", ingest: true })
+})
+
+app.post("/coach/jobs/process-next", express.json(), async (req, res) => {
+  try {
+    const auth = await resolveUserFromRequest(req, config)
+    if (auth.error) {
+      return res.status(auth.status).json({ error: auth.error })
+    }
+
+    const bodyUserId =
+      typeof req.body?.user_id === "string" ? req.body.user_id.trim() : ""
+    if (!bodyUserId) {
+      return res.status(400).json({ error: "user_id obrigatório" })
+    }
+    if (bodyUserId !== auth.userId) {
+      return res.status(403).json({ error: "user_id não corresponde à sessão" })
+    }
+
+    const random = Boolean(req.body?.random)
+    const supabase = getServiceClient(config)
+    const result = await processNextIngestDocument(supabase, config, bodyUserId, {
+      random,
+    })
+    return res.json(result)
+  } catch (e) {
+    console.error("[ingest] process-next", e)
+    const msg = e instanceof Error ? e.message : "Erro interno"
+    return res.status(500).json({ error: msg })
+  }
 })
 
 app.post(

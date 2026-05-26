@@ -48,6 +48,20 @@ async function getAccessToken(): Promise<string | null> {
   return data.session?.access_token ?? null
 }
 
+/** Headers para chamadas autenticadas à API na VPS (upload + indexação). */
+export async function getCoachUploadAuthHeaders(): Promise<Record<string, string> | null> {
+  const token = await getAccessToken()
+  if (!token) return null
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  }
+  const secret = process.env.NEXT_PUBLIC_COACH_UPLOAD_SECRET?.trim()
+  if (secret) headers["X-Coach-Upload-Secret"] = secret
+  return headers
+}
+
 async function uploadOneStudyMaterial(params: {
   file: File
   userId: string

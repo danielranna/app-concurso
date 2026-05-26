@@ -148,6 +148,9 @@ export default function IngestQueuePanel() {
           } else if (result.status === "idle") {
             setStatusMsg("Fila concluída.")
             break
+          } else if (result.status === "retry") {
+            setStatusMsg(result.error ?? "Aguarde o PDF atual terminar.")
+            break
           }
 
           if (!options.processAll) break

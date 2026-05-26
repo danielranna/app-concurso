@@ -166,7 +166,7 @@ export async function resetOrphanPipelineDocs(userId: string): Promise<number> {
     if (stuckLong) {
       await failDocumentIngest(
         docId,
-        "Interrompido (PDF grande ou timeout na Vercel). Divida o arquivo, use ↷ para pular ou Reindexar."
+        "Interrompido (timeout ou processamento cortado). Use Reindexar ou ↷ para pular."
       )
       n++
       continue
@@ -316,7 +316,7 @@ export async function processNextIngestDocument(
     }
 
     const failMsg = timedOut
-      ? "PDF muito grande para processar de uma vez na Vercel. Divida o arquivo ou use ↷ para pular."
+      ? "PDF muito grande para processar de uma vez (timeout). Configure a VPS para indexação ou divida o arquivo."
       : msg
 
     await failDocumentIngest(targetId, failMsg)
