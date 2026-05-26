@@ -20,6 +20,8 @@ type Props = {
   onChange: (value: string) => void
   placeholder?: string
   rows?: number
+  /** Upload ao colar print; insere &lt;img&gt; no texto */
+  onImageUpload?: (file: File) => Promise<string | null>
 }
 
 const FONT_SIZES = [
@@ -39,7 +41,13 @@ const FONT_FAMILIES = [
   { label: "Verdana", value: "Verdana" }
 ]
 
-export default function RichTextEditor({ value, onChange, placeholder = "", rows = 3 }: Props) {
+export default function RichTextEditor({
+  value,
+  onChange,
+  placeholder = "",
+  rows = 3,
+  onImageUpload,
+}: Props) {
   const editorRef = useRef<HTMLDivElement>(null)
   const savedSelectionRef = useRef<Range | null>(null)
   const [showColorPicker, setShowColorPicker] = useState(false)
@@ -396,6 +404,24 @@ export default function RichTextEditor({ value, onChange, placeholder = "", rows
           ref={editorRef}
           contentEditable
           onInput={handleInput}
+          onPaste={(e) => {
+            if (!onImageUpload) return
+            const file = [...(e.clipboardData?.files ?? [])].find((f) =>
+              f.type.startsWith("image/")
+            )
+            if (!file) return
+            e.preventDefault()
+            void onImageUpload(file).then((url) => {
+              if (!url || !editorRef.current) return
+              editorRef.current.focus()
+              document.execCommand(
+                "insertHTML",
+                false,
+                `<img src="${url.replace(/"/g, "&quot;")}" alt="" style="max-width:100%;height:auto;" />`
+              )
+              handleInput()
+            })
+          }}
           onFocus={() => {
             if (editorRef.current && isEmpty) {
               editorRef.current.innerHTML = ""

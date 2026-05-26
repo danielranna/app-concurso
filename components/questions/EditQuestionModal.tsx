@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react"
+import QuestionContentBlocksEditor from "@/components/questions/QuestionContentBlocksEditor"
+import {
+  emptyContentBlocks,
+  resolveQuestionContentBlocks,
+  stripEmptyBlocks,
+  type QuestionContentBlocks,
+} from "@/lib/question-content-blocks"
 
 type OptionRow = { label: string; text: string }
 
@@ -24,12 +31,10 @@ export default function EditQuestionModal({
 }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState<"before" | "after" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [type, setType] = useState<"multiple_choice" | "certo_errado">("multiple_choice")
   const [statement, setStatement] = useState("")
-  const [contentBefore, setContentBefore] = useState("")
-  const [contentAfter, setContentAfter] = useState("")
+  const [contentBlocks, setContentBlocks] = useState<QuestionContentBlocks>(emptyContentBlocks())
   const [correctAnswer, setCorrectAnswer] = useState("")
   const [options, setOptions] = useState<OptionRow[]>([])
   const [showGabarito, setShowGabarito] = useState(false)
@@ -53,8 +58,13 @@ export default function EditQuestionModal({
         }))
         setType(q.type === "certo_errado" ? "certo_errado" : "multiple_choice")
         setStatement(q.statement ?? "")
-        setContentBefore(q.content_before ?? "")
-        setContentAfter(q.content_after ?? "")
+        setContentBlocks(
+          resolveQuestionContentBlocks({
+            content_blocks: q.content_blocks,
+            content_before: q.content_before,
+            content_after: q.content_after,
+          })
+        )
         setCorrectAnswer(q.correct_answer ?? "")
         if (opts.length) setOptions(opts)
         else if (q.type === "certo_errado") {
@@ -83,22 +93,6 @@ export default function EditQuestionModal({
     }
   }
 
-  async function uploadImage(slot: "before" | "after", file: File) {
-    setUploading(slot)
-    const form = new FormData()
-    form.append("user_id", userId)
-    form.append("file", file)
-    const res = await fetch("/api/questions/upload", { method: "POST", body: form })
-    const data = await res.json()
-    setUploading(null)
-    if (!res.ok) {
-      setError(data.error ?? "Erro no upload")
-      return
-    }
-    if (slot === "before") setContentBefore(data.url)
-    else setContentAfter(data.url)
-  }
-
   async function handleSave() {
     if (!statement.trim()) {
       setError("Enunciado obrigatório")
@@ -106,6 +100,7 @@ export default function EditQuestionModal({
     }
     setSaving(true)
     setError(null)
+    const blocks = stripEmptyBlocks(contentBlocks)
     const res = await fetch(`/api/questions/${questionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -113,8 +108,9 @@ export default function EditQuestionModal({
         user_id: userId,
         type,
         statement: statement.trim(),
-        content_before: contentBefore.trim() || null,
-        content_after: contentAfter.trim() || null,
+        content_blocks: blocks,
+        content_before: null,
+        content_after: null,
         correct_answer: correctAnswer.trim(),
         options: options
           .filter((o) => o.text.trim())
@@ -143,7 +139,9 @@ export default function EditQuestionModal({
           </button>
         </div>
         <p className="mb-4 text-xs text-slate-500">
-          Correção só para você — não altera o banco global de questões.
+          Correção só para você — não altera o banco global. Use os botões{" "}
+          <strong>+</strong> para empilhar textos e imagens antes ou depois do enunciado
+          (ex.: texto → tabela → texto → imagem).
         </p>
 
         {loading ? (
@@ -164,56 +162,13 @@ export default function EditQuestionModal({
               </select>
             </label>
 
-            <label className="block text-sm">
-              <span className="font-medium">Conteúdo acima do enunciado</span>
-              <textarea
-                value={contentBefore}
-                onChange={(e) => setContentBefore(e.target.value)}
-                rows={2}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                placeholder="Texto ou cole URL de imagem após upload"
-              />
-              <input
-                type="file"
-                accept="image/*"
-                className="mt-1 text-xs"
-                disabled={uploading === "before"}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadImage("before", f)
-                }}
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="font-medium">Enunciado</span>
-              <textarea
-                value={statement}
-                onChange={(e) => setStatement(e.target.value)}
-                rows={6}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-            </label>
-
-            <label className="block text-sm">
-              <span className="font-medium">Conteúdo abaixo do enunciado</span>
-              <textarea
-                value={contentAfter}
-                onChange={(e) => setContentAfter(e.target.value)}
-                rows={2}
-                className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-              />
-              <input
-                type="file"
-                accept="image/*"
-                className="mt-1 text-xs"
-                disabled={uploading === "after"}
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadImage("after", f)
-                }}
-              />
-            </label>
+            <QuestionContentBlocksEditor
+              blocks={contentBlocks}
+              onChange={setContentBlocks}
+              userId={userId}
+              statement={statement}
+              onStatementChange={setStatement}
+            />
 
             <div>
               <span className="text-sm font-medium">Alternativas</span>

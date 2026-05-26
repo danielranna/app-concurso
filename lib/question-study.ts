@@ -255,6 +255,7 @@ export async function loadQuestionForStudy(questionId: string, userId?: string) 
     if (edit) {
       if (edit.type) merged.type = edit.type
       if (edit.statement != null) merged.statement = edit.statement
+      if (edit.content_blocks != null) merged.content_blocks = edit.content_blocks
       if (edit.content_before != null) merged.content_before = edit.content_before
       if (edit.content_after != null) merged.content_after = edit.content_after
       if (edit.correct_answer != null) merged.correct_answer = edit.correct_answer

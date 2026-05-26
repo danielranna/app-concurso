@@ -71,6 +71,7 @@ export async function PATCH(
     statement,
     content_before,
     content_after,
+    content_blocks,
     correct_answer,
     options,
   } = body as {
@@ -79,6 +80,7 @@ export async function PATCH(
     statement?: string
     content_before?: string | null
     content_after?: string | null
+    content_blocks?: { before: unknown[]; after: unknown[] } | null
     correct_answer?: string
     options?: { label: string; text: string; sort_order?: number }[]
   }
@@ -105,6 +107,7 @@ export async function PATCH(
   if (statement != null) patch.statement = statement
   if (content_before !== undefined) patch.content_before = content_before
   if (content_after !== undefined) patch.content_after = content_after
+  if (content_blocks !== undefined) patch.content_blocks = content_blocks
   if (correct_answer != null) patch.correct_answer = correct_answer
   if (options != null) patch.options = options
 

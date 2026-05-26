@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS user_question_edits (
   statement TEXT,
   content_before TEXT,
   content_after TEXT,
+  content_blocks JSONB,
   correct_answer TEXT,
   options JSONB,
   updated_at TIMESTAMPTZ DEFAULT NOW(),

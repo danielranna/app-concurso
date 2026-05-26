@@ -10,6 +10,11 @@ import QuestionOptions from "@/components/questions/QuestionOptions"
 import ConfidenceToggles from "@/components/questions/ConfidenceToggles"
 import StudyNavBar from "@/components/questions/StudyNavBar"
 import { QuestionTimerDisplay } from "@/components/questions/StudyTimer"
+import QuestionContentDisplay from "@/components/questions/QuestionContentDisplay"
+import {
+  resolveQuestionContentBlocks,
+  type QuestionContentBlocks,
+} from "@/lib/question-content-blocks"
 import type { NavMode } from "@/lib/study-navigation"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import {
@@ -35,6 +40,7 @@ type Question = {
   correct_answer: string
   content_before?: string | null
   content_after?: string | null
+  content_blocks?: QuestionContentBlocks | null
 }
 
 type Option = { label: string; text: string }
@@ -96,24 +102,6 @@ const OUTCOME_LABELS: Record<string, string> = {
   lacuna_consciente: "Lacuna consciente",
   falso_positivo: "Falso positivo",
   conteudo_desconhecido: "Conteúdo desconhecido",
-}
-
-function QuestionContentBlock({ content }: { content: string }) {
-  const trimmed = content.trim()
-  if (!trimmed) return null
-  const isImage =
-    /^https?:\/\/.+\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(trimmed) ||
-    trimmed.includes("/storage/v1/object/")
-  if (isImage) {
-    return (
-      <img
-        src={trimmed}
-        alt=""
-        className="my-3 max-h-96 w-full rounded-lg border object-contain"
-      />
-    )
-  }
-  return <div className="whitespace-pre-wrap text-slate-700">{content}</div>
 }
 
 export default function QuestionSolver({
@@ -623,19 +611,16 @@ export default function QuestionSolver({
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Enunciado
           </p>
-          {question.content_before && (
-            <div className="mt-3">
-              <QuestionContentBlock content={question.content_before} />
-            </div>
-          )}
-          <div className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800">
-            {question.statement}
+          <div className="mt-3">
+            <QuestionContentDisplay
+              blocks={resolveQuestionContentBlocks({
+                content_blocks: question.content_blocks,
+                content_before: question.content_before,
+                content_after: question.content_after,
+              })}
+              statement={question.statement}
+            />
           </div>
-          {question.content_after && (
-            <div className="mt-3">
-              <QuestionContentBlock content={question.content_after} />
-            </div>
-          )}
         </section>
 
         <aside className="order-2 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
