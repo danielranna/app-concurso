@@ -7,7 +7,7 @@ import {
   tickSerialIngestWorker,
 } from "@/lib/coach-ingest-worker-client"
 
-const POLL_MS = 3_000
+const POLL_MS = 2_000
 
 /**
  * Processa a fila global de indexação (1 etapa por vez).

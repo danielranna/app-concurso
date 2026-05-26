@@ -1,7 +1,7 @@
 import { createHash } from "crypto"
 import { supabaseServer } from "../supabase-server"
 import { COACH_DOCS_BUCKET, listCoachDocuments } from "../coach-documents"
-import { extractPdfText } from "../pdf-extract"
+import { extractPdfTextWithTimeout } from "../pdf-extract"
 import { embedTexts } from "./embeddings"
 import { getUserAiCredentials } from "./user-credentials"
 
@@ -84,6 +84,14 @@ export function buildChunksFromText(
   return rows
 }
 
+export async function failDocumentIngest(documentId: string, message: string) {
+  await updateDocumentIngest(documentId, {
+    ingest_stage: "failed",
+    status: "failed",
+    ingest_error: message.slice(0, 500),
+  })
+}
+
 async function updateDocumentIngest(
   documentId: string,
   patch: Record<string, unknown>
@@ -149,7 +157,7 @@ export async function parseDocumentFromStorage(
   if (dlErr || !blob) throw new Error(dlErr?.message ?? "Download falhou")
 
   const buffer = Buffer.from(await blob.arrayBuffer())
-  const text = await extractPdfText(buffer)
+  const text = await extractPdfTextWithTimeout(buffer)
   if (!text.trim()) {
     throw new Error("PDF sem texto extraível (pode ser scan)")
   }

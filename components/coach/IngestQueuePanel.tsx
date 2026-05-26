@@ -20,6 +20,8 @@ function QueueRow({
     title: string
     subject_name: string | null
     ingest_stage: string
+    ingest_error?: string | null
+    page_count?: number | null
     is_current?: boolean
     is_next?: boolean
   }
@@ -39,7 +41,11 @@ function QueueRow({
         <p className="truncate text-xs text-slate-500">
           {item.subject_name ? `${item.subject_name} · ` : ""}
           {ingestStageLabel(item.ingest_stage)}
+          {item.page_count ? ` · ${item.page_count} pág.` : ""}
         </p>
+        {item.ingest_error && (
+          <p className="mt-0.5 truncate text-xs text-red-600">{item.ingest_error}</p>
+        )}
       </div>
       <span
         className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${

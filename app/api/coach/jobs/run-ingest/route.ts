@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { runSerialDocumentIngestWorker } from "@/lib/ai/jobs/document-ingest-worker"
 
 export const runtime = "nodejs"
-export const maxDuration = 60
+export const maxDuration = 300
 
 /** Processa 1 etapa da fila global de indexação (parse → chunk → embed). */
 export async function POST(req: Request) {

@@ -1,13 +1,15 @@
 import { supabaseServer } from "../../supabase-server"
+import { loadDocumentText } from "../document-ingest"
 import {
   DOCUMENT_PIPELINE_JOB_TYPES,
   enqueueMaterialParse,
 } from "./document-enqueue"
-import type { JobType } from "./queue"
+import { enqueueJob, type JobType } from "./queue"
 import { runJobWorker } from "./worker"
 
 const SERIAL_INGEST_TYPES: JobType[] = [...DOCUMENT_PIPELINE_JOB_TYPES]
-const STALE_RUNNING_MS = 12 * 60 * 1000
+/** Na Vercel o job não passa de ~60s; após 2 min em running é zumbi. */
+const STALE_RUNNING_MS = 2 * 60 * 1000
 const PIPELINE_STAGES = ["uploaded", "parsing", "chunking", "embedding"] as const
 
 export type IngestQueueItemView = {
@@ -16,6 +18,8 @@ export type IngestQueueItemView = {
   subject_id: string | null
   subject_name: string | null
   ingest_stage: string
+  ingest_error?: string | null
+  page_count?: number | null
   created_at: string
   is_current: boolean
   is_next: boolean
@@ -37,6 +41,8 @@ type DocRow = {
   id: string
   title: string
   ingest_stage: string | null
+  ingest_error?: string | null
+  page_count?: number | null
   subject_id: string | null
   created_at: string
   last_ingested_at: string | null
@@ -71,6 +77,7 @@ export async function healStaleRunningJobs(userId: string): Promise<number> {
   if (e1) throw new Error(e1.message)
   healed += staleStarted?.length ?? 0
 
+  const orphanCutoff = new Date(Date.now() - 90 * 1000).toISOString()
   const { data: orphanRunning, error: e2 } = await supabaseServer
     .from("ai_jobs")
     .update({
@@ -82,10 +89,117 @@ export async function healStaleRunningJobs(userId: string): Promise<number> {
     .eq("status", "running")
     .in("job_type", SERIAL_INGEST_TYPES)
     .is("started_at", null)
+    .lt("created_at", orphanCutoff)
     .select("id")
 
   if (e2) throw new Error(e2.message)
   healed += orphanRunning?.length ?? 0
+
+  return healed
+}
+
+async function listActivePipelineJobs(userId: string) {
+  const { data, error } = await supabaseServer
+    .from("ai_jobs")
+    .select("id, payload, status, job_type")
+    .eq("user_id", userId)
+    .in("status", ["pending", "running"])
+    .in("job_type", SERIAL_INGEST_TYPES)
+
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+function jobTargetsDocument(
+  jobs: { payload: Record<string, unknown> | null }[],
+  documentId: string
+) {
+  return jobs.some(
+    (j) => (j.payload as { document_id?: string })?.document_id === documentId
+  )
+}
+
+/**
+ * Documento em parsing/chunking/embedding sem job ativo = travou (timeout).
+ * Reinicia ou pula para a etapa seguinte se o texto já foi extraído.
+ */
+export async function healStuckPipelineDocuments(userId: string): Promise<number> {
+  const { data: docs, error } = await supabaseServer
+    .from("subject_documents")
+    .select("id, ingest_stage, page_count, parsed_tables")
+    .eq("user_id", userId)
+    .eq("doc_type", "study_material")
+    .in("ingest_stage", ["parsing", "chunking", "embedding"])
+
+  if (error) throw new Error(error.message)
+  if (!docs?.length) return 0
+
+  const activeJobs = await listActivePipelineJobs(userId)
+  let healed = 0
+
+  for (const doc of docs) {
+    const documentId = doc.id as string
+    if (jobTargetsDocument(activeJobs, documentId)) continue
+
+    const stage = doc.ingest_stage as string
+
+    if (stage === "parsing") {
+      try {
+        const text = await loadDocumentText(documentId)
+        if (text.trim().length >= 80) {
+          await supabaseServer
+            .from("subject_documents")
+            .update({
+              ingest_stage: "chunking",
+              status: "processing",
+              ingest_error: null,
+            })
+            .eq("id", documentId)
+          await enqueueJob({
+            userId,
+            jobType: "document_chunk",
+            idempotencyKey: `chunk:${documentId}:recover:${Date.now()}`,
+            payload: { document_id: documentId },
+            priority: 5,
+          })
+          healed++
+          continue
+        }
+      } catch {
+        /* segue para reinício */
+      }
+    }
+
+    const pt = (doc.parsed_tables ?? {}) as { ingest_retries?: number }
+    const retries = Number(pt.ingest_retries ?? 0)
+
+    if (retries >= 2) {
+      await supabaseServer
+        .from("subject_documents")
+        .update({
+          ingest_stage: "failed",
+          status: "failed",
+          ingest_error:
+            "Não foi possível indexar (PDF muito grande ou travou várias vezes). Divida o arquivo ou use Reindexar.",
+        })
+        .eq("id", documentId)
+      healed++
+      continue
+    }
+
+    await supabaseServer
+      .from("subject_documents")
+      .update({
+        ingest_stage: "uploaded",
+        status: "pending",
+        ingest_error: "Reiniciando após travamento…",
+        parsed_tables: { ...pt, ingest_retries: retries + 1 },
+      })
+      .eq("id", documentId)
+
+    await enqueueMaterialParse(userId, documentId, { force: true })
+    healed++
+  }
 
   return healed
 }
@@ -97,7 +211,7 @@ export async function ensureParseJobsEnqueued(userId: string): Promise<number> {
     .select("id, ingest_stage")
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
-    .in("ingest_stage", ["uploaded", "failed"])
+    .in("ingest_stage", ["uploaded"])
 
   if (error) throw new Error(error.message)
 
@@ -135,11 +249,12 @@ export async function ensureParseJobsEnqueued(userId: string): Promise<number> {
 }
 
 export async function healIngestPipeline(userId: string) {
-  const [stale, enqueued] = await Promise.all([
+  const [stale, stuck, enqueued] = await Promise.all([
     healStaleRunningJobs(userId),
+    healStuckPipelineDocuments(userId),
     ensureParseJobsEnqueued(userId),
   ])
-  return { stale, enqueued }
+  return { stale, stuck, enqueued }
 }
 
 export async function userHasRunningDocumentJob(userId: string): Promise<boolean> {
@@ -193,7 +308,7 @@ export async function getIngestQueueDetails(
   const { data: docs, error } = await supabaseServer
     .from("subject_documents")
     .select(
-      "id, title, ingest_stage, subject_id, created_at, last_ingested_at, subjects(name)"
+      "id, title, ingest_stage, ingest_error, page_count, subject_id, created_at, last_ingested_at, subjects(name)"
     )
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
@@ -246,6 +361,8 @@ export async function getIngestQueueDetails(
       subject_id: d.subject_id,
       subject_name: subjectNameFromRow(d),
       ingest_stage: d.ingest_stage ?? "uploaded",
+      ingest_error: d.ingest_error,
+      page_count: d.page_count,
       created_at: d.created_at,
       is_current: flags.is_current,
       is_next: flags.is_next,

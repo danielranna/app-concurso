@@ -12,3 +12,24 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   const result = await pdfParse(buffer)
   return result.text ?? ""
 }
+
+/** Evita função serverless pendurada em PDFs enormes (ex.: 150+ páginas). */
+export async function extractPdfTextWithTimeout(
+  buffer: Buffer,
+  timeoutMs = 52_000
+): Promise<string> {
+  return Promise.race([
+    extractPdfText(buffer),
+    new Promise<string>((_, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "PDF grande demais para extrair de uma vez (timeout). Divida o arquivo ou use um PDF menor."
+            )
+          ),
+        timeoutMs
+      )
+    }),
+  ])
+}

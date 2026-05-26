@@ -6,6 +6,8 @@ export type IngestQueueItemView = {
   subject_id: string | null
   subject_name: string | null
   ingest_stage: string
+  ingest_error?: string | null
+  page_count?: number | null
   created_at: string
   is_current: boolean
   is_next: boolean

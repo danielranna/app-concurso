@@ -9,10 +9,12 @@ import { generateDailyStudyPlan } from "../execution-plan"
 import {
   chunkDocument,
   embedDocumentChunks,
+  failDocumentIngest,
   ingestDocumentBatch,
   ingestDocumentPipeline,
   parseDocumentFromStorage,
 } from "../document-ingest"
+import { DOCUMENT_PIPELINE_JOB_TYPES } from "./document-enqueue"
 import { generateRemediationDrafts } from "../remediation-drafts"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
@@ -362,6 +364,15 @@ export async function processJob(job: {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro no job"
     await completeJob(job.id, null, msg)
+
+    const documentId = payload.document_id as string | undefined
+    if (
+      documentId &&
+      (DOCUMENT_PIPELINE_JOB_TYPES as readonly string[]).includes(job.job_type)
+    ) {
+      await failDocumentIngest(documentId, msg).catch(() => {})
+    }
+
     throw e
   }
 }
