@@ -6,9 +6,11 @@ import { Loader2, Send } from "lucide-react"
 type Props = {
   questionId: string
   userId: string
+  layout?: "default" | "sidebar"
 }
 
-export default function QuickNote({ questionId, userId }: Props) {
+export default function QuickNote({ questionId, userId, layout = "default" }: Props) {
+  const sidebar = layout === "sidebar"
   const [note, setNote] = useState("")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -55,7 +57,9 @@ export default function QuickNote({ questionId, userId }: Props) {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+    <div
+      className={`rounded-lg border border-slate-200 bg-slate-50 p-3 ${sidebar ? "flex h-full min-h-[280px] flex-col lg:min-h-[420px]" : ""}`}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-slate-500">Nota rápida</p>
         {saved && <span className="text-xs text-green-600">Salva!</span>}
@@ -68,9 +72,9 @@ export default function QuickNote({ questionId, userId }: Props) {
           setError(null)
         }}
         onKeyDown={handleKeyDown}
-        rows={4}
+        rows={sidebar ? 12 : 4}
         placeholder="Dúvida, conceito a revisar..."
-        className="w-full resize-none rounded border border-slate-200 bg-white px-2 py-1 text-sm"
+        className={`w-full resize-y rounded border border-slate-200 bg-white px-2 py-1 text-sm ${sidebar ? "min-h-[200px] flex-1 lg:min-h-[320px]" : ""}`}
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button

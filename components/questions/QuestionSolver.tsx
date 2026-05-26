@@ -72,7 +72,7 @@ type Props = {
   onResetNotebook?: (mode: "all" | "wrong") => Promise<void>
   resettingNotebook?: boolean
   completedNotebookName?: string
-  onEditQuestion?: () => void
+  onEditQuestion?: (questionId: string) => void
   refreshKey?: number
   onNotebookComplete?: () => void
 }
@@ -521,7 +521,7 @@ export default function QuestionSolver({
     .join(" - ")
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4">
+    <div className="mx-auto w-full max-w-6xl space-y-4">
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-slate-700">
@@ -576,7 +576,7 @@ export default function QuestionSolver({
           {onEditQuestion && (
             <button
               type="button"
-              onClick={onEditQuestion}
+              onClick={() => onEditQuestion(question.id)}
               className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
             >
               Editar questão
@@ -585,99 +585,105 @@ export default function QuestionSolver({
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Enunciado
-        </p>
-        {question.content_before && (
-          <div className="mt-3">
-            <QuestionContentBlock content={question.content_before} />
-          </div>
-        )}
-        <div className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800">
-          {question.statement}
-        </div>
-        {question.content_after && (
-          <div className="mt-3">
-            <QuestionContentBlock content={question.content_after} />
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Alternativas
-        </p>
-        <QuestionOptions
-          options={options}
-          questionType={question.type}
-          selected={selected}
-          eliminated={eliminated}
-          locked={locked}
-          result={result}
-          onSelect={handleSelect}
-          onToggleEliminated={handleToggleEliminated}
-        />
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <ConfidenceToggles
-          value={confidence}
-          disabled={locked}
-          onChange={handleConfidenceChange}
-        />
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleResolve}
-            disabled={!selected || locked || resolving}
-            className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {resolving ? "Resolvendo..." : "Resolver questão"}
-          </button>
-          {resolvableCount >= 2 && !locked && (
-            <button
-              type="button"
-              onClick={handleResolveAll}
-              disabled={batchResolving}
-              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm disabled:opacity-50"
-            >
-              {batchResolving
-                ? "Resolvendo..."
-                : `Marcar ${resolvableCount} como resolvidas`}
-            </button>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <section className="order-1 rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-start-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Enunciado
+          </p>
+          {question.content_before && (
+            <div className="mt-3">
+              <QuestionContentBlock content={question.content_before} />
+            </div>
           )}
-        </div>
-
-        {result && (
-          <div
-            className={`mt-4 rounded-lg p-4 ${result.is_correct ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
-          >
-            {result.is_correct
-              ? "Você acertou!"
-              : `Você errou! Gabarito: ${result.correct_answer}.`}
-            {result.outcome_category && (
-              <p className="mt-1 text-sm opacity-90">
-                {OUTCOME_LABELS[result.outcome_category] ?? result.outcome_category}
-              </p>
-            )}
-            <a
-              href={result.tec_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-blue-600 underline"
-            >
-              Ver no TEC <ExternalLink className="h-3 w-3" />
-            </a>
+          <div className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800">
+            {question.statement}
           </div>
-        )}
-      </section>
+          {question.content_after && (
+            <div className="mt-3">
+              <QuestionContentBlock content={question.content_after} />
+            </div>
+          )}
+        </section>
+
+        <aside className="order-2 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+          <div className="h-full rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <QuickNote questionId={question.id} userId={userId} layout="sidebar" />
+          </div>
+        </aside>
+
+        <div className="order-3 space-y-4 lg:col-start-1 lg:row-start-2">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Alternativas
+            </p>
+            <QuestionOptions
+              options={options}
+              questionType={question.type}
+              selected={selected}
+              eliminated={eliminated}
+              locked={locked}
+              result={result}
+              onSelect={handleSelect}
+              onToggleEliminated={handleToggleEliminated}
+            />
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <ConfidenceToggles
+              value={confidence}
+              disabled={locked}
+              onChange={handleConfidenceChange}
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleResolve}
+                disabled={!selected || locked || resolving}
+                className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {resolving ? "Resolvendo..." : "Resolver questão"}
+              </button>
+              {resolvableCount >= 2 && !locked && (
+                <button
+                  type="button"
+                  onClick={handleResolveAll}
+                  disabled={batchResolving}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm disabled:opacity-50"
+                >
+                  {batchResolving
+                    ? "Resolvendo..."
+                    : `Marcar ${resolvableCount} como resolvidas`}
+                </button>
+              )}
+            </div>
+
+            {result && (
+              <div
+                className={`mt-4 rounded-lg p-4 ${result.is_correct ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
+              >
+                {result.is_correct
+                  ? "Você acertou!"
+                  : `Você errou! Gabarito: ${result.correct_answer}.`}
+                {result.outcome_category && (
+                  <p className="mt-1 text-sm opacity-90">
+                    {OUTCOME_LABELS[result.outcome_category] ?? result.outcome_category}
+                  </p>
+                )}
+                <a
+                  href={result.tec_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 text-blue-600 underline"
+                >
+                  Ver no TEC <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
 
       <StudyNavBar onNavigate={navigate} />
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <QuickNote questionId={question.id} userId={userId} />
-      </div>
 
       {showPerf && (
         <PerformanceModal

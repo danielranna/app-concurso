@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { Pause, Play } from "lucide-react"
 
 function formatElapsed(ms: number): string {
   const total = Math.floor(ms / 1000)
@@ -15,8 +16,10 @@ type Props = {
   initialMs: number
   onPersist: (ms: number) => void
   persistIntervalMs?: number
-  /** Para o cronômetro (ex.: caderno concluído). */
+  /** Para o cronômetro (ex.: caderno concluído). Não permite retomar manualmente. */
   paused?: boolean
+  /** Exibe botão de pausar/retomar (pausa manual do usuário). */
+  showPauseControl?: boolean
 }
 
 /**
@@ -28,11 +31,14 @@ export default function StudyTimer({
   onPersist,
   persistIntervalMs = 15000,
   paused = false,
+  showPauseControl = true,
 }: Props) {
   const [elapsed, setElapsed] = useState(initialMs)
+  const [userPaused, setUserPaused] = useState(false)
   const baseMs = useRef(initialMs)
   const startedAt = useRef(Date.now() - initialMs)
   const hydrated = useRef(false)
+  const effectivePaused = paused || userPaused
 
   useEffect(() => {
     if (!hydrated.current) {
@@ -50,7 +56,7 @@ export default function StudyTimer({
   }, [initialMs])
 
   useEffect(() => {
-    if (paused) {
+    if (effectivePaused) {
       const frozen = Date.now() - startedAt.current
       setElapsed(frozen)
       onPersist(frozen)
@@ -60,31 +66,63 @@ export default function StudyTimer({
       setElapsed(Date.now() - startedAt.current)
     }, 1000)
     return () => clearInterval(tick)
-  }, [paused, onPersist])
+  }, [effectivePaused, onPersist])
 
   useEffect(() => {
-    if (paused) return
+    if (effectivePaused) return
     const save = window.setInterval(() => {
       onPersist(Date.now() - startedAt.current)
     }, persistIntervalMs)
     return () => clearInterval(save)
-  }, [onPersist, persistIntervalMs, paused])
+  }, [onPersist, persistIntervalMs, effectivePaused])
 
   useEffect(() => {
     const flush = () => {
-      if (!paused) onPersist(Date.now() - startedAt.current)
+      if (!effectivePaused) onPersist(Date.now() - startedAt.current)
     }
     window.addEventListener("beforeunload", flush)
     return () => window.removeEventListener("beforeunload", flush)
-  }, [onPersist, paused])
+  }, [onPersist, effectivePaused])
+
+  function toggleUserPause() {
+    if (paused) return
+    if (userPaused) {
+      startedAt.current = Date.now() - elapsed
+      setUserPaused(false)
+    } else {
+      const frozen = Date.now() - startedAt.current
+      setElapsed(frozen)
+      onPersist(frozen)
+      setUserPaused(true)
+    }
+  }
+
+  const pauseLabel = paused
+    ? "Caderno concluído — tempo final"
+    : userPaused
+      ? "Cronômetro pausado"
+      : "Tempo no caderno"
 
   return (
-    <span
-      className={`font-mono text-sm tabular-nums ${paused ? "text-slate-400" : "text-slate-500"}`}
-      title={paused ? "Caderno concluído — tempo final" : "Tempo no caderno"}
-    >
-      · {formatElapsed(elapsed)}
-      {paused ? " (parado)" : ""}
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={`font-mono text-sm tabular-nums ${effectivePaused ? "text-slate-400" : "text-slate-500"}`}
+        title={pauseLabel}
+      >
+        · {formatElapsed(elapsed)}
+        {effectivePaused ? " (pausado)" : ""}
+      </span>
+      {showPauseControl && !paused && (
+        <button
+          type="button"
+          onClick={toggleUserPause}
+          className="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          title={userPaused ? "Retomar cronômetro" : "Pausar cronômetro"}
+          aria-label={userPaused ? "Retomar cronômetro" : "Pausar cronômetro"}
+        >
+          {userPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+        </button>
+      )}
     </span>
   )
 }

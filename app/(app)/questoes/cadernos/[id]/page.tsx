@@ -233,15 +233,17 @@ export default function ResolverCadernoPage() {
     [userId, notebookId, resetting, lastStats.wrong]
   )
 
+  function openEditForQuestion(questionId: string) {
+    setEditQuestionId(questionId)
+    setShowEditModal(true)
+  }
+
   function openEditForCurrent() {
     fetch(`/api/notebooks/${notebookId}/queue?user_id=${userId}`)
       .then((r) => r.json())
       .then((d) => {
         const qid = d.current?.question_id ?? d.question?.id
-        if (qid) {
-          setEditQuestionId(qid)
-          setShowEditModal(true)
-        }
+        if (qid) openEditForQuestion(qid)
       })
   }
 
@@ -250,7 +252,7 @@ export default function ResolverCadernoPage() {
   const unsaved = notebook && notebook.library_saved === false
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 py-6">
       <Link
         href="/questoes"
         className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600"
@@ -348,7 +350,7 @@ export default function ResolverCadernoPage() {
           onResetNotebook={resetNotebook}
           resettingNotebook={resetting}
           completedNotebookName={notebook?.name}
-          onEditQuestion={openEditForCurrent}
+          onEditQuestion={openEditForQuestion}
           refreshKey={refreshKey}
           onNotebookComplete={handleNotebookComplete}
         />

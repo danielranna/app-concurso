@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Pencil } from "lucide-react"
 import QuestionSolver from "@/components/questions/QuestionSolver"
 import StudyTimer from "@/components/questions/StudyTimer"
+import EditQuestionModal from "@/components/questions/EditQuestionModal"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import type { NavMode } from "@/lib/study-navigation"
 
@@ -31,6 +32,9 @@ export default function EstudoCombinadoPage() {
     subject_id: string
     topic_id: string
   } | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editQuestionId, setEditQuestionId] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -125,19 +129,44 @@ export default function EstudoCombinadoPage() {
     [sessionId, userId]
   )
 
+  function openEditForQuestion(questionId: string) {
+    setEditQuestionId(questionId)
+    setShowEditModal(true)
+  }
+
+  function openEditForCurrent() {
+    fetch(`/api/study-sessions/${sessionId}/queue?user_id=${userId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const qid = d.current?.question_id ?? d.question?.id
+        if (qid) openEditForQuestion(qid)
+      })
+  }
+
   if (!userId) return <p className="p-6">Carregando...</p>
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 py-6">
       <Link
         href="/questoes/semana"
         className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600"
       >
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-xl font-bold">{sessionName}</h1>
-        {timerReady && <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-bold">{sessionName}</h1>
+          {timerReady && (
+            <StudyTimer initialMs={elapsedMs} onPersist={persistElapsed} />
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={openEditForCurrent}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
+        >
+          <Pencil className="h-4 w-4" /> Editar questão
+        </button>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {childProgress.map((c) => (
@@ -159,8 +188,23 @@ export default function EstudoCombinadoPage() {
           fetchQueue={fetchQueue}
           submitAnswer={submitAnswer}
           mapping={mapping}
+          onEditQuestion={openEditForQuestion}
+          refreshKey={refreshKey}
         />
       </div>
+
+      {userId && editQuestionId && (
+        <EditQuestionModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false)
+            setEditQuestionId(null)
+          }}
+          userId={userId}
+          questionId={editQuestionId}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
     </div>
   )
 }
