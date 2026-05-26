@@ -9,7 +9,7 @@ export function loadConfig() {
   const serviceRoleKey = required("SUPABASE_SERVICE_ROLE_KEY")
   const anonKey = required("SUPABASE_ANON_KEY")
   const port = Number(process.env.PORT || 3099)
-  const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 20 * 1024 * 1024)
+  const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 50 * 1024 * 1024)
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     .split(",")
     .map((s) => s.trim())

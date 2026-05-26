@@ -111,7 +111,7 @@ SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJhbG...
 SUPABASE_ANON_KEY=eyJhbG...
 PORT=3099
-MAX_UPLOAD_BYTES=20971520
+MAX_UPLOAD_BYTES=52428800
 ALLOWED_ORIGINS=https://seu-app.vercel.app
 ```
 
@@ -204,7 +204,7 @@ server {
     listen 80;
     server_name upload.seudominio.com;
 
-    client_max_body_size 25m;
+    client_max_body_size 55m;
 
     location / {
         proxy_pass http://127.0.0.1:3099;
@@ -254,6 +254,7 @@ No painel Hostinger → **Segurança** / firewall: libere **443** (HTTPS). A por
 | Nome | Valor |
 |------|--------|
 | `NEXT_PUBLIC_COACH_UPLOAD_URL` | `https://upload.seudominio.com` (sem barra no final) |
+| `NEXT_PUBLIC_COACH_UPLOAD_MAX_MB` | `50` (mesmo valor de `MAX_UPLOAD_BYTES` na VPS, em MB) |
 
 3. **Redeploy** o projeto (Deployments → ⋮ → Redeploy).
 
@@ -270,7 +271,7 @@ Opcional (se configurou `COACH_UPLOAD_SHARED_SECRET` no `.env` da VPS):
 1. Faça login no app (produção na Vercel).
 2. Vá em **Coach → Matérias → [matéria] → Materiais**.
 3. Envie um PDF entre 5 e 15 MB (antes dava 413).
-4. O texto da tela deve mencionar envio pela VPS e limite **20 MB**.
+4. O texto da tela deve mencionar envio pela VPS e limite **50 MB** (ou o valor de `NEXT_PUBLIC_COACH_UPLOAD_MAX_MB`).
 
 Se falhar:
 

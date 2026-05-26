@@ -57,6 +57,7 @@ export default function CoachMateriaisBibliotecaPage() {
     current: number
     total: number
     name: string
+    okCount: number
   } | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const [query, setQuery] = useState("")
@@ -125,36 +126,48 @@ export default function CoachMateriaisBibliotecaPage() {
     setUploadErrors([])
     const list = Array.from(files)
     const errs: string[] = []
+    let sentOk = 0
 
     try {
       setUploadProgress({
         current: 0,
-        total: externalUpload ? 1 : list.length,
-        name: externalUpload
-          ? `${list.length} arquivo(s)`
-          : list[0]?.name ?? "",
+        total: list.length,
+        name: list[0]?.name ?? "",
+        okCount: 0,
       })
 
       const { okCount, errors } = await uploadCoachStudyMaterials({
         files: list,
         userId,
         subjectId,
+        onProgress: async ({ current, total, fileName, phase }) => {
+          if (phase === "done") {
+            sentOk = current
+            await loadDocs(userId)
+            if (current > 0 && current % 3 === 0) {
+              await fetch("/api/coach/jobs/run", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: userId, limit: 3 }),
+              }).catch(() => {})
+            }
+          }
+          setUploadProgress({
+            current: phase === "uploading" ? current : current,
+            total,
+            name: fileName,
+            okCount: phase === "done" ? current : current,
+          })
+        },
       })
       errs.push(...errors)
-
-      if (!externalUpload && list.length > 1) {
-        setUploadProgress({
-          current: list.length,
-          total: list.length,
-          name: list[list.length - 1]!.name,
-        })
-      }
+      sentOk = okCount
 
       if (okCount > 0) {
         await fetch("/api/coach/jobs/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, limit: 5 }),
+          body: JSON.stringify({ user_id: userId, limit: 8 }),
         }).catch(() => {})
         await loadDocs(userId)
       }
@@ -167,10 +180,21 @@ export default function CoachMateriaisBibliotecaPage() {
           `${okCount} PDF(s) enviado(s). ${errs.length} falha(s):\n` +
             errs.slice(0, 4).join("\n")
         )
+      } else if (okCount > 0) {
+        setUploadProgress({
+          current: list.length,
+          total: list.length,
+          name: "Concluído",
+          okCount: sentOk,
+        })
       }
     } finally {
       setUploading(false)
-      setUploadProgress(null)
+      if (sentOk > 0) {
+        setTimeout(() => setUploadProgress(null), 2500)
+      } else {
+        setUploadProgress(null)
+      }
       if (fileRef.current) fileRef.current.value = ""
     }
   }
@@ -271,10 +295,27 @@ export default function CoachMateriaisBibliotecaPage() {
               A indexação roda em segundo plano.
             </p>
             {uploadProgress && (
-              <p className="mt-2 text-xs font-medium text-violet-800">
-                Enviando {uploadProgress.current}/{uploadProgress.total}:{" "}
-                {uploadProgress.name}
-              </p>
+              <div className="mt-3 space-y-1.5">
+                <p className="text-xs font-medium text-violet-900">
+                  {uploading
+                    ? `Enviando ${Math.min(uploadProgress.current + 1, uploadProgress.total)}/${uploadProgress.total}: ${uploadProgress.name}`
+                    : `${uploadProgress.okCount}/${uploadProgress.total} PDF(s) enviado(s)`}
+                </p>
+                <div
+                  className="h-2 overflow-hidden rounded-full bg-violet-200"
+                  role="progressbar"
+                  aria-valuenow={uploadProgress.current}
+                  aria-valuemin={0}
+                  aria-valuemax={uploadProgress.total}
+                >
+                  <div
+                    className="h-full rounded-full bg-violet-600 transition-all duration-300"
+                    style={{
+                      width: `${Math.round((uploadProgress.current / Math.max(uploadProgress.total, 1)) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
             )}
             {uploadErrors.length > 0 && !uploading && (
               <ul className="mt-2 list-inside list-disc text-xs text-red-700">
