@@ -54,7 +54,7 @@ export async function fetchIngestQueueDetails(
 }
 
 export type ProcessNextResult = {
-  status: "ready" | "failed" | "idle" | "retry"
+  status: "ready" | "failed" | "idle"
   document_id?: string
   title?: string
   error?: string
@@ -66,12 +66,16 @@ export async function processNextIngest(
   userId: string,
   options?: { random?: boolean }
 ): Promise<ProcessNextResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 120_000)
+
   const res = await fetch("/api/coach/jobs/process-next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, random: options?.random ?? false }),
     cache: "no-store",
-  })
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer))
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new Error((data as { error?: string }).error ?? "Falha ao processar")

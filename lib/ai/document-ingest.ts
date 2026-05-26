@@ -92,6 +92,73 @@ export async function failDocumentIngest(documentId: string, message: string) {
   })
 }
 
+export async function markProcessingStarted(
+  userId: string,
+  documentId: string
+) {
+  const doc = await getDocumentById(userId, documentId)
+  const pt = (doc?.parsed_tables ?? {}) as Record<string, unknown>
+  await updateDocumentIngest(documentId, {
+    ingest_stage: "parsing",
+    status: "processing",
+    ingest_error: null,
+    parsed_tables: {
+      ...pt,
+      processing_started_at: new Date().toISOString(),
+    },
+  })
+}
+
+/** Se já tem trechos mas a Vercel cortou no embed, libera como pronto (busca lexical). */
+export async function tryFinalizeReadyIfChunked(
+  documentId: string
+): Promise<boolean> {
+  const { count, error } = await supabaseServer
+    .from("document_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", documentId)
+
+  if (error || !count || count < 1) return false
+
+  await updateDocumentIngest(documentId, {
+    ingest_stage: "ready",
+    status: "ready",
+    ingest_error: null,
+    chunk_count: count,
+    last_ingested_at: new Date().toISOString(),
+  })
+  return true
+}
+
+const PIPELINE_TIMEOUT_MS = 52_000
+const MAX_EMBED_BATCHES_PER_RUN = 5
+
+export function isIngestTimeoutError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return /timeout|timed out|TIMEOUT|FUNCTION_INVOCATION_TIMEOUT/i.test(msg)
+}
+
+export async function ingestDocumentPipelineWithTimeout(
+  userId: string,
+  documentId: string,
+  timeoutMs = PIPELINE_TIMEOUT_MS
+) {
+  return Promise.race([
+    ingestDocumentPipeline(userId, documentId),
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "TIMEOUT: PDF grande demais para uma execução na Vercel. Será marcado como erro e a fila segue."
+            )
+          ),
+        timeoutMs
+      )
+    }),
+  ])
+}
+
 async function updateDocumentIngest(
   documentId: string,
   patch: Record<string, unknown>
@@ -280,21 +347,26 @@ export async function embedDocumentChunks(
   }
 
   let embedded = 0
+  let batches = 0
   for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
+    if (batches >= MAX_EMBED_BATCHES_PER_RUN) break
+    batches++
     const batch = chunks.slice(i, i + EMBED_BATCH)
     const vectors = await embedTexts(
       batch.map((c) => c.content),
       credentials
     )
-    for (let j = 0; j < batch.length; j++) {
-      const vec = vectors[j]
-      if (!vec) continue
-      const { error: upErr } = await supabaseServer
-        .from("document_chunks")
-        .update({ embedding: vec as unknown as string })
-        .eq("id", batch[j]!.id)
-      if (!upErr) embedded++
-    }
+    await Promise.all(
+      batch.map(async (chunk, j) => {
+        const vec = vectors[j]
+        if (!vec) return
+        const { error: upErr } = await supabaseServer
+          .from("document_chunks")
+          .update({ embedding: vec as unknown as string })
+          .eq("id", chunk.id)
+        if (!upErr) embedded++
+      })
+    )
   }
 
   return { embedded, skipped: false }

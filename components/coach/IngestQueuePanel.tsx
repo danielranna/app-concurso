@@ -145,9 +145,6 @@ export default function IngestQueuePanel() {
             setStatusMsg(`Pronto: ${result.title ?? "arquivo"}`)
           } else if (result.status === "failed") {
             setStatusMsg(`Erro em ${result.title ?? "arquivo"} — seguindo fila…`)
-          } else if (result.status === "retry") {
-            setStatusMsg(`Falhou uma vez em ${result.title ?? "arquivo"} — tente de novo`)
-            break
           } else if (result.status === "idle") {
             setStatusMsg("Fila concluída.")
             break
@@ -157,7 +154,11 @@ export default function IngestQueuePanel() {
           if (result.queue.pending_count === 0) break
         } while (options.processAll)
       } catch (e) {
-        setStatusMsg(e instanceof Error ? e.message : "Erro ao processar")
+        const err = e instanceof Error ? e.message : "Erro ao processar"
+        setStatusMsg(
+          `${err} — o PDF pode ter ficado preso; clique Atualizar lista e processe o próximo (ou use ↷ para pular).`
+        )
+        if (userId) await loadQueue(userId, showAll ? 50 : LIST_LIMIT)
       } finally {
         setProcessing(false)
         setProcessingTitle(null)

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { processNextIngestDocument } from "@/lib/ai/jobs/document-ingest-worker"
 
 export const runtime = "nodejs"
-export const maxDuration = 300
+/** Plano Hobby = 60s; timeout interno em 52s para marcar erro e liberar a fila. */
+export const maxDuration = 60
 
 /** Processa o próximo PDF da fila (SELECT → pipeline completa → SELECT). */
 export async function POST(req: Request) {

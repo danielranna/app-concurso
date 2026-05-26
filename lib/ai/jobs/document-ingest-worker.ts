@@ -1,7 +1,10 @@
 import { supabaseServer } from "../../supabase-server"
 import {
   failDocumentIngest,
-  ingestDocumentPipeline,
+  ingestDocumentPipelineWithTimeout,
+  isIngestTimeoutError,
+  markProcessingStarted,
+  tryFinalizeReadyIfChunked,
 } from "../document-ingest"
 import { DOCUMENT_PIPELINE_JOB_TYPES } from "./document-enqueue"
 import type { JobType } from "./queue"
@@ -10,7 +13,8 @@ const SERIAL_INGEST_TYPES: JobType[] = [...DOCUMENT_PIPELINE_JOB_TYPES]
 const STALE_RUNNING_MS = 2 * 60 * 1000
 const PIPELINE_STAGES = ["uploaded", "parsing", "chunking", "embedding"] as const
 const RECENT_WAVE_MS = 72 * 60 * 60 * 1000
-const MAX_AUTO_RETRIES = 1
+const MAX_AUTO_RETRIES = 0
+const STUCK_PROCESSING_MS = 3 * 60 * 1000
 
 export type IngestQueueItemView = {
   id: string
@@ -130,13 +134,13 @@ export async function healStaleRunningJobs(userId: string): Promise<number> {
   return healed
 }
 
-/** PDFs presos em parsing sem worker = voltam para uploaded. */
+/** PDFs presos (timeout Vercel) → pronto se já tem chunks, senão erro e sai da fila. */
 export async function resetOrphanPipelineDocs(userId: string): Promise<number> {
   if (await userHasRunningDocumentJob(userId)) return 0
 
   const { data: stuck, error } = await supabaseServer
     .from("subject_documents")
-    .select("id, parsed_tables")
+    .select("id, parsed_tables, chunk_count")
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
     .in("ingest_stage", ["parsing", "chunking", "embedding"])
@@ -144,7 +148,30 @@ export async function resetOrphanPipelineDocs(userId: string): Promise<number> {
   if (error) throw new Error(error.message)
   let n = 0
   for (const row of stuck ?? []) {
-    const pt = (row.parsed_tables ?? {}) as Record<string, unknown>
+    const docId = row.id as string
+    if (await tryFinalizeReadyIfChunked(docId)) {
+      n++
+      continue
+    }
+
+    const pt = (row.parsed_tables ?? {}) as {
+      processing_started_at?: string
+    }
+    const started = pt.processing_started_at
+      ? new Date(pt.processing_started_at).getTime()
+      : 0
+    const stuckLong =
+      !started || Date.now() - started > STUCK_PROCESSING_MS
+
+    if (stuckLong) {
+      await failDocumentIngest(
+        docId,
+        "Interrompido (PDF grande ou timeout na Vercel). Divida o arquivo, use ↷ para pular ou Reindexar."
+      )
+      n++
+      continue
+    }
+
     await supabaseServer
       .from("subject_documents")
       .update({
@@ -153,7 +180,7 @@ export async function resetOrphanPipelineDocs(userId: string): Promise<number> {
         ingest_error: null,
         parsed_tables: pt,
       })
-      .eq("id", row.id)
+      .eq("id", docId)
     n++
   }
   return n
@@ -262,11 +289,11 @@ export async function processNextIngestDocument(
   }
 
   const doc = all.find((d) => d.id === targetId)!
-  const pt = (doc.parsed_tables ?? {}) as { ingest_retries?: number }
-  const retries = Number(pt.ingest_retries ?? 0)
+
+  await markProcessingStarted(userId, targetId)
 
   try {
-    const result = await ingestDocumentPipeline(userId, targetId)
+    const result = await ingestDocumentPipelineWithTimeout(userId, targetId)
     return {
       status: "ready",
       document_id: targetId,
@@ -276,33 +303,28 @@ export async function processNextIngestDocument(
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro na indexação"
+    const timedOut = isIngestTimeoutError(e)
 
-    if (retries < MAX_AUTO_RETRIES) {
-      await supabaseServer
-        .from("subject_documents")
-        .update({
-          ingest_stage: "uploaded",
-          status: "pending",
-          ingest_error: `Tentativa ${retries + 1} falhou — pode tentar de novo`,
-          parsed_tables: { ...pt, ingest_retries: retries + 1 },
-        })
-        .eq("id", targetId)
-
+    if (await tryFinalizeReadyIfChunked(targetId)) {
       return {
-        status: "retry",
+        status: "ready",
         document_id: targetId,
         title: doc.title,
-        error: msg,
+        error: "Concluído com busca lexical (vetorização parcial).",
         queue: await readIngestQueueDetails(userId),
       }
     }
 
-    await failDocumentIngest(targetId, msg)
+    const failMsg = timedOut
+      ? "PDF muito grande para processar de uma vez na Vercel. Divida o arquivo ou use ↷ para pular."
+      : msg
+
+    await failDocumentIngest(targetId, failMsg)
     return {
       status: "failed",
       document_id: targetId,
       title: doc.title,
-      error: msg,
+      error: failMsg,
       queue: await readIngestQueueDetails(userId),
     }
   }
