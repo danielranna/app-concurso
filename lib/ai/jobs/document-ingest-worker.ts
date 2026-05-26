@@ -1,11 +1,10 @@
 import { supabaseServer } from "../../supabase-server"
-import { failDocumentIngest } from "../document-ingest"
 import {
-  DOCUMENT_PIPELINE_JOB_TYPES,
-  enqueueMaterialIngest,
-} from "./document-enqueue"
-import { claimHeadIngestJob, type JobType } from "./queue"
-import { processJob } from "./worker"
+  failDocumentIngest,
+  ingestDocumentPipeline,
+} from "../document-ingest"
+import { DOCUMENT_PIPELINE_JOB_TYPES } from "./document-enqueue"
+import type { JobType } from "./queue"
 
 const SERIAL_INGEST_TYPES: JobType[] = [...DOCUMENT_PIPELINE_JOB_TYPES]
 const STALE_RUNNING_MS = 2 * 60 * 1000
@@ -68,80 +67,29 @@ function isRecentWaveDoc(d: DocRow): boolean {
   return Date.now() - Math.max(created, ingested) < RECENT_WAVE_MS
 }
 
-function sortByCreated(docs: DocRow[]) {
-  return [...docs].sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  )
+function queueSortTime(d: DocRow): number {
+  const pt = (d.parsed_tables ?? {}) as { queue_sort_at?: string }
+  if (pt.queue_sort_at) return new Date(pt.queue_sort_at).getTime()
+  return new Date(d.created_at).getTime()
 }
 
-/** Cabeça da fila: o único que pode estar em parsing/chunking/embedding. */
-export function pickQueueHeadId(all: DocRow[]): string | null {
-  const inProgress = sortByCreated(
-    all.filter((d) =>
-      ["parsing", "chunking", "embedding"].includes(d.ingest_stage ?? "")
-    )
-  )
-  if (inProgress.length) return inProgress[0]!.id
+function sortByQueue(docs: DocRow[]) {
+  return [...docs].sort((a, b) => queueSortTime(a) - queueSortTime(b))
+}
 
-  const waiting = sortByCreated(
+/** Próximo da fila: enviados mas não prontos, ordenados por queue_sort_at. */
+export function pickNextPendingId(
+  all: DocRow[],
+  options?: { random?: boolean }
+): string | null {
+  const waiting = sortByQueue(
     all.filter((d) => d.ingest_stage === "uploaded")
   )
-  return waiting[0]?.id ?? null
-}
-
-function docPayloadId(payload: unknown): string | null {
-  const p = payload as { document_id?: string } | null
-  return p?.document_id ?? null
-}
-
-/** Só 1 PDF ativo; demais voltam para uploaded e jobs pendentes são ignorados. */
-export async function enforceSerialQueue(
-  userId: string,
-  allDocs: DocRow[]
-): Promise<string | null> {
-  const headId = pickQueueHeadId(allDocs)
-  if (!headId) return null
-
-  const othersInPipeline = allDocs.filter(
-    (d) =>
-      d.id !== headId &&
-      ["parsing", "chunking", "embedding"].includes(d.ingest_stage ?? "")
-  )
-
-  for (const doc of othersInPipeline) {
-    await supabaseServer
-      .from("subject_documents")
-      .update({
-        ingest_stage: "uploaded",
-        status: "pending",
-        ingest_error: null,
-      })
-      .eq("id", doc.id)
+  if (!waiting.length) return null
+  if (options?.random) {
+    return waiting[Math.floor(Math.random() * waiting.length)]!.id
   }
-
-  const { data: pendingJobs } = await supabaseServer
-    .from("ai_jobs")
-    .select("id, payload")
-    .eq("user_id", userId)
-    .eq("status", "pending")
-    .in("job_type", SERIAL_INGEST_TYPES)
-
-  for (const job of pendingJobs ?? []) {
-    const docId = docPayloadId(job.payload)
-    if (docId && docId !== headId) {
-      await supabaseServer
-        .from("ai_jobs")
-        .update({
-          status: "skipped",
-          error_message: "Aguardando vez na fila serial",
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id)
-    }
-  }
-
-  return headId
+  return waiting[0]!.id
 }
 
 export async function healStaleRunningJobs(userId: string): Promise<number> {
@@ -182,90 +130,182 @@ export async function healStaleRunningJobs(userId: string): Promise<number> {
   return healed
 }
 
-async function headHasActiveIngestJob(
-  userId: string,
-  headDocumentId: string
-): Promise<boolean> {
-  const { data: jobs } = await supabaseServer
-    .from("ai_jobs")
-    .select("id, status, payload")
+/** PDFs presos em parsing sem worker = voltam para uploaded. */
+export async function resetOrphanPipelineDocs(userId: string): Promise<number> {
+  if (await userHasRunningDocumentJob(userId)) return 0
+
+  const { data: stuck, error } = await supabaseServer
+    .from("subject_documents")
+    .select("id, parsed_tables")
     .eq("user_id", userId)
-    .eq("job_type", "document_ingest")
-    .in("status", ["pending", "running"])
+    .eq("doc_type", "study_material")
+    .in("ingest_stage", ["parsing", "chunking", "embedding"])
 
-  return (jobs ?? []).some(
-    (j) => docPayloadId(j.payload) === headDocumentId
-  )
-}
-
-/** Só enfileira job para o primeiro da fila (nunca vários de uma vez). */
-export async function ensureHeadIngestJob(
-  userId: string,
-  headDocumentId: string,
-  headStage: string
-): Promise<boolean> {
-  if (await headHasActiveIngestJob(userId, headDocumentId)) return false
-  if (headStage !== "uploaded") return false
-  await enqueueMaterialIngest(userId, headDocumentId)
-  return true
-}
-
-export async function healHeadDocument(
-  userId: string,
-  headId: string,
-  headDoc: DocRow
-): Promise<void> {
-  const stage = headDoc.ingest_stage ?? "uploaded"
-  const activeJobs = await supabaseServer
-    .from("ai_jobs")
-    .select("id")
-    .eq("user_id", userId)
-    .in("status", ["pending", "running"])
-    .in("job_type", SERIAL_INGEST_TYPES)
-
-  const hasJob = (activeJobs.data ?? []).length > 0
-  if (hasJob) return
-
-  if (["parsing", "chunking", "embedding"].includes(stage)) {
-    const pt = (headDoc.parsed_tables ?? {}) as { ingest_retries?: number }
-    const retries = Number(pt.ingest_retries ?? 0)
-
-    if (retries >= MAX_AUTO_RETRIES) {
-      await failDocumentIngest(
-        headId,
-        "Não foi possível indexar após novas tentativas. Divida o PDF ou use Reindexar."
-      )
-      return
-    }
-
+  if (error) throw new Error(error.message)
+  let n = 0
+  for (const row of stuck ?? []) {
+    const pt = (row.parsed_tables ?? {}) as Record<string, unknown>
     await supabaseServer
       .from("subject_documents")
       .update({
         ingest_stage: "uploaded",
         status: "pending",
-        ingest_error: "Nova tentativa automática…",
-        parsed_tables: { ...pt, ingest_retries: retries + 1 },
+        ingest_error: null,
+        parsed_tables: pt,
       })
-      .eq("id", headId)
-
-    await enqueueMaterialIngest(userId, headId, { force: true })
+      .eq("id", row.id)
+    n++
   }
+  return n
 }
 
-export async function healIngestPipeline(
+export async function skipPendingIngestJobs(userId: string) {
+  await supabaseServer
+    .from("ai_jobs")
+    .update({
+      status: "skipped",
+      error_message: "Processamento manual (botão)",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .in("job_type", SERIAL_INGEST_TYPES)
+}
+
+/** Envia PDF para o fim da fila (quando o primeiro trava). */
+export async function deferDocumentToQueueEnd(
   userId: string,
-  allDocs: DocRow[]
-): Promise<{ headId: string | null }> {
+  documentId: string
+) {
+  const { data: doc, error } = await supabaseServer
+    .from("subject_documents")
+    .select("parsed_tables")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (error || !doc) throw new Error(error?.message ?? "Documento não encontrado")
+
+  const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+  await supabaseServer
+    .from("subject_documents")
+    .update({
+      ingest_stage: "uploaded",
+      status: "pending",
+      ingest_error: null,
+      parsed_tables: {
+        ...pt,
+        queue_sort_at: new Date().toISOString(),
+        ingest_retries: 0,
+      },
+    })
+    .eq("id", documentId)
+
+  await skipPendingIngestJobs(userId)
+}
+
+/** Reindexar na própria fila (erros). */
+export async function requeueDocumentForIngest(
+  userId: string,
+  documentId: string
+) {
+  const { data: doc, error } = await supabaseServer
+    .from("subject_documents")
+    .select("parsed_tables")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (error || !doc) throw new Error(error?.message ?? "Documento não encontrado")
+
+  const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+  await supabaseServer
+    .from("subject_documents")
+    .update({
+      ingest_stage: "uploaded",
+      status: "pending",
+      ingest_error: null,
+      parsed_tables: { ...pt, ingest_retries: 0 },
+    })
+    .eq("id", documentId)
+}
+
+export type ProcessNextResult = {
+  status: "ready" | "failed" | "idle" | "retry"
+  document_id?: string
+  title?: string
+  error?: string
+  chunks?: number
+  queue: IngestQueueDetails
+}
+
+/**
+ * Loop do botão: SELECT na DB → processa 1 PDF inteiro → SELECT de novo.
+ * Sem fila ai_jobs no caminho feliz.
+ */
+export async function processNextIngestDocument(
+  userId: string,
+  options?: { random?: boolean }
+): Promise<ProcessNextResult> {
   await healStaleRunningJobs(userId)
-  const headId = await enforceSerialQueue(userId, allDocs)
-  if (headId) {
-    const headDoc = allDocs.find((d) => d.id === headId)
-    if (headDoc) {
-      await healHeadDocument(userId, headId, headDoc)
-      await ensureHeadIngestJob(userId, headId, headDoc.ingest_stage ?? "uploaded")
+  await skipPendingIngestJobs(userId)
+  await resetOrphanPipelineDocs(userId)
+
+  let all = await fetchAllStudyDocs(userId)
+  const targetId = pickNextPendingId(all, options)
+
+  if (!targetId) {
+    return {
+      status: "idle",
+      queue: await readIngestQueueDetails(userId),
     }
   }
-  return { headId }
+
+  const doc = all.find((d) => d.id === targetId)!
+  const pt = (doc.parsed_tables ?? {}) as { ingest_retries?: number }
+  const retries = Number(pt.ingest_retries ?? 0)
+
+  try {
+    const result = await ingestDocumentPipeline(userId, targetId)
+    return {
+      status: "ready",
+      document_id: targetId,
+      title: doc.title,
+      chunks: result.chunks,
+      queue: await readIngestQueueDetails(userId),
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro na indexação"
+
+    if (retries < MAX_AUTO_RETRIES) {
+      await supabaseServer
+        .from("subject_documents")
+        .update({
+          ingest_stage: "uploaded",
+          status: "pending",
+          ingest_error: `Tentativa ${retries + 1} falhou — pode tentar de novo`,
+          parsed_tables: { ...pt, ingest_retries: retries + 1 },
+        })
+        .eq("id", targetId)
+
+      return {
+        status: "retry",
+        document_id: targetId,
+        title: doc.title,
+        error: msg,
+        queue: await readIngestQueueDetails(userId),
+      }
+    }
+
+    await failDocumentIngest(targetId, msg)
+    return {
+      status: "failed",
+      document_id: targetId,
+      title: doc.title,
+      error: msg,
+      queue: await readIngestQueueDetails(userId),
+    }
+  }
 }
 
 export async function userHasRunningDocumentJob(userId: string): Promise<boolean> {
@@ -336,21 +376,16 @@ export async function readIngestQueueDetails(
         (d.ingest_stage === "ready" && isRecentWaveDoc(d)))
   )
 
-  const failedRecent = sortByCreated(
+  const failedRecent = sortByQueue(
     all.filter((d) => d.ingest_stage === "failed" && isRecentWaveDoc(d))
   )
 
   const completed = wave.filter((d) => d.ingest_stage === "ready").length
   const total = wave.length
-  const running = await userHasRunningDocumentJob(userId)
-  const headId = pickQueueHeadId(all)
+  const running = false
 
-  const waiting = sortByCreated(
-    all.filter((d) => d.ingest_stage === "uploaded" && d.id !== headId)
-  )
-
-  const pending_count =
-    waiting.length + (headId && all.find((d) => d.id === headId)?.ingest_stage !== "ready" ? 1 : 0)
+  const waiting = sortByQueue(all.filter((d) => d.ingest_stage === "uploaded"))
+  const pending_count = waiting.length
 
   const active =
     pending_count > 0 || running || failedRecent.length > 0 || completed < total
@@ -371,12 +406,8 @@ export async function readIngestQueueDetails(
     }
   }
 
-  const headDoc = headId ? all.find((d) => d.id === headId) : null
   const nextDoc = waiting[0] ?? null
-
-  const current = headDoc
-    ? toView(headDoc, { is_current: true, is_next: false })
-    : null
+  const current = null
   const next = nextDoc
     ? toView(nextDoc, { is_current: false, is_next: true })
     : null
@@ -405,79 +436,14 @@ export async function readIngestQueueDetails(
   }
 }
 
+/** Legado: delega ao fluxo do botão. */
 export async function runSerialDocumentIngestWorker(userId: string) {
-  const all = await fetchAllStudyDocs(userId)
-
-  if (await userHasRunningDocumentJob(userId)) {
-    return {
-      processed: 0,
-      skipped: "already_running" as const,
-      results: [],
-      queue: await readIngestQueueDetails(userId),
-    }
-  }
-
-  const { headId } = await healIngestPipeline(userId, all)
-
-  if (!headId) {
-    return {
-      processed: 0,
-      skipped: "idle" as const,
-      results: [],
-      queue: await readIngestQueueDetails(userId),
-    }
-  }
-
-  const headDoc = all.find((d) => d.id === headId)
-  if (headDoc?.ingest_stage === "uploaded") {
-    await ensureHeadIngestJob(userId, headId, "uploaded")
-  }
-
-  const jobs = await claimHeadIngestJob(userId, headId)
-  if (!jobs.length) {
-    return {
-      processed: 0,
-      skipped: "no_job" as const,
-      results: [],
-      queue: await readIngestQueueDetails(userId),
-    }
-  }
-
-  const job = jobs[0]!
-  try {
-    await processJob(job)
-    return {
-      processed: 1,
-      skipped: null,
-      results: [{ id: job.id, status: "done" }],
-      queue: await readIngestQueueDetails(userId),
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erro na indexação"
-    const pt = (headDoc?.parsed_tables ?? {}) as { ingest_retries?: number }
-    const retries = Number(pt.ingest_retries ?? 0)
-
-    if (retries < MAX_AUTO_RETRIES) {
-      await supabaseServer
-        .from("subject_documents")
-        .update({
-          ingest_stage: "uploaded",
-          status: "pending",
-          ingest_error: `Tentativa ${retries + 1} falhou — repetindo…`,
-          parsed_tables: { ...pt, ingest_retries: retries + 1 },
-        })
-        .eq("id", headId)
-      await enqueueMaterialIngest(userId, headId, { force: true })
-    } else {
-      await failDocumentIngest(headId, msg)
-    }
-
-    return {
-      processed: 0,
-      skipped: "failed" as const,
-      results: [{ id: job.id, status: "failed", error: msg }],
-      queue: await readIngestQueueDetails(userId),
-    }
+  const result = await processNextIngestDocument(userId)
+  return {
+    processed: result.status === "ready" ? 1 : 0,
+    skipped: result.status === "idle" ? ("idle" as const) : null,
+    results: [{ status: result.status, document_id: result.document_id }],
+    queue: result.queue,
   }
 }
 

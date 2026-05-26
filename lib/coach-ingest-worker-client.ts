@@ -1,4 +1,4 @@
-/** Fila global de indexação — um único coordenador no cliente. */
+/** Fila global — controle manual (botão), sem polling automático de processamento. */
 
 export type IngestQueueItemView = {
   id: string
@@ -53,26 +53,52 @@ export async function fetchIngestQueueDetails(
   return data as IngestQueueDetails
 }
 
-export type RunIngestResult = {
-  processed: number
-  skipped: string | null
-  results: unknown[]
-  queue?: IngestQueueDetails
+export type ProcessNextResult = {
+  status: "ready" | "failed" | "idle" | "retry"
+  document_id?: string
+  title?: string
+  error?: string
+  chunks?: number
+  queue: IngestQueueDetails
 }
 
-/** Um passo da fila; retorna estado atualizado da fila. */
-export async function tickSerialIngestWorker(
-  userId: string
-): Promise<RunIngestResult> {
-  const res = await fetch("/api/coach/jobs/run-ingest", {
+export async function processNextIngest(
+  userId: string,
+  options?: { random?: boolean }
+): Promise<ProcessNextResult> {
+  const res = await fetch("/api/coach/jobs/process-next", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId, random: options?.random ?? false }),
     cache: "no-store",
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error ?? "Falha ao processar fila")
+    throw new Error((data as { error?: string }).error ?? "Falha ao processar")
   }
-  return data as RunIngestResult
+  return data as ProcessNextResult
+}
+
+export async function deferDocumentInQueue(userId: string, documentId: string) {
+  const res = await fetch(`/api/coach/documents/${documentId}/defer-queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error ?? "Falha ao adiar")
+  }
+}
+
+export async function reindexDocumentInQueue(userId: string, documentId: string) {
+  const res = await fetch(`/api/coach/documents/${documentId}/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error ?? "Falha ao reindexar")
+  }
 }

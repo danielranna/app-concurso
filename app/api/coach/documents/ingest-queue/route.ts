@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
-import { readIngestQueueDetails } from "@/lib/ai/jobs/document-ingest-worker"
+import {
+  readIngestQueueDetails,
+  resetOrphanPipelineDocs,
+} from "@/lib/ai/jobs/document-ingest-worker"
 
 /** GET leve: só lê fila na DB (subject_documents), sem heal. */
 export async function GET(req: Request) {
@@ -11,6 +14,7 @@ export async function GET(req: Request) {
     }
 
     const limit = Math.min(Number(searchParams.get("limit")) || 5, 50)
+    await resetOrphanPipelineDocs(userId)
     const details = await readIngestQueueDetails(userId, { itemLimit: limit })
 
     return NextResponse.json(details)

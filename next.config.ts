@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
     ],
     "/api/coach/jobs/run": ["./node_modules/pdf-parse/**/*"],
     "/api/coach/jobs/run-ingest": ["./node_modules/pdf-parse/**/*"],
+    "/api/coach/jobs/process-next": ["./node_modules/pdf-parse/**/*"],
   },
   async redirects() {
     return [
