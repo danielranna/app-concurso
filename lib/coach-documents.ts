@@ -558,15 +558,16 @@ export async function listCoachDocuments(
   userId: string,
   filters?: { examTargetId?: string; subjectId?: string; docType?: CoachDocType }
 ) {
-  let q = supabaseServer
-    .from("subject_documents")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
+  let q = supabaseServer.from("subject_documents").select("*").eq("user_id", userId)
 
   if (filters?.examTargetId) q = q.eq("exam_target_id", filters.examTargetId)
   if (filters?.subjectId) q = q.eq("subject_id", filters.subjectId)
   if (filters?.docType) q = q.eq("doc_type", filters.docType)
+
+  q =
+    filters?.docType === "study_material"
+      ? q.order("title", { ascending: true })
+      : q.order("created_at", { ascending: false })
 
   const { data, error } = await q
   if (error) throw new Error(error.message)
