@@ -4,6 +4,7 @@ import { Fragment, useState } from "react"
 import { ImageIcon, Plus, Trash2, Type } from "lucide-react"
 import RichTextEditor from "@/components/RichTextEditor"
 import ImagePasteZone from "@/components/questions/ImagePasteZone"
+import ResizableQuestionImage from "@/components/questions/ResizableQuestionImage"
 import type {
   QuestionContentBlock,
   QuestionContentBlockKind,
@@ -72,7 +73,7 @@ function AddBlockSlot({ label, onAdd, disabled }: AddSlotProps) {
 
 type BlockEditorProps = {
   block: QuestionContentBlock
-  onChange: (content: string) => void
+  onPatch: (patch: Partial<QuestionContentBlock>) => void
   onRemove: () => void
   uploading: boolean
   onUpload: (file: File) => Promise<string | null>
@@ -80,18 +81,19 @@ type BlockEditorProps = {
 
 function BlockEditor({
   block,
-  onChange,
+  onPatch,
   onRemove,
   uploading,
   onUpload,
 }: BlockEditorProps) {
+  const [replacing, setReplacing] = useState(false)
+  const hasImage = block.kind === "image" && !!block.content.trim()
+
   if (block.kind === "image") {
     return (
-      <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Imagem — cole o print
-          </span>
+      <div className="py-1">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-slate-500">Imagem</span>
           <button
             type="button"
             onClick={onRemove}
@@ -101,15 +103,35 @@ function BlockEditor({
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
-        <ImagePasteZone
-          imageUrl={block.content.trim() || undefined}
-          uploading={uploading}
-          autoFocus={!block.content.trim()}
-          onPasteImage={async (file) => {
-            const url = await onUpload(file)
-            if (url) onChange(url)
-          }}
-        />
+        {hasImage && !replacing ? (
+          <>
+            <ResizableQuestionImage
+              src={block.content}
+              widthPct={block.widthPct}
+              editable
+              onWidthChange={(widthPct) => onPatch({ widthPct })}
+            />
+            <button
+              type="button"
+              onClick={() => setReplacing(true)}
+              className="mt-1 text-xs text-violet-700 hover:underline"
+            >
+              Substituir imagem (Ctrl+V)
+            </button>
+          </>
+        ) : (
+          <ImagePasteZone
+            uploading={uploading}
+            autoFocus
+            onPasteImage={async (file) => {
+              const url = await onUpload(file)
+              if (url) {
+                onPatch({ content: url, widthPct: block.widthPct ?? 45 })
+                setReplacing(false)
+              }
+            }}
+          />
+        )}
       </div>
     )
   }
@@ -131,7 +153,7 @@ function BlockEditor({
       </div>
       <RichTextEditor
         value={block.content}
-        onChange={onChange}
+        onChange={(content) => onPatch({ content })}
         rows={3}
         placeholder="Texto formatado — pode colar print (Ctrl+V)"
         onImageUpload={onUpload}
@@ -161,8 +183,8 @@ function BlockSection({
     onChange(next)
   }
 
-  function updateBlock(id: string, content: string) {
-    onChange(blocks.map((b) => (b.id === id ? { ...b, content } : b)))
+  function patchBlock(id: string, patch: Partial<QuestionContentBlock>) {
+    onChange(blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   }
 
   function removeBlock(id: string) {
@@ -177,12 +199,12 @@ function BlockSection({
         <Fragment key={block.id}>
           <BlockEditor
             block={block}
-            onChange={(c) => updateBlock(block.id, c)}
+            onPatch={(patch) => patchBlock(block.id, patch)}
             onRemove={() => removeBlock(block.id)}
             uploading={uploadingBlockId === block.id}
             onUpload={async (file) => {
               const url = await onUpload(block.id, file)
-              if (url) updateBlock(block.id, url)
+              if (url) patchBlock(block.id, { content: url })
               return url
             }}
           />

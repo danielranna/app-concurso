@@ -2,25 +2,20 @@
 
 import type { QuestionContentBlock, QuestionContentBlocks } from "@/lib/question-content-blocks"
 import { isImageContent } from "@/lib/question-content-blocks"
+import ResizableQuestionImage from "@/components/questions/ResizableQuestionImage"
 
 function SingleBlock({ block }: { block: QuestionContentBlock }) {
   const content = block.content.trim()
   if (!content) return null
 
   if (block.kind === "image" || isImageContent(content)) {
-    return (
-      <img
-        src={content}
-        alt=""
-        className="my-3 max-h-[28rem] w-full rounded-lg border object-contain"
-      />
-    )
+    return <ResizableQuestionImage src={content} widthPct={block.widthPct} />
   }
 
   if (content.includes("<")) {
     return (
       <div
-        className="prose prose-sm max-w-none text-slate-800 [&_img]:my-3 [&_img]:max-h-[28rem] [&_img]:w-full [&_img]:rounded-lg [&_img]:border [&_img]:object-contain"
+        className="prose prose-sm max-w-none text-slate-800 [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-w-full"
         dangerouslySetInnerHTML={{ __html: content }}
       />
     )

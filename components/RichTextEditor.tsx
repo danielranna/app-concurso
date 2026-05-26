@@ -417,7 +417,7 @@ export default function RichTextEditor({
               document.execCommand(
                 "insertHTML",
                 false,
-                `<img src="${url.replace(/"/g, "&quot;")}" alt="" style="max-width:100%;height:auto;" />`
+                `<img src="${url.replace(/"/g, "&quot;")}" alt="" style="max-width:55%;height:auto;display:block;" />`
               )
               handleInput()
             })

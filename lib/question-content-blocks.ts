@@ -5,6 +5,8 @@ export type QuestionContentBlock = {
   kind: QuestionContentBlockKind
   /** HTML para texto; URL pública para imagem */
   content: string
+  /** Largura da imagem em % do enunciado (só kind === image) */
+  widthPct?: number
 }
 
 export type QuestionContentBlocks = {
@@ -47,7 +49,11 @@ function normalizeBlock(b: unknown): QuestionContentBlock | null {
   const kind: QuestionContentBlockKind =
     o.kind === "image" || (o.kind !== "text" && isImageContent(content)) ? "image" : "text"
   const id = typeof o.id === "string" && o.id ? o.id : newBlockId()
-  return { id, kind, content }
+  const widthPct =
+    typeof o.widthPct === "number" && !Number.isNaN(o.widthPct)
+      ? Math.min(100, Math.max(15, Math.round(o.widthPct)))
+      : undefined
+  return { id, kind, content, ...(widthPct != null ? { widthPct } : {}) }
 }
 
 /** Converte campos legados ou JSON salvo em estrutura de blocos. */
