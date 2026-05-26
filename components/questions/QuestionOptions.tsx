@@ -4,6 +4,7 @@ type Option = { label: string; text: string }
 
 type Props = {
   options: Option[]
+  questionType?: "multiple_choice" | "certo_errado" | string
   selected: string | null
   eliminated: Set<string>
   locked: boolean
@@ -12,8 +13,21 @@ type Props = {
   onToggleEliminated: (label: string) => void
 }
 
+function optionDisplayText(
+  opt: Option,
+  questionType?: string
+): { prefix: string | null; text: string } {
+  const sameLabel =
+    opt.label.trim().toLowerCase() === opt.text.trim().toLowerCase()
+  if (questionType === "certo_errado" || sameLabel) {
+    return { prefix: null, text: opt.text }
+  }
+  return { prefix: `${opt.label})`, text: opt.text }
+}
+
 export default function QuestionOptions({
   options,
+  questionType,
   selected,
   eliminated,
   locked,
@@ -52,14 +66,25 @@ export default function QuestionOptions({
                       : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
             }`}
           >
-            <span
-              className={`font-medium ${isEliminated ? "line-through decoration-slate-400" : ""}`}
-            >
-              {opt.label})
-            </span>{" "}
-            <span className={isEliminated ? "line-through decoration-slate-400" : ""}>
-              {opt.text}
-            </span>
+            {(() => {
+              const { prefix, text } = optionDisplayText(opt, questionType)
+              return (
+                <>
+                  {prefix != null && (
+                    <span
+                      className={`font-medium ${isEliminated ? "line-through decoration-slate-400" : ""}`}
+                    >
+                      {prefix}{" "}
+                    </span>
+                  )}
+                  <span
+                    className={`${prefix == null ? "font-medium" : ""} ${isEliminated ? "line-through decoration-slate-400" : ""}`}
+                  >
+                    {text}
+                  </span>
+                </>
+              )
+            })()}
           </button>
         )
       })}

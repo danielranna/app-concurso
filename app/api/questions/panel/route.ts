@@ -27,12 +27,14 @@ export async function GET(req: Request) {
         .select("id", { count: "exact", head: true })
         .eq("user_id", user_id)
         .eq("subject_id", s.id)
+        .eq("library_saved", true)
 
       const { data: notebooks } = await supabaseServer
         .from("notebooks")
         .select("question_count, answered_count")
         .eq("user_id", user_id)
         .eq("subject_id", s.id)
+        .eq("library_saved", true)
 
       let totalQ = 0
       let answeredQ = 0
@@ -50,6 +52,7 @@ export async function GET(req: Request) {
             .select("id")
             .eq("user_id", user_id)
             .eq("subject_id", s.id)
+            .eq("library_saved", true)
         ).data?.map((n) => n.id) ?? []
 
         if (ids.length) {
@@ -85,6 +88,14 @@ export async function GET(req: Request) {
     .select("id, name, question_count, answered_count, completed_at, created_at")
     .eq("user_id", user_id)
     .is("subject_id", null)
+    .eq("library_saved", true)
+    .order("created_at", { ascending: false })
+
+  const { data: ephemeralNotebooks } = await supabaseServer
+    .from("notebooks")
+    .select("id, name, question_count, answered_count, completed_at, created_at")
+    .eq("user_id", user_id)
+    .eq("library_saved", false)
     .order("created_at", { ascending: false })
 
   return NextResponse.json({
@@ -93,6 +104,10 @@ export async function GET(req: Request) {
     unassigned: {
       notebook_count: unassignedNotebooks?.length ?? 0,
       notebooks: unassignedNotebooks ?? [],
+    },
+    ephemeral: {
+      notebook_count: ephemeralNotebooks?.length ?? 0,
+      notebooks: ephemeralNotebooks ?? [],
     },
   })
 }

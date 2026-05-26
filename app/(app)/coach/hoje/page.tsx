@@ -312,13 +312,21 @@ export default function CoachHojePage() {
                   )}
                 </div>
                 {plan.combined_notebook_id && (
-                  <Link
-                    href={`/questoes/cadernos/${plan.combined_notebook_id}`}
-                    className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800"
-                  >
-                    <Play className="h-5 w-5" />
-                    Estudar caderno agora
-                  </Link>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/questoes/cadernos/${plan.combined_notebook_id}`}
+                      className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800"
+                    >
+                      <Play className="h-5 w-5" />
+                      Estudar caderno agora
+                    </Link>
+                    <Link
+                      href={`/questoes/cadernos/${plan.combined_notebook_id}?save=1`}
+                      className="inline-flex items-center gap-2 rounded-lg border border-violet-400 bg-white px-4 py-2.5 text-sm font-medium text-violet-800 hover:bg-violet-100"
+                    >
+                      Salvar na biblioteca
+                    </Link>
+                  </div>
                 )}
               </div>
             </div>

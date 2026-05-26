@@ -3,7 +3,7 @@ import type { NotebookReportStructured, PerQuestionError } from "../coach-types"
 import { classifyWrongAttempts } from "./error-classifier"
 import { runReportAgent } from "./agents/report"
 import { loadSubjectBrain } from "./context-builder"
-import { getReportPreferences } from "./context-builder"
+import { getEffectiveReportPreferences } from "./context-builder"
 import { computeLearningSignals } from "../learning-signals"
 import {
   buildDeterministicMetacognition,
@@ -334,7 +334,7 @@ export async function generateNotebookReport(
     .single()
 
   const subjectId = nb?.subject_id ?? null
-  const prefs = await getReportPreferences(userId)
+  const prefs = await getEffectiveReportPreferences(userId, subjectId)
 
   const perQuestionErrors = await classifyWrongAttempts(
     userId,

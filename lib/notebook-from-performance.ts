@@ -129,7 +129,8 @@ export async function createNotebookFromQuestionIds(
   name: string,
   subjectId: string,
   questionIds: string[],
-  folderId?: string | null
+  folderId?: string | null,
+  librarySaved = true
 ) {
   const { data: notebook, error: nbErr } = await supabaseServer
     .from("notebooks")
@@ -139,6 +140,7 @@ export async function createNotebookFromQuestionIds(
       subject_id: subjectId,
       folder_id: folderId ?? null,
       question_count: questionIds.length,
+      library_saved: librarySaved,
     })
     .select("id")
     .single()

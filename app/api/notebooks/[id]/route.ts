@@ -35,12 +35,13 @@ export async function PUT(
 ) {
   const { id } = await params
   const body = await req.json()
-  const { name, folder_id, subject_id } = body
+  const { name, folder_id, subject_id, library_saved } = body
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (name != null) update.name = name
   if (folder_id !== undefined) update.folder_id = folder_id
   if (subject_id !== undefined) update.subject_id = subject_id
+  if (library_saved !== undefined) update.library_saved = library_saved
 
   const { data, error } = await supabaseServer
     .from("notebooks")

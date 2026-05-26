@@ -25,6 +25,28 @@ export async function getReportPreferences(userId: string) {
   }
 }
 
+export async function getEffectiveReportPreferences(
+  userId: string,
+  subjectId?: string | null
+) {
+  const global = await getReportPreferences(userId)
+  if (!subjectId) return global
+
+  const { data: subjectRow } = await supabaseServer
+    .from("coach_subject_report_preferences")
+    .select("explain_wrong")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+    .maybeSingle()
+
+  const explain_wrong =
+    subjectRow?.explain_wrong !== undefined && subjectRow?.explain_wrong !== null
+      ? subjectRow.explain_wrong
+      : global.explain_wrong
+
+  return { ...global, explain_wrong }
+}
+
 export async function getTeacherDailyCap(userId: string): Promise<number> {
   const prefs = await getReportPreferences(userId)
   return prefs.teacher_daily_cap

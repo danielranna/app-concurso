@@ -190,13 +190,35 @@ export async function recordAttempt(params: {
   if (error) throw new Error(error.message)
 }
 
-export async function loadQuestionForStudy(questionId: string) {
+export type StudyOption = { label: string; text: string; sort_order?: number }
+
+export function normalizeStudyOptions(
+  questionType: string,
+  raw: { label: string; text: string; sort_order?: number }[]
+): StudyOption[] {
+  let opts = raw.map((o, i) => ({
+    label: o.label,
+    text: o.text,
+    sort_order: o.sort_order ?? i,
+  }))
+  if (questionType === "certo_errado" && opts.length === 0) {
+    opts = [
+      { label: "Certo", text: "Certo", sort_order: 0 },
+      { label: "Errado", text: "Errado", sort_order: 1 },
+    ]
+  }
+  return opts
+}
+
+export async function loadQuestionForStudy(questionId: string, userId?: string) {
   const { data: question, error } = await supabaseServer
     .from("questions")
     .select("*")
     .eq("id", questionId)
     .single()
-  if (error || !question) return { question: null, options: [] as { label: string; text: string; sort_order: number }[] }
+  if (error || !question) {
+    return { question: null, options: [] as StudyOption[] }
+  }
 
   const { data: options } = await supabaseServer
     .from("question_options")
@@ -204,7 +226,64 @@ export async function loadQuestionForStudy(questionId: string) {
     .eq("question_id", questionId)
     .order("sort_order")
 
-  return { question, options: options ?? [] }
+  let merged = { ...question }
+  let optsList = (options ?? []) as StudyOption[]
+
+  if (userId) {
+    const { data: edit } = await supabaseServer
+      .from("user_question_edits")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("question_id", questionId)
+      .maybeSingle()
+
+    if (edit) {
+      if (edit.type) merged.type = edit.type
+      if (edit.statement != null) merged.statement = edit.statement
+      if (edit.content_before != null) merged.content_before = edit.content_before
+      if (edit.content_after != null) merged.content_after = edit.content_after
+      if (edit.correct_answer != null) merged.correct_answer = edit.correct_answer
+      if (edit.options && Array.isArray(edit.options)) {
+        optsList = (edit.options as { label: string; text: string; sort_order?: number }[]).map(
+          (o, i) => ({
+            label: o.label,
+            text: o.text,
+            sort_order: o.sort_order ?? i,
+          })
+        )
+      }
+    }
+  }
+
+  return {
+    question: merged,
+    options: normalizeStudyOptions(merged.type, optsList),
+  }
+}
+
+export async function pickWrongIdsFromNotebook(
+  notebookId: string,
+  userId: string
+): Promise<string[]> {
+  const { data: attempts, error } = await supabaseServer
+    .from("question_attempts")
+    .select("question_id, is_correct, created_at")
+    .eq("user_id", userId)
+    .eq("notebook_id", notebookId)
+    .order("created_at", { ascending: false })
+
+  if (error) throw new Error(error.message)
+
+  const lastByQuestion = new Map<string, boolean>()
+  for (const a of attempts ?? []) {
+    if (!lastByQuestion.has(a.question_id)) {
+      lastByQuestion.set(a.question_id, a.is_correct)
+    }
+  }
+
+  return [...lastByQuestion.entries()]
+    .filter(([, correct]) => !correct)
+    .map(([id]) => id)
 }
 
 export async function refreshNotebookProgress(

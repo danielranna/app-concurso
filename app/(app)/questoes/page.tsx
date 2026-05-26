@@ -20,12 +20,18 @@ type Unassigned = {
   notebooks: { id: string; name: string; question_count: number }[]
 }
 
+type Ephemeral = {
+  notebook_count: number
+  notebooks: { id: string; name: string; question_count: number }[]
+}
+
 export default function QuestoesHomePage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<SubjectRow[]>([])
   const [bankTotal, setBankTotal] = useState(0)
   const [unassigned, setUnassigned] = useState<Unassigned | null>(null)
+  const [ephemeral, setEphemeral] = useState<Ephemeral | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -40,6 +46,7 @@ export default function QuestoesHomePage() {
           setSubjects(d.subjects ?? [])
           setBankTotal(d.bank_total ?? 0)
           setUnassigned(d.unassigned ?? null)
+          setEphemeral(d.ephemeral ?? null)
         })
     })
   }, [router])
@@ -80,6 +87,26 @@ export default function QuestoesHomePage() {
           </Link>
         </div>
       </div>
+      {(ephemeral?.notebook_count ?? 0) > 0 && (
+        <div className="mb-6 rounded-xl border border-violet-200 bg-violet-50 p-4">
+          <p className="font-semibold text-violet-900">Cadernos do plano (não salvos)</p>
+          <p className="mt-1 text-sm text-violet-800">
+            Gerados pelo Coach — salve na biblioteca para organizar por matéria.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {ephemeral!.notebooks.map((nb) => (
+              <li key={nb.id}>
+                <Link
+                  href={`/questoes/cadernos/${nb.id}`}
+                  className="text-sm font-medium text-violet-700 underline hover:text-violet-900"
+                >
+                  {nb.name} ({nb.question_count} questões)
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(unassigned?.notebook_count ?? 0) > 0 && (
         <Link
           href="/questoes/importados"

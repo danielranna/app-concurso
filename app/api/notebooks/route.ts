@@ -22,6 +22,11 @@ export async function GET(req: Request) {
   else if (subject_id) query = query.eq("subject_id", subject_id)
   if (folder_id) query = query.eq("folder_id", folder_id)
   if (searchParams.get("root_only") === "1") query = query.is("folder_id", null)
+  if (searchParams.get("ephemeral") === "1") {
+    query = query.eq("library_saved", false)
+  } else if (searchParams.get("include_ephemeral") !== "1") {
+    query = query.eq("library_saved", true)
+  }
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

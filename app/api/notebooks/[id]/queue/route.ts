@@ -81,7 +81,7 @@ export async function GET(
       null
 
     const { question, options } = current
-      ? await loadQuestionForStudy(current.question_id)
+      ? await loadQuestionForStudy(current.question_id, user_id)
       : { question: null, options: [] }
 
     const position =

@@ -62,6 +62,8 @@ export default function CoachInsightsPage() {
   const [recomputingBrain, setRecomputingBrain] = useState(false)
   const [queueItems, setQueueItems] = useState<QueueItem[]>([])
   const [loadingQueue, setLoadingQueue] = useState(false)
+  const [explainMode, setExplainMode] = useState<"global" | "on" | "off">("global")
+  const [savingExplain, setSavingExplain] = useState(false)
 
   function reload(uid: string) {
     setLoading(true)
@@ -79,8 +81,11 @@ export default function CoachInsightsPage() {
       fetch(`/api/coach/strategic-queue?user_id=${uid}&subject_id=${subjectId}`).then(
         (r) => r.json()
       ),
+      fetch(
+        `/api/coach/preferences/subject?user_id=${uid}&subject_id=${subjectId}`
+      ).then((r) => r.json()),
     ])
-      .then(([subs, sig, reps, brainRes, queueRes]) => {
+      .then(([subs, sig, reps, brainRes, queueRes, explainRes]) => {
         const sub = (subs ?? []).find((s: { id: string }) => s.id === subjectId)
         setSubjectName(sub?.name ?? "Matéria")
         setSignals(sig.signals ?? [])
@@ -114,8 +119,33 @@ export default function CoachInsightsPage() {
             })
           )
         )
+        if (explainRes?.explain_wrong === null || explainRes?.explain_wrong === undefined) {
+          setExplainMode("global")
+        } else if (explainRes.explain_wrong) {
+          setExplainMode("on")
+        } else {
+          setExplainMode("off")
+        }
       })
       .finally(() => setLoading(false))
+  }
+
+  async function saveExplainMode(mode: "global" | "on" | "off") {
+    if (!userId) return
+    setSavingExplain(true)
+    setExplainMode(mode)
+    const explain_wrong =
+      mode === "global" ? null : mode === "on"
+    await fetch("/api/coach/preferences/subject", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        subject_id: subjectId,
+        explain_wrong,
+      }),
+    })
+    setSavingExplain(false)
   }
 
   useEffect(() => {
@@ -244,6 +274,39 @@ export default function CoachInsightsPage() {
           Ações a partir da fila
         </button>
       </div>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Relatório de caderno (Professor / IA)
+        </h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Controla se questões erradas desta matéria recebem explicação no relatório. O padrão
+          global está em Configurações.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(
+            [
+              ["global", "Usar padrão global"],
+              ["on", "Explicar erradas"],
+              ["off", "Não explicar"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              disabled={savingExplain}
+              onClick={() => saveExplainMode(mode)}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${
+                explainMode === mode
+                  ? "border-violet-600 bg-violet-50 text-violet-900"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="rounded-xl border border-violet-200 bg-white p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

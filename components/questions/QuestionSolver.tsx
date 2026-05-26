@@ -33,6 +33,8 @@ type Question = {
   tec_topic: string | null
   statement: string
   correct_answer: string
+  content_before?: string | null
+  content_after?: string | null
 }
 
 type Option = { label: string; text: string }
@@ -65,6 +67,11 @@ type Props = {
     outcome_category?: string
   }>
   mapping?: { subject_id: string; topic_id: string } | null
+  onCreateWrongNotebook?: () => Promise<void>
+  creatingWrongNotebook?: boolean
+  completedNotebookName?: string
+  onEditQuestion?: () => void
+  refreshKey?: number
 }
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -82,6 +89,24 @@ const OUTCOME_LABELS: Record<string, string> = {
   conteudo_desconhecido: "Conteúdo desconhecido",
 }
 
+function QuestionContentBlock({ content }: { content: string }) {
+  const trimmed = content.trim()
+  if (!trimmed) return null
+  const isImage =
+    /^https?:\/\/.+\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(trimmed) ||
+    trimmed.includes("/storage/v1/object/")
+  if (isImage) {
+    return (
+      <img
+        src={trimmed}
+        alt=""
+        className="my-3 max-h-96 w-full rounded-lg border object-contain"
+      />
+    )
+  }
+  return <div className="whitespace-pre-wrap text-slate-700">{content}</div>
+}
+
 export default function QuestionSolver({
   userId,
   mode,
@@ -90,6 +115,11 @@ export default function QuestionSolver({
   fetchQueue,
   submitAnswer,
   mapping,
+  onCreateWrongNotebook,
+  creatingWrongNotebook,
+  completedNotebookName,
+  onEditQuestion,
+  refreshKey,
 }: Props) {
   const scopeId = mode === "notebook" ? notebookId! : studySessionId!
   const scopeKey = draftScopeKey(mode, scopeId)
@@ -183,17 +213,12 @@ export default function QuestionSolver({
       const data = await fetchQueue(opts)
       setCurrent(data.current)
       setQuestion(data.question)
-      let optsList = (data.options ?? []).map((o: { label: string; text: string }) => ({
-        label: o.label,
-        text: o.text,
-      }))
-      if (data.question?.type === "certo_errado" && optsList.length === 0) {
-        optsList = [
-          { label: "Certo", text: "Certo" },
-          { label: "Errado", text: "Errado" },
-        ]
-      }
-      setOptions(optsList)
+      setOptions(
+        (data.options ?? []).map((o: { label: string; text: string }) => ({
+          label: o.label,
+          text: o.text,
+        }))
+      )
       setStats(data.stats)
       setPosition(data.position ?? 1)
 
@@ -218,7 +243,7 @@ export default function QuestionSolver({
       }
       setLoading(false)
     },
-    [fetchQueue, scopeKey, applyDraft, saveCurrentDraft]
+    [fetchQueue, scopeKey, applyDraft, saveCurrentDraft, refreshKey]
   )
 
   const navigate = useCallback(
@@ -234,6 +259,11 @@ export default function QuestionSolver({
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
   }, [])
+
+  useEffect(() => {
+    if (refreshKey != null && refreshKey > 0) load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   useEffect(() => {
     if (result) return
@@ -396,19 +426,46 @@ export default function QuestionSolver({
   }
 
   if (!question || !current) {
+    const wrongN = stats.wrong
     return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-8 text-center">
+      <div className="mx-auto max-w-2xl space-y-4 rounded-xl border border-green-200 bg-green-50 p-8 text-center">
         <p className="text-lg font-medium text-green-800">Caderno / sessão concluído!</p>
-        {mode === "notebook" && notebookId && (
-          <Link href="/questoes/importados" className="mt-4 inline-block text-blue-600">
-            Voltar aos cadernos
-          </Link>
+        {completedNotebookName && (
+          <p className="text-sm text-green-700">{completedNotebookName}</p>
         )}
-        {mode === "study" && studySessionId && (
-          <Link href="/questoes/semana" className="mt-4 inline-block text-blue-600">
-            Voltar
-          </Link>
-        )}
+        <p className="text-sm text-green-700">
+          {stats.correct} acertos · {stats.wrong} erros de {stats.total} questões
+        </p>
+        <div className="flex flex-wrap justify-center gap-3 pt-2">
+          {mode === "notebook" && onCreateWrongNotebook && wrongN > 0 && (
+            <button
+              type="button"
+              onClick={() => onCreateWrongNotebook()}
+              disabled={creatingWrongNotebook}
+              className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {creatingWrongNotebook
+                ? "Criando..."
+                : `Criar caderno das erradas (${wrongN})`}
+            </button>
+          )}
+          {mode === "notebook" && notebookId && (
+            <Link
+              href="/questoes"
+              className="rounded-lg border border-green-300 bg-white px-5 py-2.5 text-sm text-green-800 hover:bg-green-100"
+            >
+              Voltar aos cadernos
+            </Link>
+          )}
+          {mode === "study" && studySessionId && (
+            <Link
+              href="/questoes/semana"
+              className="rounded-lg border border-green-300 bg-white px-5 py-2.5 text-sm text-green-800 hover:bg-green-100"
+            >
+              Voltar
+            </Link>
+          )}
+        </div>
       </div>
     )
   }
@@ -419,59 +476,96 @@ export default function QuestionSolver({
     .join(" - ")
 
   return (
-    <div className="max-w-3xl">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm text-slate-600">
-          Questão {displayIdx} de {stats.total} ({stats.resolved} resolvidas, {stats.correct}{" "}
-          acertos e {stats.wrong} erros)
+    <div className="mx-auto w-full max-w-3xl space-y-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium text-slate-700">
+            Questão {displayIdx} de {stats.total}
+          </p>
+          {timerTick >= 0 && (
+            <QuestionTimerDisplay
+              ms={questionMs + (locked ? 0 : Date.now() - questionStartedAt.current)}
+            />
+          )}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {stats.resolved} resolvidas · {stats.correct} acertos · {stats.wrong} erros
         </p>
-        {timerTick >= 0 && (
-          <QuestionTimerDisplay
-            ms={questionMs + (locked ? 0 : Date.now() - questionStartedAt.current)}
-          />
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Informações
+        </p>
+        <p className="mt-2 text-sm text-slate-700">
+          <span className="text-slate-500">Matéria:</span> {question.tec_subject}
+          <br />
+          <span className="text-slate-500">Assunto:</span> {question.tec_topic}
+        </p>
+        <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
+          <a
+            href={question.tec_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-blue-600 hover:underline"
+          >
+            #{question.tec_id}
+          </a>
+          {meta ? ` · ${meta}` : ""}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowPerf(true)}
+            className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+          >
+            <BarChart2 className="h-4 w-4" /> Desempenho
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowError(true)}
+            className="flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+          >
+            <Flag className="h-4 w-4" /> Adicionar erro
+          </button>
+          {onEditQuestion && (
+            <button
+              type="button"
+              onClick={onEditQuestion}
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+            >
+              Editar questão
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Enunciado
+        </p>
+        {question.content_before && (
+          <div className="mt-3">
+            <QuestionContentBlock content={question.content_before} />
+          </div>
         )}
-      </div>
+        <div className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800">
+          {question.statement}
+        </div>
+        {question.content_after && (
+          <div className="mt-3">
+            <QuestionContentBlock content={question.content_after} />
+          </div>
+        )}
+      </section>
 
-      <p className="mt-3 text-sm">
-        <span className="text-slate-500">Matéria:</span> {question.tec_subject}
-        {" · "}
-        <span className="text-slate-500">Assunto:</span> {question.tec_topic}
-      </p>
-      <p className="mt-2 rounded bg-slate-100 px-3 py-1 text-xs text-slate-600">
-        <a
-          href={question.tec_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline"
-        >
-          #{question.tec_id}
-        </a>
-        {" · "}
-        {meta}
-      </p>
-
-      <div className="mt-4 flex gap-2">
-        <button
-          type="button"
-          onClick={() => setShowPerf(true)}
-          className="flex items-center gap-1 rounded border px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-        >
-          <BarChart2 className="h-4 w-4" /> Desempenho
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowError(true)}
-          className="flex items-center gap-1 rounded border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-        >
-          <Flag className="h-4 w-4" /> Adicionar erro
-        </button>
-      </div>
-
-      <div className="mt-6 whitespace-pre-wrap text-slate-800">{question.statement}</div>
-
-      <div className="mt-6">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Alternativas
+        </p>
         <QuestionOptions
           options={options}
+          questionType={question.type}
           selected={selected}
           eliminated={eliminated}
           locked={locked}
@@ -479,65 +573,64 @@ export default function QuestionSolver({
           onSelect={handleSelect}
           onToggleEliminated={handleToggleEliminated}
         />
-      </div>
+      </section>
 
-      <div className="mt-5">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <ConfidenceToggles
           value={confidence}
           disabled={locked}
           onChange={handleConfidenceChange}
         />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={handleResolve}
-          disabled={!selected || locked || resolving}
-          className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {resolving ? "Resolvendo..." : "Resolver questão"}
-        </button>
-        {resolvableCount >= 2 && !locked && (
+        <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={handleResolveAll}
-            disabled={batchResolving}
-            className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm disabled:opacity-50"
+            onClick={handleResolve}
+            disabled={!selected || locked || resolving}
+            className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {batchResolving
-              ? "Resolvendo..."
-              : `Marcar ${resolvableCount} como resolvidas`}
+            {resolving ? "Resolvendo..." : "Resolver questão"}
           </button>
-        )}
-      </div>
-
-      {result && (
-        <div
-          className={`mt-4 rounded-lg p-4 ${result.is_correct ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
-        >
-          {result.is_correct ? "Você acertou!" : `Você errou! Gabarito: ${result.correct_answer}.`}
-          {result.outcome_category && (
-            <p className="mt-1 text-sm opacity-90">
-              {OUTCOME_LABELS[result.outcome_category] ?? result.outcome_category}
-            </p>
+          {resolvableCount >= 2 && !locked && (
+            <button
+              type="button"
+              onClick={handleResolveAll}
+              disabled={batchResolving}
+              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm disabled:opacity-50"
+            >
+              {batchResolving
+                ? "Resolvendo..."
+                : `Marcar ${resolvableCount} como resolvidas`}
+            </button>
           )}
-          <a
-            href={result.tec_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-1 text-blue-600 underline"
-          >
-            Ver no TEC <ExternalLink className="h-3 w-3" />
-          </a>
         </div>
-      )}
 
-      <div className="mt-6">
-        <StudyNavBar onNavigate={navigate} />
-      </div>
+        {result && (
+          <div
+            className={`mt-4 rounded-lg p-4 ${result.is_correct ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
+          >
+            {result.is_correct
+              ? "Você acertou!"
+              : `Você errou! Gabarito: ${result.correct_answer}.`}
+            {result.outcome_category && (
+              <p className="mt-1 text-sm opacity-90">
+                {OUTCOME_LABELS[result.outcome_category] ?? result.outcome_category}
+              </p>
+            )}
+            <a
+              href={result.tec_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-blue-600 underline"
+            >
+              Ver no TEC <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
+      </section>
 
-      <div className="mt-4">
+      <StudyNavBar onNavigate={navigate} />
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <QuickNote questionId={question.id} userId={userId} />
       </div>
 

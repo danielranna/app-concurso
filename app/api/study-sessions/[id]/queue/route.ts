@@ -75,7 +75,7 @@ export async function GET(
     fullQueue.find((q) => q.question_id === currentId) ?? pending[0] ?? null
 
   const { question, options } = current
-    ? await loadQuestionForStudy(current.question_id)
+    ? await loadQuestionForStudy(current.question_id, user_id)
     : { question: null, options: [] }
 
   const { data: attempts } = await supabaseServer

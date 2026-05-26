@@ -199,7 +199,9 @@ export async function generateDailyStudyPlan(
         120
       ),
       primarySubjectId,
-      allQuestionIds
+      allQuestionIds,
+      null,
+      false
     )
 
     const topReason = pickedSubjects

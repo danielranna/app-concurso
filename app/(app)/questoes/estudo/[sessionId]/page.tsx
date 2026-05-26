@@ -66,13 +66,7 @@ export default function EstudoCombinadoPage() {
       const data = await res.json()
       setSessionName(data.session?.name ?? "")
       setChildProgress(data.child_progress ?? [])
-      let options = data.options ?? []
-      if (data.question?.type === "certo_errado" && options.length === 0) {
-        options = [
-          { label: "Certo", text: "Certo" },
-          { label: "Errado", text: "Errado" },
-        ]
-      }
+      const options = data.options ?? []
       if (data.question && userId) {
         const mParams = new URLSearchParams({
           user_id: userId,
@@ -134,7 +128,7 @@ export default function EstudoCombinadoPage() {
   if (!userId) return <p className="p-6">Carregando...</p>
 
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-4xl px-4 py-6">
       <Link
         href="/questoes/semana"
         className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600"
