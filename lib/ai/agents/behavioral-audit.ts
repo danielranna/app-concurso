@@ -2,7 +2,9 @@ import type {
   BehavioralAudit,
   BehavioralAuditQuestionItem,
   ErrorTaxonomy,
+  FeedbackSource,
   PerQuestionError,
+  TeacherCitation,
 } from "../../coach-types"
 import { runAgent } from "../run-agent"
 import { countReportLlmRunsToday } from "../report-helpers"
@@ -12,6 +14,10 @@ import {
   type NotebookAuditPayload,
   type NotebookAuditQuestion,
 } from "../notebook-audit-payload"
+import {
+  buildTeacherQueryForError,
+  retrieveForTeacher,
+} from "../teacher-retrieval"
 import { supabaseServer } from "../../supabase-server"
 
 const VALID_TAXONOMIES = new Set<string>([
@@ -23,34 +29,97 @@ const VALID_TAXONOMIES = new Set<string>([
   "nao_aplicavel",
 ])
 
-const SYSTEM = `Você é o auditor comportamental de um caderno de questões de concurso (Fase 2).
-Analise CADA questão das zonas vermelha e amarela com precisão cirúrgica.
+const CHUNKS_PER_QUESTION = 4
+const CHUNK_EXCERPT_MAX = 400
+
+const SYSTEM = `Você é o tutor unificado do relatório de caderno (explicação por questão).
+Para CADA questão das zonas vermelha e amarela você recebe: enunciado, marcada vs gabarito, nota do aluno e trechos RAG dos PDFs (material_chunks).
 
 REGRAS OBRIGATÓRIAS:
-1. Se existir user_note, o feedback DEVE começar corrigindo a lógica expressa na nota do aluno (cite o equívoco).
-2. Proibido texto genérico de apostila quando a nota ou o enunciado revelam o erro específico.
-3. Mencione conceitos exatos do enunciado (ex.: supremacia/indisponibilidade, não só "princípios genéricos").
-4. Formato: explique por que Marcada vs Gabarito; se acertou por chute ou lógica errada, diga explicitamente.
-5. Português (BR), tom de professor de concurso, técnico e direto.
+1. Se existir user_note, o feedback DEVE começar corrigindo a lógica da nota (cite o equívoco).
+2. Proibido texto genérico quando a nota ou o enunciado revelam o erro específico.
+3. Use material_chunks quando cobrirem o ponto; cite no JSON citations com document_title, excerpt, page.
+4. source por questão:
+   - "material": feedback sustentado principalmente nos trechos fornecidos
+   - "mixed": trechos ajudam mas você complementou com raciocínio
+   - "ai_generated": sem trechos úteis ou insuficientes
+5. Marcada vs Gabarito sempre claro; se acertou com lógica errada ou chute, diga.
+6. Português (BR), tom de professor de concurso.
 
 Responda JSON:
 {
   "red_zone": [{
     "question_index": 1,
-    "feedback": "texto detalhado",
-    "misconception": "equívoco em 1 frase",
-    "error_taxonomy": "falta_compreensao|falta_memorizacao|pegadinha_interpretacao|desatencao|calculo_procedimento"
+    "feedback": "",
+    "misconception": "",
+    "error_taxonomy": "falta_compreensao|...",
+    "source": "material|ai_generated|mixed",
+    "citations": [{"document_title":"","excerpt":"","page":null}]
   }],
-  "yellow_zone": [{ "question_index": 2, "feedback": "...", "misconception": "..." }],
-  "green_zone": {
-    "mastered_indexes": [1, 3, 5],
-    "theory_balance": "parágrafo sobre domínio consolidado citando questões Qn quando relevante"
-  }
+  "yellow_zone": [...],
+  "green_zone": { "mastered_indexes": [], "theory_balance": "" }
 }
 
 Inclua TODAS as questões red e yellow do input (mesmos question_index).`
 
-function toLlmItem(q: NotebookAuditQuestion) {
+type MaterialChunk = {
+  document_title: string
+  excerpt: string
+  page?: number | null
+}
+
+function buildRetrievalQuery(q: NotebookAuditQuestion): string {
+  const base = buildTeacherQueryForError({
+    tec_topic: q.tec_topic,
+    statementSnippet: q.statement_excerpt,
+  })
+  const note = q.user_note?.trim()
+  return note ? `${base} ${note.slice(0, 120)}` : base
+}
+
+function chunksToMaterial(chunks: Awaited<ReturnType<typeof retrieveForTeacher>>): MaterialChunk[] {
+  return chunks.slice(0, CHUNKS_PER_QUESTION).map((c) => ({
+    document_title: c.title,
+    excerpt: c.content.slice(0, CHUNK_EXCERPT_MAX),
+    page: c.page ?? null,
+  }))
+}
+
+function chunksToCitations(chunks: MaterialChunk[]): TeacherCitation[] {
+  return chunks.map((c) => ({
+    document_title: c.document_title,
+    excerpt: c.excerpt,
+    page: c.page,
+  }))
+}
+
+async function prefetchMaterialByQuestion(
+  userId: string,
+  subjectId: string | null,
+  questions: NotebookAuditQuestion[]
+): Promise<Map<number, MaterialChunk[]>> {
+  const map = new Map<number, MaterialChunk[]>()
+  if (!subjectId || !questions.length) return map
+
+  await Promise.all(
+    questions.map(async (q) => {
+      const chunks = await retrieveForTeacher(
+        userId,
+        subjectId,
+        buildRetrievalQuery(q),
+        CHUNKS_PER_QUESTION
+      )
+      map.set(q.question_index, chunksToMaterial(chunks))
+    })
+  )
+
+  return map
+}
+
+function toLlmItem(
+  q: NotebookAuditQuestion,
+  materialChunks: MaterialChunk[]
+) {
   return {
     question_index: q.question_index,
     question_id: q.question_id,
@@ -64,10 +133,19 @@ function toLlmItem(q: NotebookAuditQuestion) {
     confidence_level: q.confidence_level,
     user_note: q.user_note || null,
     zone: q.zone,
+    material_chunks: materialChunks,
   }
 }
 
-function buildFallbackItem(q: NotebookAuditQuestion): BehavioralAuditQuestionItem {
+function parseSource(raw: string | undefined): FeedbackSource {
+  if (raw === "material" || raw === "mixed" || raw === "ai_generated") return raw
+  return "ai_generated"
+}
+
+function buildFallbackItem(
+  q: NotebookAuditQuestion,
+  materialChunks: MaterialChunk[] = []
+): BehavioralAuditQuestionItem {
   const marked = q.selected_answer
   const key = q.correct_answer
   let feedback = q.is_correct
@@ -78,6 +156,14 @@ function buildFallbackItem(q: NotebookAuditQuestion): BehavioralAuditQuestionIte
     feedback += ` Sua nota: "${q.user_note}". Revise o conceito no enunciado e confronte com o gabarito.`
   } else {
     feedback += ` Revise o trecho central do enunciado sobre ${q.tec_topic}.`
+  }
+
+  const citations = chunksToCitations(materialChunks)
+  const source: FeedbackSource =
+    citations.length > 0 ? "material" : "ai_generated"
+
+  if (citations.length > 0) {
+    feedback += ` Consulte o material indicado abaixo.`
   }
 
   return {
@@ -91,6 +177,8 @@ function buildFallbackItem(q: NotebookAuditQuestion): BehavioralAuditQuestionIte
     outcome_category: q.outcome_category,
     confidence_level: q.confidence_level,
     feedback,
+    source,
+    citations: citations.length > 0 ? citations : undefined,
   }
 }
 
@@ -99,7 +187,24 @@ function parseTaxonomy(raw: string | undefined): ErrorTaxonomy | undefined {
   return raw as ErrorTaxonomy
 }
 
-export function mergeBehavioralAuditIntoErrors(
+function parseCitations(
+  raw: { document_title?: string; excerpt?: string; page?: number | null }[] | undefined
+): TeacherCitation[] | undefined {
+  if (!raw?.length) return undefined
+  const list = raw
+    .filter((c) => c.document_title && c.excerpt)
+    .map((c) => ({
+      document_title: String(c.document_title),
+      excerpt: String(c.excerpt).slice(0, 500),
+      page: c.page ?? null,
+    }))
+  return list.length ? list : undefined
+}
+
+/** @deprecated Use mergeUnifiedExplainIntoErrors */
+export const mergeBehavioralAuditIntoErrors = mergeUnifiedExplainIntoErrors
+
+export function mergeUnifiedExplainIntoErrors(
   perQuestionErrors: PerQuestionError[],
   audit: BehavioralAudit,
   payload: NotebookAuditPayload
@@ -110,41 +215,39 @@ export function mergeBehavioralAuditIntoErrors(
   for (const item of auditItems) {
     const q = payload.questions.find((x) => x.question_id === item.question_id)
     const zone = q?.zone ?? "red"
-    const existing = byQid.get(item.question_id)
+    const source = item.source ?? "ai_generated"
 
+    const patch: Partial<PerQuestionError> = {
+      feedback_detailed: item.feedback,
+      specific_mistake: item.misconception,
+      misconception: item.misconception,
+      question_index: item.question_index,
+      header_label: item.header_label,
+      statement_excerpt: item.statement_excerpt,
+      marked_answer: item.marked,
+      correct_answer: item.answer_key,
+      user_note: item.user_note,
+      zone,
+      outcome_category: item.outcome_category,
+      confidence_level: item.confidence_level,
+      feedback_source: source,
+      explanation_source: source,
+      explanation_citations: item.citations,
+      explanation: undefined,
+    }
+    if (item.error_taxonomy) patch.error_taxonomy = item.error_taxonomy
+
+    const existing = byQid.get(item.question_id)
     if (existing) {
-      existing.feedback_detailed = item.feedback
-      existing.specific_mistake = item.misconception ?? existing.specific_mistake
-      existing.misconception = item.misconception
-      existing.question_index = item.question_index
-      existing.header_label = item.header_label
-      existing.statement_excerpt = item.statement_excerpt
-      existing.marked_answer = item.marked
-      existing.correct_answer = item.answer_key
-      existing.user_note = item.user_note
-      existing.zone = zone
-      existing.outcome_category = item.outcome_category
-      existing.confidence_level = item.confidence_level
-      if (item.error_taxonomy) existing.error_taxonomy = item.error_taxonomy
+      Object.assign(existing, patch)
     } else if (zone === "yellow") {
       byQid.set(item.question_id, {
         question_id: item.question_id,
         tec_id: q?.tec_id,
         tec_topic: q?.tec_topic,
         error_taxonomy: item.error_taxonomy ?? "pegadinha_interpretacao",
-        feedback_detailed: item.feedback,
-        specific_mistake: item.misconception,
-        misconception: item.misconception,
-        question_index: item.question_index,
-        header_label: item.header_label,
-        statement_excerpt: item.statement_excerpt,
-        marked_answer: item.marked,
-        correct_answer: item.answer_key,
-        user_note: item.user_note,
-        zone: "yellow",
-        outcome_category: item.outcome_category,
-        confidence_level: item.confidence_level,
-      })
+        ...patch,
+      } as PerQuestionError)
     }
   }
 
@@ -177,7 +280,9 @@ export async function persistAuditInsightsToAttempts(
           misconception: item.misconception,
           specific_mistake: item.misconception ?? prev.specific_mistake,
           feedback_detailed: item.feedback,
-          behavioral_audit: true,
+          feedback_source: item.source,
+          explanation_citations: item.citations,
+          unified_explain: true,
         },
         ...(item.error_taxonomy ? { error_taxonomy: item.error_taxonomy } : {}),
       })
@@ -194,6 +299,15 @@ export type RunBehavioralAuditResult = {
   costUsd: number
 }
 
+type LlmZoneItem = {
+  question_index: number
+  feedback: string
+  misconception?: string
+  error_taxonomy?: string
+  source?: string
+  citations?: { document_title?: string; excerpt?: string; page?: number | null }[]
+}
+
 export async function runBehavioralAuditAgent(params: {
   userId: string
   subjectId: string | null
@@ -203,11 +317,22 @@ export async function runBehavioralAuditAgent(params: {
   const redQs = params.payload.questions.filter((q) => q.zone === "red")
   const yellowQs = params.payload.questions.filter((q) => q.zone === "yellow")
   const greenQs = params.payload.questions.filter((q) => q.zone === "green")
+  const explainQs = [...redQs, ...yellowQs]
+
+  const materialByIndex = await prefetchMaterialByQuestion(
+    params.userId,
+    params.subjectId,
+    explainQs
+  )
 
   const baseAudit: BehavioralAudit = {
     performance_summary: params.payload.performance_summary,
-    red_zone: redQs.map(buildFallbackItem),
-    yellow_zone: yellowQs.map(buildFallbackItem),
+    red_zone: redQs.map((q) =>
+      buildFallbackItem(q, materialByIndex.get(q.question_index) ?? [])
+    ),
+    yellow_zone: yellowQs.map((q) =>
+      buildFallbackItem(q, materialByIndex.get(q.question_index) ?? [])
+    ),
     green_zone: {
       mastered_indexes: greenQs.map((q) => q.question_index),
       theory_balance:
@@ -219,7 +344,7 @@ export async function runBehavioralAuditAgent(params: {
     model_used: "rule-based",
   }
 
-  if (params.skipLlm || (redQs.length === 0 && yellowQs.length === 0)) {
+  if (params.skipLlm || explainQs.length === 0) {
     return {
       audit: baseAudit,
       modelUsed: "rule-based",
@@ -247,8 +372,12 @@ export async function runBehavioralAuditAgent(params: {
     notebook_name: params.payload.notebook_name,
     subject_name: params.payload.subject_name,
     performance_summary: params.payload.performance_summary,
-    red_zone: redQs.map(toLlmItem),
-    yellow_zone: yellowQs.map(toLlmItem),
+    red_zone: redQs.map((q) =>
+      toLlmItem(q, materialByIndex.get(q.question_index) ?? [])
+    ),
+    yellow_zone: yellowQs.map((q) =>
+      toLlmItem(q, materialByIndex.get(q.question_index) ?? [])
+    ),
     green_zone_summary: greenQs.map((q) => ({
       question_index: q.question_index,
       tec_topic: q.tec_topic,
@@ -260,13 +389,13 @@ export async function runBehavioralAuditAgent(params: {
     userId: params.userId,
     subjectId: params.subjectId,
     systemPrompt: SYSTEM,
-    userContent: `Auditoria comportamental:\n${JSON.stringify(input)}`,
+    userContent: `Explicação unificada (RAG + auditoria):\n${JSON.stringify(input)}`,
     jsonMode: true,
     maxTokens: 6000,
     model: "gpt-4o",
     metadata: {
       notebook_id: params.payload.notebook_id,
-      phase: "behavioral_audit",
+      phase: "unified_explain",
     },
   })
 
@@ -283,18 +412,8 @@ export async function runBehavioralAuditAgent(params: {
 
   try {
     const parsed = JSON.parse(result.text) as {
-      red_zone?: {
-        question_index: number
-        feedback: string
-        misconception?: string
-        error_taxonomy?: string
-      }[]
-      yellow_zone?: {
-        question_index: number
-        feedback: string
-        misconception?: string
-        error_taxonomy?: string
-      }[]
+      red_zone?: LlmZoneItem[]
+      yellow_zone?: LlmZoneItem[]
       green_zone?: { mastered_indexes?: number[]; theory_balance?: string }
     }
 
@@ -303,7 +422,7 @@ export async function runBehavioralAuditAgent(params: {
     )
 
     function mapItems(
-      raw: typeof parsed.red_zone,
+      raw: LlmZoneItem[] | undefined,
       zone: "red" | "yellow"
     ): BehavioralAuditQuestionItem[] {
       const source = zone === "red" ? redQs : yellowQs
@@ -311,8 +430,18 @@ export async function runBehavioralAuditAgent(params: {
 
       return source.map((q) => {
         const llm = byIndex.get(q.question_index)
-        const fallback = buildFallbackItem(q)
+        const fallback = buildFallbackItem(
+          q,
+          materialByIndex.get(q.question_index) ?? []
+        )
         if (!llm) return fallback
+
+        const llmCitations = parseCitations(llm.citations)
+        const sourceParsed = parseSource(llm.source)
+        const citations =
+          llmCitations ??
+          (sourceParsed !== "ai_generated" ? fallback.citations : undefined)
+
         return {
           question_index: q.question_index,
           question_id: q.question_id,
@@ -326,6 +455,8 @@ export async function runBehavioralAuditAgent(params: {
           feedback: llm.feedback?.trim() || fallback.feedback,
           misconception: llm.misconception,
           error_taxonomy: parseTaxonomy(llm.error_taxonomy),
+          source: sourceParsed,
+          citations,
         }
       })
     }

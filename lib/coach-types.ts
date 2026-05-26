@@ -68,6 +68,8 @@ export type TeacherCitation = {
   page?: number | null
 }
 
+export type FeedbackSource = "material" | "ai_generated" | "mixed"
+
 export type AuditZone = "red" | "yellow" | "green"
 
 export type PerQuestionError = {
@@ -79,8 +81,10 @@ export type PerQuestionError = {
   priority_score?: number
   specific_mistake?: string
   misconception?: string
+  /** @deprecated Relatório usa só feedback_detailed */
   explanation?: string
-  explanation_source?: "material" | "ai_generated"
+  feedback_source?: FeedbackSource
+  explanation_source?: FeedbackSource
   explanation_citations?: TeacherCitation[]
   topic_explanation_key?: string
   topic_group_size?: number
@@ -111,6 +115,8 @@ export type BehavioralAuditQuestionItem = {
   feedback: string
   misconception?: string
   error_taxonomy?: ErrorTaxonomy
+  source?: FeedbackSource
+  citations?: TeacherCitation[]
 }
 
 export type BehavioralAudit = {

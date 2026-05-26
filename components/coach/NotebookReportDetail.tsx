@@ -4,6 +4,7 @@ import Link from "next/link"
 import ReportSourceBadge from "@/components/coach/ReportSourceBadge"
 import type {
   BehavioralAuditQuestionItem,
+  FeedbackSource,
   NotebookReportStructured,
   PerQuestionError,
 } from "@/lib/coach-types"
@@ -43,6 +44,18 @@ function zoneBadgeClass(zone?: string) {
   return "bg-red-100 text-red-800"
 }
 
+function sourceBadgeLabel(source?: FeedbackSource) {
+  if (source === "material") return "Material"
+  if (source === "mixed") return "Material + IA"
+  return "IA"
+}
+
+function sourceBadgeClass(source?: FeedbackSource) {
+  if (source === "material") return "bg-emerald-100 text-emerald-900"
+  if (source === "mixed") return "bg-violet-100 text-violet-900"
+  return "bg-slate-200 text-slate-700"
+}
+
 function QuestionAuditCard({
   eq,
   report,
@@ -63,7 +76,14 @@ function QuestionAuditCard({
   const marked = perQ?.marked_answer ?? auditItem?.marked
   const key = perQ?.correct_answer ?? auditItem?.answer_key
   const note = perQ?.user_note ?? auditItem?.user_note
-  const feedback = perQ?.feedback_detailed ?? auditItem?.feedback
+  const feedback =
+    perQ?.feedback_detailed ?? perQ?.explanation ?? auditItem?.feedback
+  const feedbackSource =
+    perQ?.feedback_source ??
+    perQ?.explanation_source ??
+    auditItem?.source
+  const citations =
+    perQ?.explanation_citations ?? auditItem?.citations
   const topic = perQ?.tec_topic
   const taxonomy = perQ?.error_taxonomy
   const zone = perQ?.zone
@@ -127,22 +147,20 @@ function QuestionAuditCard({
 
       {feedback && (
         <div className="mt-2 rounded border border-slate-200 bg-white p-2">
-          <p className="text-xs font-medium text-slate-500">Auditoria (Fase 2)</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium text-slate-500">Explicação</p>
+            {feedbackSource && (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-medium ${sourceBadgeClass(feedbackSource)}`}
+              >
+                {sourceBadgeLabel(feedbackSource)}
+              </span>
+            )}
+          </div>
           <p className="mt-1 whitespace-pre-wrap text-slate-700">{feedback}</p>
-        </div>
-      )}
-
-      {perQ?.explanation && (
-        <div className="mt-2 rounded border border-slate-200 bg-white p-2">
-          <p className="text-xs font-medium text-slate-500">
-            {perQ.explanation_source === "material"
-              ? "Professor (material)"
-              : "Material de apoio"}
-          </p>
-          <p className="mt-1 text-slate-700">{perQ.explanation}</p>
-          {perQ.explanation_citations && perQ.explanation_citations.length > 0 && (
+          {citations && citations.length > 0 && (
             <ul className="mt-2 space-y-1 border-t border-slate-100 pt-2">
-              {perQ.explanation_citations.map((c, ci) => (
+              {citations.map((c, ci) => (
                 <li key={ci} className="text-xs text-slate-600">
                   <span className="font-medium text-slate-800">
                     {c.document_title}
@@ -226,8 +244,8 @@ export default function NotebookReportDetail({
             className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800 hover:bg-violet-100 disabled:opacity-60"
           >
             {regeneratingAudit
-              ? "Regenerando auditoria…"
-              : "Regenerar auditoria detalhada"}
+              ? "Regenerando explicações…"
+              : "Regenerar explicações (RAG + IA)"}
           </button>
         )}
       </header>

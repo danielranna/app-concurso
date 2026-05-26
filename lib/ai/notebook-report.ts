@@ -2,7 +2,7 @@ import { supabaseServer } from "../supabase-server"
 import type { NotebookReportStructured, PerQuestionError } from "../coach-types"
 import { classifyWrongAttempts } from "./error-classifier"
 import {
-  mergeBehavioralAuditIntoErrors,
+  mergeUnifiedExplainIntoErrors,
   runBehavioralAuditForNotebook,
 } from "./agents/behavioral-audit"
 import { runReportAgent } from "./agents/report"
@@ -346,8 +346,7 @@ export async function generateNotebookReport(
   let perQuestionErrors = await classifyWrongAttempts(
     userId,
     notebookId,
-    subjectId,
-    { explain: prefs.explain_wrong }
+    subjectId
   )
 
   const reportsToday = await countReportLlmRunsToday(userId)
@@ -359,7 +358,7 @@ export async function generateNotebookReport(
     subjectId,
     { skipLlm: skipAuditLlm }
   )
-  perQuestionErrors = mergeBehavioralAuditIntoErrors(
+  perQuestionErrors = mergeUnifiedExplainIntoErrors(
     perQuestionErrors,
     auditResult.audit,
     auditResult.payload
@@ -467,7 +466,7 @@ export async function regenerateBehavioralAuditOnly(
     { skipLlm: false }
   )
 
-  const merged = mergeBehavioralAuditIntoErrors(
+  const merged = mergeUnifiedExplainIntoErrors(
     perQuestionErrors,
     auditResult.audit,
     auditResult.payload

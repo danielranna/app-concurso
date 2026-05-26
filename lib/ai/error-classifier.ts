@@ -1,8 +1,7 @@
 import { supabaseServer } from "../supabase-server"
 import type { ErrorTaxonomy, PerQuestionError, SubjectBrainState } from "../coach-types"
 import { findTopicEntry } from "./brain-helpers"
-import { loadSubjectBrain, getEffectiveReportPreferences } from "./context-builder"
-import { applyGroupedTeacherExplanations } from "./teacher-report-explain"
+import { loadSubjectBrain } from "./context-builder"
 import { runAgent } from "./run-agent"
 import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
 import {
@@ -260,9 +259,8 @@ export async function classifyWrongAttempts(
   userId: string,
   notebookId: string,
   subjectId: string | null,
-  options?: { explain?: boolean }
+  _options?: { explain?: boolean }
 ): Promise<PerQuestionError[]> {
-  const prefs = await getEffectiveReportPreferences(userId, subjectId)
   const rows = await fetchWrongAttemptsForNotebook(userId, notebookId, subjectId)
   const brain = subjectId ? await loadSubjectBrain(userId, subjectId) : null
 
@@ -318,12 +316,6 @@ export async function classifyWrongAttempts(
     }
 
     prepared.push({ row, item, errorDetail })
-  }
-
-  if (subjectId && (options?.explain ?? prefs.explain_wrong)) {
-    await applyGroupedTeacherExplanations(userId, subjectId, prepared, {
-      explain: true,
-    })
   }
 
   return prepared.map((p) => p.item)
