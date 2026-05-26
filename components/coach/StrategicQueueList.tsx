@@ -1,6 +1,9 @@
 "use client"
 
-import { Loader2 } from "lucide-react"
+import { useState } from "react"
+import { ChevronDown, ChevronUp, Loader2 } from "lucide-react"
+import { BRAIN_STATUS_LABELS, ERROR_TAXONOMY_LABELS } from "@/lib/coach-labels"
+import type { ErrorTaxonomy } from "@/lib/coach-types"
 
 export type QueueItem = {
   id?: string
@@ -14,15 +17,27 @@ export type QueueItem = {
   reason?: string | null
 }
 
+export type BrainTopicHint = {
+  last_insight?: string
+  predominant_error?: ErrorTaxonomy
+  status?: string
+}
+
 export default function StrategicQueueList({
   items,
   loading,
   emptyMessage = "Nenhum tópico na fila. Conclua cadernos ou recalcule a fila.",
+  collapseAfter = 5,
+  brainByTopic,
 }: {
   items: QueueItem[]
   loading?: boolean
   emptyMessage?: string
+  /** Mostra só os N primeiros até o usuário expandir; 0 = sem colapso */
+  collapseAfter?: number
+  brainByTopic?: Record<string, BrainTopicHint>
 }) {
+  const [expanded, setExpanded] = useState(false)
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
@@ -37,10 +52,17 @@ export default function StrategicQueueList({
   }
 
   const maxScore = Math.max(...items.map((i) => i.priority_score), 0.01)
+  const shouldCollapse =
+    collapseAfter > 0 && items.length > collapseAfter && !expanded
+  const visibleItems = shouldCollapse ? items.slice(0, collapseAfter) : items
+  const hiddenCount = items.length - collapseAfter
 
   return (
+  <>
     <ol className="space-y-2">
-      {items.map((item, idx) => (
+      {visibleItems.map((item, idx) => {
+        const brain = brainByTopic?.[item.topic_key]
+        return (
         <li
           key={item.id ?? `${item.topic_key}-${idx}`}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2.5"
@@ -55,6 +77,24 @@ export default function StrategicQueueList({
               </span>
               {item.reason && (
                 <p className="mt-1 pl-7 text-xs text-slate-600">{item.reason}</p>
+              )}
+              {brain?.last_insight && (
+                <p className="mt-1.5 pl-7 text-xs text-emerald-800">
+                  <span className="font-medium">Equívoco detectado: </span>
+                  {brain.last_insight}
+                </p>
+              )}
+              {!brain?.last_insight && brain?.predominant_error && (
+                <p className="mt-1 pl-7 text-xs text-emerald-700">
+                  Tipo de erro:{" "}
+                  {ERROR_TAXONOMY_LABELS[brain.predominant_error] ??
+                    brain.predominant_error}
+                </p>
+              )}
+              {brain?.status && (
+                <p className="mt-0.5 pl-7 text-[10px] text-slate-500">
+                  Cérebro: {BRAIN_STATUS_LABELS[brain.status] ?? brain.status}
+                </p>
               )}
             </div>
             <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
@@ -84,7 +124,28 @@ export default function StrategicQueueList({
             )}
           </div>
         </li>
-      ))}
+        )
+      })}
     </ol>
+    {collapseAfter > 0 && items.length > collapseAfter && (
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mt-3 flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+      >
+        {expanded ? (
+          <>
+            <ChevronUp className="h-4 w-4" />
+            Mostrar só top {collapseAfter}
+          </>
+        ) : (
+          <>
+            <ChevronDown className="h-4 w-4" />
+            Ver mais {hiddenCount} tópico{hiddenCount === 1 ? "" : "s"} na fila
+          </>
+        )}
+      </button>
+    )}
+  </>
   )
 }

@@ -4,8 +4,17 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, Play, Sparkles, RefreshCw } from "lucide-react"
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Play,
+  Sparkles,
+  RefreshCw,
+} from "lucide-react"
 import StrategicQueueList, {
+  type BrainTopicHint,
   type QueueItem,
 } from "@/components/coach/StrategicQueueList"
 import type { LearningSignal, SubjectBrainState } from "@/lib/coach-types"
@@ -64,6 +73,34 @@ export default function CoachInsightsPage() {
   const [loadingQueue, setLoadingQueue] = useState(false)
   const [explainMode, setExplainMode] = useState<"global" | "on" | "off">("global")
   const [savingExplain, setSavingExplain] = useState(false)
+  const [brainTableExpanded, setBrainTableExpanded] = useState(false)
+
+  const brainByTopic: Record<string, BrainTopicHint> | undefined = brain
+    ? Object.fromEntries(
+        Object.entries(brain.topic_map).map(([key, entry]) => [
+          key,
+          {
+            last_insight: entry.last_insight,
+            predominant_error: entry.predominant_error,
+            status: entry.status,
+          },
+        ])
+      )
+    : undefined
+
+  const brainTopicRows = brain
+    ? Object.entries(brain.topic_map).sort((a, b) => {
+        const aInsight = a[1].last_insight ? 1 : 0
+        const bInsight = b[1].last_insight ? 1 : 0
+        if (bInsight !== aInsight) return bInsight - aInsight
+        return a[1].dominio - b[1].dominio
+      })
+    : []
+  const BRAIN_TABLE_TOP = 5
+  const visibleBrainRows =
+    brainTableExpanded || brainTopicRows.length <= BRAIN_TABLE_TOP
+      ? brainTopicRows
+      : brainTopicRows.slice(0, BRAIN_TABLE_TOP)
 
   function reload(uid: string) {
     setLoading(true)
@@ -327,7 +364,17 @@ export default function CoachInsightsPage() {
             Recalcular
           </button>
         </div>
-        <StrategicQueueList items={queueItems} loading={loading && !queueItems.length} />
+        <p className="mb-3 text-xs text-slate-600">
+          Top {Math.min(5, queueItems.length)} por prioridade. Quando o cérebro tiver
+          dados de relatório, cada tópico pode mostrar o equívoco específico — não só
+          “bom ou ruim”.
+        </p>
+        <StrategicQueueList
+          items={queueItems}
+          loading={loading && !queueItems.length}
+          collapseAfter={5}
+          brainByTopic={brainByTopic}
+        />
       </section>
 
       {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
@@ -384,6 +431,11 @@ export default function CoachInsightsPage() {
           {brainSummary && (
             <p className="mb-3 text-sm text-slate-700">{brainSummary}</p>
           )}
+          <p className="mb-3 text-xs text-emerald-900/80">
+            O cérebro aprende com cada relatório de caderno: registra{" "}
+            <strong>equívocos concretos</strong> (ex.: confundiu conceito X com Y) e
+            taxonomia de erro — além do status geral do tópico.
+          </p>
           <p className="mb-2 text-xs text-slate-500">
             Tendência: {brain.trend}
             {brain.danger_topics?.length
@@ -407,10 +459,7 @@ export default function CoachInsightsPage() {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(brain.topic_map)
-                  .sort((a, b) => a[1].dominio - b[1].dominio)
-                  .slice(0, 12)
-                  .map(([topicKey, entry]) => (
+                {visibleBrainRows.map(([topicKey, entry]) => (
                     <tr key={topicKey} className="border-t border-slate-100">
                       <td className="px-3 py-2 font-medium">
                         {entry.label ?? topicKey}
@@ -437,16 +486,21 @@ export default function CoachInsightsPage() {
                       <td className="px-3 py-2">
                         {Math.round(entry.retencao * 100)}%
                       </td>
-                      <td className="px-3 py-2 text-xs">
+                      <td className="max-w-xs px-3 py-2 text-xs">
                         {entry.last_insight ? (
-                          <span title={entry.last_insight}>
-                            {entry.last_insight.slice(0, 80)}
-                            {entry.last_insight.length > 80 ? "…" : ""}
+                          <span
+                            className="text-emerald-900"
+                            title={entry.last_insight}
+                          >
+                            {entry.last_insight.slice(0, 120)}
+                            {entry.last_insight.length > 120 ? "…" : ""}
                           </span>
                         ) : entry.predominant_error ? (
-                          ERROR_TAXONOMY_LABELS[entry.predominant_error]
+                          <span className="text-amber-800">
+                            {ERROR_TAXONOMY_LABELS[entry.predominant_error]}
+                          </span>
                         ) : (
-                          "—"
+                          <span className="text-slate-400">Sem detalhe ainda</span>
                         )}
                       </td>
                     </tr>
@@ -454,6 +508,26 @@ export default function CoachInsightsPage() {
               </tbody>
             </table>
           </div>
+          {brainTopicRows.length > BRAIN_TABLE_TOP && (
+            <button
+              type="button"
+              onClick={() => setBrainTableExpanded((v) => !v)}
+              className="mt-3 flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-white py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-50"
+            >
+              {brainTableExpanded ? (
+                <>
+                  <ChevronUp className="h-4 w-4" />
+                  Mostrar só top {BRAIN_TABLE_TOP}
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" />
+                  Ver mais {brainTopicRows.length - BRAIN_TABLE_TOP} tópico
+                  {brainTopicRows.length - BRAIN_TABLE_TOP === 1 ? "" : "s"} no cérebro
+                </>
+              )}
+            </button>
+          )}
         </section>
       )}
 
