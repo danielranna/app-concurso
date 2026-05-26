@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState } from "react"
+import { getImageFileFromPasteEvent } from "@/lib/clipboard-image"
 import {
   Bold,
   Italic,
@@ -406,11 +407,10 @@ export default function RichTextEditor({
           onInput={handleInput}
           onPaste={(e) => {
             if (!onImageUpload) return
-            const file = [...(e.clipboardData?.files ?? [])].find((f) =>
-              f.type.startsWith("image/")
-            )
+            const file = getImageFileFromPasteEvent(e)
             if (!file) return
             e.preventDefault()
+            e.stopPropagation()
             void onImageUpload(file).then((url) => {
               if (!url || !editorRef.current) return
               editorRef.current.focus()

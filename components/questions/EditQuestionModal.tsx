@@ -139,9 +139,9 @@ export default function EditQuestionModal({
           </button>
         </div>
         <p className="mb-4 text-xs text-slate-500">
-          Correção só para você — não altera o banco global. Use os botões{" "}
-          <strong>+</strong> para empilhar textos e imagens antes ou depois do enunciado
-          (ex.: texto → tabela → texto → imagem).
+          Correção só para você — não altera o banco global. Use <strong>+</strong> para
+          blocos de texto ou imagem. Em imagem: clique na área tracejada e{" "}
+          <strong>Ctrl+V</strong> para colar o print.
         </p>
 
         {loading ? (

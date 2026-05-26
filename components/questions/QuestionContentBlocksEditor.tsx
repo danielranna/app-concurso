@@ -1,8 +1,9 @@
 "use client"
 
 import { Fragment, useState } from "react"
-import { ImageIcon, Loader2, Plus, Trash2, Type } from "lucide-react"
+import { ImageIcon, Plus, Trash2, Type } from "lucide-react"
 import RichTextEditor from "@/components/RichTextEditor"
+import ImagePasteZone from "@/components/questions/ImagePasteZone"
 import type {
   QuestionContentBlock,
   QuestionContentBlockKind,
@@ -84,17 +85,12 @@ function BlockEditor({
   uploading,
   onUpload,
 }: BlockEditorProps) {
-  async function handleFile(file: File) {
-    const url = await onUpload(file)
-    if (url) onChange(url)
-  }
-
   if (block.kind === "image") {
     return (
       <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Imagem
+            Imagem — cole o print
           </span>
           <button
             type="button"
@@ -105,45 +101,15 @@ function BlockEditor({
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
-        {block.content.trim() ? (
-          <img
-            src={block.content}
-            alt=""
-            className="mb-2 max-h-48 w-full rounded border object-contain bg-white"
-          />
-        ) : (
-          <p className="mb-2 text-xs text-slate-500">
-            Envie um arquivo ou cole um print (Ctrl+V) nesta área.
-          </p>
-        )}
-        <div
-          className="rounded-lg border border-dashed border-slate-300 bg-white p-3"
-          onPaste={async (e) => {
-            const file = [...(e.clipboardData?.files ?? [])].find((f) =>
-              f.type.startsWith("image/")
-            )
-            if (!file) return
-            e.preventDefault()
-            await handleFile(file)
+        <ImagePasteZone
+          imageUrl={block.content.trim() || undefined}
+          uploading={uploading}
+          autoFocus={!block.content.trim()}
+          onPasteImage={async (file) => {
+            const url = await onUpload(file)
+            if (url) onChange(url)
           }}
-        >
-          <input
-            type="file"
-            accept="image/*"
-            disabled={uploading}
-            className="w-full text-xs"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) void handleFile(f)
-            }}
-          />
-          {uploading && (
-            <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Enviando…
-            </p>
-          )}
-        </div>
+        />
       </div>
     )
   }
@@ -178,7 +144,7 @@ type SectionProps = {
   title: string
   blocks: QuestionContentBlock[]
   uploadingBlockId: string | null
-  onUpload: (file: File) => Promise<string | null>
+  onUpload: (blockId: string, file: File) => Promise<string | null>
   onChange: (blocks: QuestionContentBlock[]) => void
 }
 
@@ -215,7 +181,7 @@ function BlockSection({
             onRemove={() => removeBlock(block.id)}
             uploading={uploadingBlockId === block.id}
             onUpload={async (file) => {
-              const url = await onUpload(file)
+              const url = await onUpload(block.id, file)
               if (url) updateBlock(block.id, url)
               return url
             }}
@@ -270,7 +236,7 @@ export default function QuestionContentBlocksEditor({
         title="Acima do enunciado"
         blocks={blocks.before}
         uploadingBlockId={uploadingBlockId}
-        onUpload={(file) => uploadImage(file)}
+        onUpload={uploadForBlock}
         onChange={(before) => onChange({ ...blocks, before })}
       />
 
@@ -289,7 +255,7 @@ export default function QuestionContentBlocksEditor({
         title="Abaixo do enunciado"
         blocks={blocks.after}
         uploadingBlockId={uploadingBlockId}
-        onUpload={(file) => uploadImage(file)}
+        onUpload={uploadForBlock}
         onChange={(after) => onChange({ ...blocks, after })}
       />
     </div>
