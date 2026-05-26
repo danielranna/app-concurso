@@ -10,6 +10,7 @@ import {
   uploadCoachStudyMaterials,
   usesExternalCoachUpload,
 } from "@/lib/coach-upload-client"
+import { tickSerialIngestWorker } from "@/lib/coach-ingest-worker-client"
 import {
   ArrowLeft,
   CheckCircle2,
@@ -185,6 +186,8 @@ export default function CoachMateriaisBibliotecaPage() {
 
         await loadDocs(userId)
       }
+
+      void tickSerialIngestWorker(userId).catch(() => {})
     } finally {
       uploadProcessingRef.current = false
       const remaining = await readQueue()
@@ -430,11 +433,6 @@ export default function CoachMateriaisBibliotecaPage() {
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Arquivos
           </h3>
-          {docs.some(docNeedsIngest) && (
-            <p className="mt-1 text-xs text-violet-700">
-              Na fila global de indexação (um arquivo por vez) — pode continuar enviando PDFs.
-            </p>
-          )}
         </div>
         {!docs.length ? (
           <p className="px-4 py-8 text-center text-sm text-slate-500">

@@ -3,19 +3,19 @@
 import { useEffect, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import {
-  fetchIngestQueueStatus,
+  fetchIngestQueueDetails,
   tickSerialIngestWorker,
-  withGlobalIngestLock,
 } from "@/lib/coach-ingest-worker-client"
 
-const POLL_MS = 6_000
+const POLL_MS = 3_000
 
 /**
- * Fila global de indexação: um PDF (uma etapa) por vez, todas as matérias.
- * Roda em qualquer página do Coach; só uma aba do navegador executa por vez.
+ * Processa a fila global de indexação (1 etapa por vez).
+ * Sem lock entre abas — o servidor serializa e desbloqueia jobs travados.
  */
 export default function GlobalDocumentIngestWorker() {
   const userIdRef = useRef<string | null>(null)
+  const busyRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -32,17 +32,18 @@ export default function GlobalDocumentIngestWorker() {
 
     const tick = async () => {
       const userId = userIdRef.current
-      if (!userId || cancelled) return
+      if (!userId || cancelled || busyRef.current) return
 
       try {
-        const status = await fetchIngestQueueStatus(userId)
+        const status = await fetchIngestQueueDetails(userId, 1)
         if (!status.active) return
 
-        await withGlobalIngestLock(async () => {
-          await tickSerialIngestWorker(userId)
-        })
+        busyRef.current = true
+        await tickSerialIngestWorker(userId)
       } catch {
         /* próximo ciclo */
+      } finally {
+        busyRef.current = false
       }
     }
 

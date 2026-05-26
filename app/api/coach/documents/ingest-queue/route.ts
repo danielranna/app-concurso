@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server"
-import {
-  countPendingMaterialIngest,
-  userHasRunningDocumentJob,
-} from "@/lib/ai/jobs/document-ingest-worker"
+import { getIngestQueueDetails } from "@/lib/ai/jobs/document-ingest-worker"
 
 export async function GET(req: Request) {
   try {
@@ -12,16 +9,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
     }
 
-    const [pending_count, running] = await Promise.all([
-      countPendingMaterialIngest(userId),
-      userHasRunningDocumentJob(userId),
-    ])
+    const limit = Math.min(Number(searchParams.get("limit")) || 5, 50)
+    const details = await getIngestQueueDetails(userId, { itemLimit: limit })
 
-    return NextResponse.json({
-      pending_count,
-      running,
-      active: pending_count > 0 || running,
-    })
+    return NextResponse.json(details)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })
