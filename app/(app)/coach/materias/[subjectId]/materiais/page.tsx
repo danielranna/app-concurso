@@ -5,19 +5,34 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
+  getCoachUploadMaxBytes,
   getCoachUploadMaxLabel,
   uploadCoachStudyMaterials,
   usesExternalCoachUpload,
 } from "@/lib/coach-upload-client"
 import {
   ArrowLeft,
+  CheckCircle2,
   Loader2,
   RefreshCw,
   Trash2,
   Upload,
   BookOpen,
   Send,
+  XCircle,
 } from "lucide-react"
+
+type UploadQueueItem = {
+  id: string
+  file: File
+  status: "pending" | "uploading" | "done" | "error"
+  error?: string
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 type MaterialDoc = {
   id: string
@@ -52,14 +67,8 @@ export default function CoachMateriaisBibliotecaPage() {
   const [subjectName, setSubjectName] = useState("")
   const [docs, setDocs] = useState<MaterialDoc[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<{
-    current: number
-    total: number
-    name: string
-    okCount: number
-  } | null>(null)
-  const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([])
+  const uploadProcessingRef = useRef(false)
   const [query, setQuery] = useState("")
   const [answer, setAnswer] = useState<{
     answer: string
@@ -118,52 +127,65 @@ export default function CoachMateriaisBibliotecaPage() {
   }, [userId, docs, loadDocs])
 
   const uploadMaxLabel = getCoachUploadMaxLabel()
+  const uploadMaxBytes = getCoachUploadMaxBytes()
   const externalUpload = usesExternalCoachUpload()
 
-  async function onUpload(files: FileList | null) {
-    if (!userId || !files?.length) return
-    setUploading(true)
-    setUploadErrors([])
-    const list = Array.from(files)
-    const errs: string[] = []
-    let sentOk = 0
+  const readQueue = useCallback(
+    () =>
+      new Promise<UploadQueueItem[]>((resolve) => {
+        setUploadQueue((prev) => {
+          resolve(prev)
+          return prev
+        })
+      }),
+    []
+  )
+
+  const patchQueueItem = useCallback((id: string, patch: Partial<UploadQueueItem>) => {
+    setUploadQueue((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    )
+  }, [])
+
+  const drainUploadQueue = useCallback(async () => {
+    if (!userId || uploadProcessingRef.current) return
+    uploadProcessingRef.current = true
+    let uploadedSinceJobs = 0
 
     try {
-      setUploadProgress({
-        current: 0,
-        total: list.length,
-        name: list[0]?.name ?? "",
-        okCount: 0,
-      })
+      while (true) {
+        const snapshot = await readQueue()
+        const next = snapshot.find((i) => i.status === "pending")
+        if (!next) break
 
-      const { okCount, errors } = await uploadCoachStudyMaterials({
-        files: list,
-        userId,
-        subjectId,
-        onProgress: async ({ current, total, fileName, phase }) => {
-          if (phase === "done") {
-            sentOk = current
-            await loadDocs(userId)
-            if (current > 0 && current % 3 === 0) {
-              await fetch("/api/coach/jobs/run", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_id: userId, limit: 3 }),
-              }).catch(() => {})
-            }
+        patchQueueItem(next.id, { status: "uploading" })
+
+        const { okCount, errors } = await uploadCoachStudyMaterials({
+          files: [next.file],
+          userId,
+          subjectId,
+        })
+
+        if (okCount > 0) {
+          uploadedSinceJobs++
+          patchQueueItem(next.id, { status: "done" })
+          await loadDocs(userId)
+          if (uploadedSinceJobs % 3 === 0) {
+            await fetch("/api/coach/jobs/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ user_id: userId, limit: 3 }),
+            }).catch(() => {})
           }
-          setUploadProgress({
-            current: phase === "uploading" ? current : current,
-            total,
-            name: fileName,
-            okCount: phase === "done" ? current : current,
+        } else {
+          patchQueueItem(next.id, {
+            status: "error",
+            error: errors[0] ?? "Falha no envio",
           })
-        },
-      })
-      errs.push(...errors)
-      sentOk = okCount
+        }
+      }
 
-      if (okCount > 0) {
+      if (uploadedSinceJobs > 0) {
         await fetch("/api/coach/jobs/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -171,33 +193,51 @@ export default function CoachMateriaisBibliotecaPage() {
         }).catch(() => {})
         await loadDocs(userId)
       }
-
-      setUploadErrors(errs)
-      if (errs.length && okCount === 0) {
-        alert(errs.slice(0, 5).join("\n") + (errs.length > 5 ? `\n… +${errs.length - 5}` : ""))
-      } else if (errs.length) {
-        alert(
-          `${okCount} PDF(s) enviado(s). ${errs.length} falha(s):\n` +
-            errs.slice(0, 4).join("\n")
-        )
-      } else if (okCount > 0) {
-        setUploadProgress({
-          current: list.length,
-          total: list.length,
-          name: "Concluído",
-          okCount: sentOk,
-        })
-      }
     } finally {
-      setUploading(false)
-      if (sentOk > 0) {
-        setTimeout(() => setUploadProgress(null), 2500)
-      } else {
-        setUploadProgress(null)
+      uploadProcessingRef.current = false
+      const remaining = await readQueue()
+      if (remaining.some((i) => i.status === "pending")) {
+        void drainUploadQueue()
       }
-      if (fileRef.current) fileRef.current.value = ""
     }
+  }, [userId, subjectId, loadDocs, readQueue, patchQueueItem])
+
+  function onFilesPicked(files: FileList | null) {
+    if (!files?.length) return
+
+    const newItems: UploadQueueItem[] = Array.from(files).map((file) => {
+      if (file.size > uploadMaxBytes) {
+        return {
+          id: crypto.randomUUID(),
+          file,
+          status: "error" as const,
+          error: `Maior que ${uploadMaxLabel}`,
+        }
+      }
+      return {
+        id: crypto.randomUUID(),
+        file,
+        status: "pending" as const,
+      }
+    })
+
+    setUploadQueue((prev) => [...prev, ...newItems])
+    if (fileRef.current) fileRef.current.value = ""
+    void drainUploadQueue()
   }
+
+  function removeQueueItem(id: string) {
+    setUploadQueue((prev) => {
+      const item = prev.find((i) => i.id === id)
+      if (item?.status === "uploading") return prev
+      return prev.filter((i) => i.id !== id)
+    })
+  }
+
+  const queuePendingCount = uploadQueue.filter((i) => i.status === "pending").length
+  const queueActiveCount = uploadQueue.filter(
+    (i) => i.status === "pending" || i.status === "uploading"
+  ).length
 
   async function reprocess(docId: string) {
     if (!userId) return
@@ -283,47 +323,17 @@ export default function CoachMateriaisBibliotecaPage() {
       </div>
 
       <section className="rounded-xl border border-dashed border-violet-300 bg-violet-50/40 p-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <BookOpen className="h-8 w-8 text-violet-700" />
+        <div className="flex flex-wrap items-start gap-3">
+          <BookOpen className="h-8 w-8 shrink-0 text-violet-700" />
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-slate-900">Enviar PDFs de estudo</h3>
             <p className="text-sm text-slate-600">
-              Selecione vários PDFs
+              Escolha os PDFs: cada um entra na fila abaixo (enviando → pronto). Pode adicionar
+              mais a qualquer momento
               {externalUpload
-                ? ` (até ${uploadMaxLabel} cada, envio pela sua VPS).`
-                : ` — cada um é enviado separadamente (máx. ${uploadMaxLabel} por arquivo na Vercel).`}{" "}
-              A indexação roda em segundo plano.
+                ? ` (até ${uploadMaxLabel} cada, pela VPS).`
+                : ` (máx. ${uploadMaxLabel} por arquivo na Vercel).`}
             </p>
-            {uploadProgress && (
-              <div className="mt-3 space-y-1.5">
-                <p className="text-xs font-medium text-violet-900">
-                  {uploading
-                    ? `Enviando ${Math.min(uploadProgress.current + 1, uploadProgress.total)}/${uploadProgress.total}: ${uploadProgress.name}`
-                    : `${uploadProgress.okCount}/${uploadProgress.total} PDF(s) enviado(s)`}
-                </p>
-                <div
-                  className="h-2 overflow-hidden rounded-full bg-violet-200"
-                  role="progressbar"
-                  aria-valuenow={uploadProgress.current}
-                  aria-valuemin={0}
-                  aria-valuemax={uploadProgress.total}
-                >
-                  <div
-                    className="h-full rounded-full bg-violet-600 transition-all duration-300"
-                    style={{
-                      width: `${Math.round((uploadProgress.current / Math.max(uploadProgress.total, 1)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-            {uploadErrors.length > 0 && !uploading && (
-              <ul className="mt-2 list-inside list-disc text-xs text-red-700">
-                {uploadErrors.slice(0, 5).map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            )}
           </div>
           <input
             ref={fileRef}
@@ -331,22 +341,88 @@ export default function CoachMateriaisBibliotecaPage() {
             accept="application/pdf"
             multiple
             className="hidden"
-            onChange={(e) => onUpload(e.target.files)}
+            onChange={(e) => onFilesPicked(e.target.files)}
           />
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800 disabled:opacity-50"
-          >
-            {uploading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50"
+            >
               <Upload className="h-4 w-4" />
-            )}
-            Escolher PDFs
-          </button>
+              Escolher PDFs
+            </button>
+            <button
+              type="button"
+              onClick={() => void drainUploadQueue()}
+              className="inline-flex items-center gap-2 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800"
+            >
+              {queueActiveCount > 0 ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Enviar
+              {queuePendingCount > 0 ? ` (${queuePendingCount})` : ""}
+            </button>
+          </div>
         </div>
+
+        {uploadQueue.length > 0 && (
+          <ul className="mt-4 space-y-2 border-t border-violet-200/80 pt-4">
+            {uploadQueue.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-violet-100 bg-white px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900">
+                    {item.file.name}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatFileSize(item.file.size)}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {item.status === "pending" && (
+                    <span className="text-xs font-medium text-slate-500">Na fila</span>
+                  )}
+                  {item.status === "uploading" && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Enviando…
+                    </span>
+                  )}
+                  {item.status === "done" && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Pronto
+                    </span>
+                  )}
+                  {item.status === "error" && (
+                    <span
+                      className="inline-flex max-w-[10rem] items-center gap-1.5 text-xs font-medium text-red-700"
+                      title={item.error}
+                    >
+                      <XCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{item.error ?? "Erro"}</span>
+                    </span>
+                  )}
+                  {item.status !== "uploading" && (
+                    <button
+                      type="button"
+                      onClick={() => removeQueueItem(item.id)}
+                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      title="Remover da fila"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white">
