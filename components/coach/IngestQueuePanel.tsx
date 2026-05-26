@@ -150,7 +150,7 @@ export default function IngestQueuePanel() {
             Fila de indexação (global)
           </h3>
           <p className="text-xs text-amber-900/80">
-            Um arquivo por vez na Vercel · fila na base de dados
+            Um PDF por vez até ficar pronto (ler → indexar → vetorizar) · depois o próximo
           </p>
         </div>
         {expanded ? (
@@ -193,6 +193,35 @@ export default function IngestQueuePanel() {
             </li>
           )}
         </ul>
+      )}
+
+      {expanded && queue.failed_count > 0 && (
+        <div className="mt-4 border-t border-red-200/80 pt-3">
+          <p className="mb-2 text-xs font-semibold text-red-800">
+            Erros ({queue.failed_count}) — pulados; use Reindexar na matéria
+          </p>
+          <ul className="space-y-2">
+            {queue.failed_items.map((item) => (
+              <li
+                key={item.id}
+                className="rounded-lg border border-red-100 bg-red-50/80 px-3 py-2"
+              >
+                <p className="truncate text-sm font-medium text-slate-900">
+                  {item.title}
+                </p>
+                <p className="truncate text-xs text-red-700">
+                  {item.subject_name ? `${item.subject_name} · ` : ""}
+                  {item.ingest_error ?? "Falha na indexação"}
+                </p>
+              </li>
+            ))}
+          </ul>
+          {queue.failed_count > queue.failed_items.length && (
+            <p className="mt-2 text-xs text-red-700">
+              +{queue.failed_count - queue.failed_items.length} outros com erro
+            </p>
+          )}
+        </div>
       )}
 
       {expanded && (queue.has_more || showAll) && (

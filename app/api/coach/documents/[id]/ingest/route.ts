@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { enqueueMaterialParse } from "@/lib/ai/jobs/document-enqueue"
+import { enqueueMaterialIngest } from "@/lib/ai/jobs/document-enqueue"
+import { supabaseServer } from "@/lib/supabase-server"
 
 export async function POST(
   req: Request,
@@ -14,7 +15,17 @@ export async function POST(
       return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
     }
 
-    await enqueueMaterialParse(user_id, id, { force: true })
+    await supabaseServer
+      .from("subject_documents")
+      .update({
+        ingest_stage: "uploaded",
+        status: "pending",
+        ingest_error: null,
+      })
+      .eq("id", id)
+      .eq("user_id", user_id)
+
+    await enqueueMaterialIngest(user_id, id, { force: true })
 
     return NextResponse.json({ ok: true, queued: true })
   } catch (e) {

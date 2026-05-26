@@ -5,10 +5,6 @@ import multer from "multer"
 import { loadConfig } from "./config.js"
 import { resolveUserFromRequest } from "./auth.js"
 import { uploadStudyMaterialPdf } from "./upload.js"
-import {
-  enqueueMaterialParse,
-  enqueueMaterialParses,
-} from "./enqueue.js"
 
 const config = loadConfig()
 const app = express()
@@ -110,12 +106,6 @@ app.post(
           const msg = e instanceof Error ? e.message : "Falha no upload"
           errors.push({ file: file.originalname, error: msg })
         }
-      }
-
-      if (documentIds.length === 1) {
-        await enqueueMaterialParse(config, userId, documentIds[0])
-      } else if (documentIds.length > 1) {
-        await enqueueMaterialParses(config, userId, documentIds)
       }
 
       return res.json({

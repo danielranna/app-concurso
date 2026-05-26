@@ -1,6 +1,5 @@
 import { enqueueJob } from "./queue"
 
-/** Jobs da pipeline de material (upload → parse → chunk → embed). */
 export const DOCUMENT_PIPELINE_JOB_TYPES = [
   "document_parse",
   "document_chunk",
@@ -9,29 +8,37 @@ export const DOCUMENT_PIPELINE_JOB_TYPES = [
   "document_batch_ingest",
 ] as const
 
-/** Enfileira só a leitura do PDF; chunk e embed entram em jobs seguintes. */
-export async function enqueueMaterialParse(
+/** Pipeline completa num único job (parse + chunk + embed) — fila serial. */
+export async function enqueueMaterialIngest(
   userId: string,
   documentId: string,
   options?: { force?: boolean }
 ) {
   const idempotencyKey = options?.force
-    ? `parse:${documentId}:v1:${Date.now()}`
-    : `parse:${documentId}:v1`
+    ? `ingest:${documentId}:v2:${Date.now()}`
+    : `ingest:${documentId}:v2`
   return enqueueJob({
     userId,
-    jobType: "document_parse",
+    jobType: "document_ingest",
     idempotencyKey,
     payload: { document_id: documentId },
     priority: options?.force ? 7 : 6,
   })
 }
 
+/** @deprecated Use enqueueMaterialIngest — mantido para compat. */
+export async function enqueueMaterialParse(
+  userId: string,
+  documentId: string,
+  options?: { force?: boolean }
+) {
+  return enqueueMaterialIngest(userId, documentId, options)
+}
+
 export async function enqueueMaterialParses(
   userId: string,
   documentIds: string[]
 ) {
-  await Promise.all(
-    documentIds.map((documentId) => enqueueMaterialParse(userId, documentId))
-  )
+  if (!documentIds.length) return
+  await enqueueMaterialIngest(userId, documentIds[0]!, { force: false })
 }

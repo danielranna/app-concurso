@@ -23,6 +23,8 @@ export type IngestQueueDetails = {
   next: IngestQueueItemView | null
   items: IngestQueueItemView[]
   has_more: boolean
+  failed_items: IngestQueueItemView[]
+  failed_count: number
 }
 
 const STAGE_LABELS: Record<string, string> = {

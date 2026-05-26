@@ -2,11 +2,6 @@ import { NextResponse } from "next/server"
 import { uploadCoachDocument, type CoachDocType } from "@/lib/coach-documents"
 import { COACH_UPLOAD_MAX_BYTES, COACH_UPLOAD_MAX_LABEL } from "@/lib/coach-upload-limits"
 import { supabaseServer } from "@/lib/supabase-server"
-import {
-  enqueueMaterialParse,
-  enqueueMaterialParses,
-} from "@/lib/ai/jobs/document-enqueue"
-
 export const runtime = "nodejs"
 export const maxDuration = 60
 
@@ -131,12 +126,6 @@ export async function POST(req: Request) {
       if (doc_type === "study_material" && docId) {
         documentIds.push(docId)
       }
-    }
-
-    if (documentIds.length === 1) {
-      await enqueueMaterialParse(user_id, documentIds[0]!)
-    } else if (documentIds.length > 1) {
-      await enqueueMaterialParses(user_id, documentIds)
     }
 
     return NextResponse.json({

@@ -368,7 +368,8 @@ export async function processJob(job: {
     const documentId = payload.document_id as string | undefined
     if (
       documentId &&
-      (DOCUMENT_PIPELINE_JOB_TYPES as readonly string[]).includes(job.job_type)
+      (DOCUMENT_PIPELINE_JOB_TYPES as readonly string[]).includes(job.job_type) &&
+      job.job_type !== "document_ingest"
     ) {
       await failDocumentIngest(documentId, msg).catch(() => {})
     }
