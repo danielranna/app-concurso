@@ -2,7 +2,6 @@
 
 import CoachHeader from "@/components/coach/CoachHeader"
 import CoachSubNav from "@/components/coach/CoachSubNav"
-import GlobalDocumentIngestWorker from "@/components/coach/GlobalDocumentIngestWorker"
 import IngestQueuePanel from "@/components/coach/IngestQueuePanel"
 
 export default function CoachLayout({
@@ -12,7 +11,6 @@ export default function CoachLayout({
 }) {
   return (
     <div className="p-6">
-      <GlobalDocumentIngestWorker />
       <CoachHeader />
       <CoachSubNav />
       <IngestQueuePanel />

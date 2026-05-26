@@ -8,9 +8,10 @@ import { enqueueJob, type JobType } from "./queue"
 import { runJobWorker } from "./worker"
 
 const SERIAL_INGEST_TYPES: JobType[] = [...DOCUMENT_PIPELINE_JOB_TYPES]
-/** Na Vercel o job não passa de ~60s; após 2 min em running é zumbi. */
 const STALE_RUNNING_MS = 2 * 60 * 1000
 const PIPELINE_STAGES = ["uploaded", "parsing", "chunking", "embedding"] as const
+const RECENT_WAVE_MS = 72 * 60 * 60 * 1000
+const MAX_PARSE_ENQUEUE_PER_HEAL = 8
 
 export type IngestQueueItemView = {
   id: string
@@ -56,7 +57,15 @@ function subjectNameFromRow(row: DocRow): string | null {
   return s.name ?? null
 }
 
-/** Jobs travados em running (timeout serverless) voltam para pending. */
+function isRecentWaveDoc(d: DocRow): boolean {
+  const created = new Date(d.created_at).getTime()
+  const ingested = d.last_ingested_at
+    ? new Date(d.last_ingested_at).getTime()
+    : 0
+  const t = Math.max(created, ingested)
+  return Date.now() - t < RECENT_WAVE_MS
+}
+
 export async function healStaleRunningJobs(userId: string): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_RUNNING_MS).toISOString()
   let healed = 0
@@ -101,7 +110,7 @@ export async function healStaleRunningJobs(userId: string): Promise<number> {
 async function listActivePipelineJobs(userId: string) {
   const { data, error } = await supabaseServer
     .from("ai_jobs")
-    .select("id, payload, status, job_type")
+    .select("id, payload, status, job_type, idempotency_key")
     .eq("user_id", userId)
     .in("status", ["pending", "running"])
     .in("job_type", SERIAL_INGEST_TYPES)
@@ -119,17 +128,14 @@ function jobTargetsDocument(
   )
 }
 
-/**
- * Documento em parsing/chunking/embedding sem job ativo = travou (timeout).
- * Reinicia ou pula para a etapa seguinte se o texto já foi extraído.
- */
 export async function healStuckPipelineDocuments(userId: string): Promise<number> {
   const { data: docs, error } = await supabaseServer
     .from("subject_documents")
-    .select("id, ingest_stage, page_count, parsed_tables")
+    .select("id, ingest_stage, parsed_tables")
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
     .in("ingest_stage", ["parsing", "chunking", "embedding"])
+    .limit(20)
 
   if (error) throw new Error(error.message)
   if (!docs?.length) return 0
@@ -166,7 +172,7 @@ export async function healStuckPipelineDocuments(userId: string): Promise<number
           continue
         }
       } catch {
-        /* segue para reinício */
+        /* reinício */
       }
     }
 
@@ -204,45 +210,63 @@ export async function healStuckPipelineDocuments(userId: string): Promise<number
   return healed
 }
 
-/** PDF enviado sem job na fila — recoloca parse. */
+/** Uma query de jobs + no máximo N enfileiramentos por ciclo (evita 100+ GET no Supabase). */
 export async function ensureParseJobsEnqueued(userId: string): Promise<number> {
   const { data: docs, error } = await supabaseServer
     .from("subject_documents")
-    .select("id, ingest_stage")
+    .select("id")
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
-    .in("ingest_stage", ["uploaded"])
+    .eq("ingest_stage", "uploaded")
+    .order("created_at", { ascending: true })
+    .limit(100)
 
   if (error) throw new Error(error.message)
+  if (!docs?.length) return 0
+
+  const { data: jobs, error: jobsErr } = await supabaseServer
+    .from("ai_jobs")
+    .select("idempotency_key, status, payload")
+    .eq("user_id", userId)
+    .in("job_type", ["document_parse", "document_chunk", "document_embed", "document_ingest"])
+    .in("status", ["pending", "running", "done"])
+
+  if (jobsErr) throw new Error(jobsErr.message)
+
+  const busyDocIds = new Set<string>()
+  for (const job of jobs ?? []) {
+    if (job.status === "pending" || job.status === "running") {
+      const docId = (job.payload as { document_id?: string })?.document_id
+      if (docId) busyDocIds.add(docId)
+    }
+  }
+
+  const doneParseKeys = new Set(
+    (jobs ?? [])
+      .filter(
+        (j) =>
+          j.status === "done" &&
+          typeof j.idempotency_key === "string" &&
+          j.idempotency_key.startsWith("parse:")
+      )
+      .map((j) => j.idempotency_key as string)
+  )
 
   let enqueued = 0
-  for (const doc of docs ?? []) {
+  for (const doc of docs) {
+    if (enqueued >= MAX_PARSE_ENQUEUE_PER_HEAL) break
     const documentId = doc.id as string
-    const stage = doc.ingest_stage as string
+    if (busyDocIds.has(documentId)) continue
+
     const parseKey = `parse:${documentId}:v1`
-
-    const { data: parseJob } = await supabaseServer
-      .from("ai_jobs")
-      .select("id, status")
-      .eq("user_id", userId)
-      .eq("idempotency_key", parseKey)
-      .maybeSingle()
-
-    if (parseJob?.status === "pending" || parseJob?.status === "running") {
+    if (doneParseKeys.has(parseKey)) {
+      await enqueueMaterialParse(userId, documentId, { force: true })
+      enqueued++
       continue
     }
 
-    const needsForce =
-      stage === "failed" ||
-      parseJob?.status === "failed" ||
-      parseJob?.status === "done"
-
-    if (!parseJob || needsForce) {
-      await enqueueMaterialParse(userId, documentId, {
-        force: needsForce,
-      })
-      enqueued++
-    }
+    await enqueueMaterialParse(userId, documentId)
+    enqueued++
   }
 
   return enqueued
@@ -270,18 +294,6 @@ export async function userHasRunningDocumentJob(userId: string): Promise<boolean
   return Boolean(data?.id)
 }
 
-export async function countPendingMaterialIngest(userId: string): Promise<number> {
-  const { count, error } = await supabaseServer
-    .from("subject_documents")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("doc_type", "study_material")
-    .in("ingest_stage", [...PIPELINE_STAGES])
-
-  if (error) throw new Error(error.message)
-  return count ?? 0
-}
-
 function sortPipelineDocs(docs: DocRow[]): DocRow[] {
   const stageRank: Record<string, number> = {
     parsing: 0,
@@ -297,12 +309,11 @@ function sortPipelineDocs(docs: DocRow[]): DocRow[] {
   })
 }
 
-export async function getIngestQueueDetails(
+/** Só leitura — fila = PDFs na DB com ingest_stage (sem heal, sem centenas de queries). */
+export async function readIngestQueueDetails(
   userId: string,
   options?: { itemLimit?: number }
 ): Promise<IngestQueueDetails> {
-  await healIngestPipeline(userId)
-
   const itemLimit = options?.itemLimit ?? 5
 
   const { data: docs, error } = await supabaseServer
@@ -325,9 +336,24 @@ export async function getIngestQueueDetails(
 
   const running = await userHasRunningDocumentJob(userId)
 
-  if (!pipeline.length) {
+  const wave = all.filter(
+    (d) =>
+      d.ingest_stage !== "failed" &&
+      (PIPELINE_STAGES.includes(
+        (d.ingest_stage ?? "") as (typeof PIPELINE_STAGES)[number]
+      ) ||
+        (d.ingest_stage === "ready" && isRecentWaveDoc(d)))
+  )
+
+  const completed = wave.filter((d) => d.ingest_stage === "ready").length
+  const total = wave.length
+  const pending_count = pipeline.length
+
+  const active = pending_count > 0 || running || (total > completed && completed < total)
+
+  if (!active) {
     return {
-      active: running,
+      active: false,
       running,
       pending_count: 0,
       completed: 0,
@@ -339,12 +365,19 @@ export async function getIngestQueueDetails(
     }
   }
 
-  const batchStart = pipeline[0]!.created_at
-  const completedInBatch = all.filter(
-    (d) =>
-      d.ingest_stage === "ready" &&
-      new Date(d.created_at).getTime() >= new Date(batchStart).getTime()
-  )
+  if (!pipeline.length) {
+    return {
+      active: true,
+      running,
+      pending_count: 0,
+      completed,
+      total,
+      current: null,
+      next: null,
+      items: [],
+      has_more: false,
+    }
+  }
 
   const sorted = sortPipelineDocs(pipeline)
   const currentDoc =
@@ -375,13 +408,10 @@ export async function getIngestQueueDetails(
     })
   )
 
-  const total = pipeline.length + completedInBatch.length
-  const completed = completedInBatch.length
-
   return {
     active: true,
     running,
-    pending_count: pipeline.length,
+    pending_count,
     completed,
     total,
     current: toView(currentDoc, { is_current: true, is_next: false }),
@@ -394,32 +424,30 @@ export async function getIngestQueueDetails(
 }
 
 export async function runSerialDocumentIngestWorker(userId: string) {
-  await healIngestPipeline(userId)
-
   if (await userHasRunningDocumentJob(userId)) {
-    return { processed: 0, skipped: "already_running" as const, results: [] }
-  }
-
-  const pendingDocs = await countPendingMaterialIngest(userId)
-  if (pendingDocs === 0) {
-    const { data: pendingJobs } = await supabaseServer
-      .from("ai_jobs")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("status", "pending")
-      .in("job_type", SERIAL_INGEST_TYPES)
-      .limit(1)
-    if (!pendingJobs?.length) {
-      return { processed: 0, skipped: "nothing_pending" as const, results: [] }
+    const queue = await readIngestQueueDetails(userId)
+    return {
+      processed: 0,
+      skipped: "already_running" as const,
+      results: [],
+      queue,
     }
   }
+
+  await healIngestPipeline(userId)
 
   const results = await runJobWorker(1, {
     userId,
     jobTypes: SERIAL_INGEST_TYPES,
   })
 
-  return { processed: results.length, skipped: null, results }
+  const queue = await readIngestQueueDetails(userId)
+  const skipped =
+    results.length === 0 && !queue.running && queue.pending_count === 0
+      ? ("idle" as const)
+      : null
+
+  return { processed: results.length, skipped, results, queue }
 }
 
 export { SERIAL_INGEST_TYPES }

@@ -1,4 +1,4 @@
-/** Fila global de indexação — uma aba/navegador processa por vez. */
+/** Fila global de indexação — um único coordenador no cliente. */
 
 export type IngestQueueItemView = {
   id: string
@@ -41,7 +41,8 @@ export async function fetchIngestQueueDetails(
   limit = 5
 ): Promise<IngestQueueDetails> {
   const res = await fetch(
-    `/api/coach/documents/ingest-queue?user_id=${encodeURIComponent(userId)}&limit=${limit}`
+    `/api/coach/documents/ingest-queue?user_id=${encodeURIComponent(userId)}&limit=${limit}`,
+    { cache: "no-store" }
   )
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -50,10 +51,26 @@ export async function fetchIngestQueueDetails(
   return data as IngestQueueDetails
 }
 
-export async function tickSerialIngestWorker(userId: string): Promise<void> {
-  await fetch("/api/coach/jobs/run-ingest", {
+export type RunIngestResult = {
+  processed: number
+  skipped: string | null
+  results: unknown[]
+  queue?: IngestQueueDetails
+}
+
+/** Um passo da fila; retorna estado atualizado da fila. */
+export async function tickSerialIngestWorker(
+  userId: string
+): Promise<RunIngestResult> {
+  const res = await fetch("/api/coach/jobs/run-ingest", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId }),
+    cache: "no-store",
   })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error ?? "Falha ao processar fila")
+  }
+  return data as RunIngestResult
 }

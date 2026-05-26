@@ -10,7 +10,6 @@ import {
   uploadCoachStudyMaterials,
   usesExternalCoachUpload,
 } from "@/lib/coach-upload-client"
-import { tickSerialIngestWorker } from "@/lib/coach-ingest-worker-client"
 import {
   ArrowLeft,
   CheckCircle2,
@@ -187,7 +186,6 @@ export default function CoachMateriaisBibliotecaPage() {
         await loadDocs(userId)
       }
 
-      void tickSerialIngestWorker(userId).catch(() => {})
     } finally {
       uploadProcessingRef.current = false
       const remaining = await readQueue()
@@ -248,11 +246,6 @@ export default function CoachMateriaisBibliotecaPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId }),
     })
-    await fetch("/api/coach/jobs/run-ingest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    }).catch(() => {})
     await loadDocs(userId)
   }
 

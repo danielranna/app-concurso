@@ -1,15 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import {
   fetchIngestQueueDetails,
   ingestStageLabel,
+  tickSerialIngestWorker,
   type IngestQueueDetails,
 } from "@/lib/coach-ingest-worker-client"
 
-const POLL_MS = 3_000
+const POLL_UI_MS = 5_000
+const WORKER_GAP_MS = 8_000
 const LIST_LIMIT = 5
 
 function QueueRow({
@@ -48,7 +50,7 @@ function QueueRow({
         )}
       </div>
       <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+        className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${
           variant === "current"
             ? "bg-amber-200 text-amber-950"
             : variant === "next"
@@ -57,7 +59,7 @@ function QueueRow({
         }`}
       >
         {variant === "current" && (
-          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
         )}
         {badge}
       </span>
@@ -65,16 +67,23 @@ function QueueRow({
   )
 }
 
+/**
+ * Único coordenador: mostra fila (GET leve) + processa 1 job por vez (POST).
+ * Evita dois componentes chamando run-ingest em paralelo.
+ */
 export default function IngestQueuePanel() {
   const [userId, setUserId] = useState<string | null>(null)
   const [queue, setQueue] = useState<IngestQueueDetails | null>(null)
   const [showAll, setShowAll] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
+  const workerBusyRef = useRef(false)
+  const lastWorkerAtRef = useRef(0)
 
-  const load = useCallback(async (uid: string, limit: number) => {
+  const loadQueue = useCallback(async (uid: string, limit: number) => {
     const details = await fetchIngestQueueDetails(uid, limit)
     setQueue(details)
     if (!details.active) setShowAll(false)
+    return details
   }, [])
 
   useEffect(() => {
@@ -90,19 +99,44 @@ export default function IngestQueuePanel() {
   useEffect(() => {
     if (!userId) return
     const limit = showAll ? 50 : LIST_LIMIT
-    void load(userId, limit)
-    const t = setInterval(() => void load(userId, limit), POLL_MS)
-    return () => clearInterval(t)
-  }, [userId, load, showAll])
 
-  if (!queue?.active || queue.total === 0) return null
+    const runCycle = async () => {
+      const details = await loadQueue(userId, limit)
+      if (!details.active) return
+
+      const now = Date.now()
+      if (workerBusyRef.current) return
+      if (now - lastWorkerAtRef.current < WORKER_GAP_MS) return
+      if (details.running) return
+
+      workerBusyRef.current = true
+      lastWorkerAtRef.current = now
+      try {
+        const result = await tickSerialIngestWorker(userId)
+        if (result.queue) setQueue(result.queue)
+        else await loadQueue(userId, limit)
+      } catch {
+        /* UI atualiza no próximo ciclo */
+      } finally {
+        workerBusyRef.current = false
+      }
+    }
+
+    void runCycle()
+    const t = setInterval(() => void runCycle(), POLL_UI_MS)
+    return () => clearInterval(t)
+  }, [userId, loadQueue, showAll])
+
+  const showPanel =
+    queue &&
+    (queue.active || queue.running || queue.pending_count > 0 || queue.total > 0)
+
+  if (!showPanel) return null
 
   const progressPct =
     queue.total > 0 ? Math.round((queue.completed / queue.total) * 100) : 0
 
-  const waitingItems = queue.items.filter(
-    (i) => !i.is_current && !i.is_next
-  )
+  const waitingItems = queue.items.filter((i) => !i.is_current && !i.is_next)
 
   return (
     <section className="mb-6 rounded-xl border border-amber-300 bg-amber-50/50 p-4">
@@ -116,7 +150,7 @@ export default function IngestQueuePanel() {
             Fila de indexação (global)
           </h3>
           <p className="text-xs text-amber-900/80">
-            Um arquivo por vez · todas as matérias
+            Um arquivo por vez na Vercel · fila na base de dados
           </p>
         </div>
         {expanded ? (
@@ -130,6 +164,7 @@ export default function IngestQueuePanel() {
         <div className="mb-1 flex items-center justify-between text-xs font-medium text-amber-950">
           <span>
             {queue.completed}/{queue.total} indexados
+            {queue.pending_count > 0 ? ` · ${queue.pending_count} na fila` : ""}
           </span>
           <span>{progressPct}%</span>
         </div>
@@ -152,6 +187,11 @@ export default function IngestQueuePanel() {
           {waitingItems.map((item) => (
             <QueueRow key={item.id} item={item} variant="waiting" />
           ))}
+          {!queue.items.length && queue.pending_count > 0 && (
+            <li className="rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs text-slate-600">
+              {queue.pending_count} arquivo(s) aguardando na fila…
+            </li>
+          )}
         </ul>
       )}
 
