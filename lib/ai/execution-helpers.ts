@@ -211,29 +211,38 @@ export async function buildSummaryBlocks(
 
   for (const subjectId of pickedSubjects) {
     if (budget <= 0) break
-    const top = (queueBySubject.get(subjectId) ?? [])[0]
-    const topicKey = top?.topic_key
-    const searchQuery = top?.topic_label ?? topicKey
-    if (!searchQuery) continue
+    const candidates = (queueBySubject.get(subjectId) ?? []).slice(0, 3)
+    let selectedTop: QueueRow | undefined
+    let selectedChunk:
+      | Awaited<ReturnType<typeof searchDocumentChunks>>[number]
+      | undefined
+    for (const top of candidates) {
+      const topicKey = top?.topic_key
+      const searchQuery = top?.topic_label ?? topicKey
+      if (!searchQuery) continue
+      const chunks = await searchDocumentChunks(userId, subjectId, searchQuery, 1)
+      if (!chunks.length) continue
+      selectedTop = top
+      selectedChunk = chunks[0]
+      break
+    }
+    if (!selectedTop || !selectedChunk) continue
 
-    const chunks = await searchDocumentChunks(userId, subjectId, searchQuery, 1)
-    if (!chunks.length) continue
-
-    const chunk = chunks[0]
+    const topicKey = selectedTop.topic_key
     blocks.push({
       subject_id: subjectId,
       subject_name: subjectNames.get(subjectId),
       type: "read_material",
       count: 1,
       minutes: 15,
-      label: `Leitura: ${chunk.title}`,
+      label: `Leitura: ${selectedChunk.title}`,
       params: {
         block_key: `read_material:${subjectId}:${topicKey}`,
         topic_key: topicKey,
-        document_id: chunk.document_id,
-        material_title: chunk.title,
-        excerpt: chunk.content.slice(0, 400),
-        queue_reason: top?.reason ?? undefined,
+        document_id: selectedChunk.document_id,
+        material_title: selectedChunk.title,
+        excerpt: selectedChunk.content.slice(0, 400),
+        queue_reason: selectedTop.reason ?? undefined,
       },
     })
     budget--

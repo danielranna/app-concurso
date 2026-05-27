@@ -11,6 +11,16 @@ export async function generatePriorityVerdict(
   userId: string,
   subjectId: string
 ) {
+  const parseReasonMeta = (reason?: string | null) => {
+    const text = String(reason ?? "")
+    const low = text.toLowerCase()
+    const diag =
+      /diag=(unknown|developing|validated)/.exec(low)?.[1] ?? "validated"
+    const attempts = Number(/tentativas=(\d+)/.exec(low)?.[1] ?? 0)
+    const hasMaterial = !low.includes("cob=nao")
+    return { diag, attempts, hasMaterial }
+  }
+
   const { data: queue } = await supabaseServer
     .from("strategic_queue_items")
     .select("*")
@@ -50,6 +60,7 @@ export async function generatePriorityVerdict(
 
   const structured: Record<string, unknown> = {
     top_priorities: top.map((q, i) => ({
+      ...parseReasonMeta(q.reason),
       rank: i + 1,
       title:
         (q as { topic_label?: string }).topic_label ?? q.topic_key,
@@ -58,6 +69,10 @@ export async function generatePriorityVerdict(
       time_minutes: 40,
       topic_key: q.topic_key,
       priority_score: q.priority_score,
+      relevance_weight: Number((q as { edital_weight?: number }).edital_weight ?? 1),
+      incidence_weight: Number((q as { incidence_weight?: number }).incidence_weight ?? 1),
+      gap_score: Number((q as { gap_score?: number }).gap_score ?? 0),
+      retention_penalty: Number((q as { retention_penalty?: number }).retention_penalty ?? 1),
       source: q.source ?? "sql",
     })),
     narrative_summary:

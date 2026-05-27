@@ -1,7 +1,6 @@
 import type { LearningSignal, LearningSignalType } from "../coach-types"
 import { topicBrainKey, findTopicEntry } from "./brain-helpers"
 import { supabaseServer } from "../supabase-server"
-import { formatPriorityReason } from "../strategic-weights"
 
 export type StrategicQueueRow = {
   user_id: string
@@ -188,7 +187,7 @@ export function formatQueueNarrativeSummary(
 }
 
 export function buildExecutableActionsFromQueue(
-  items: { topic_label: string; topic_key: string }[],
+  items: { topic_label: string; topic_key: string; reason?: string | null }[],
   subjectId: string
 ): {
   type: string
@@ -199,6 +198,16 @@ export function buildExecutableActionsFromQueue(
 }[] {
   const top = items[0]
   if (!top) return []
+  const reason = String(top.reason ?? "").toLowerCase()
+  const diagnosticState = reason.includes("diag=unknown")
+    ? "unknown"
+    : reason.includes("diag=developing")
+      ? "developing"
+      : "validated"
+  const hasCoverage = !reason.includes("cob=nao")
+  const minWrongAttempts = diagnosticState === "unknown" ? 0 : 1
+  const notebookLabelPrefix =
+    diagnosticState === "unknown" ? "Caderno diagnóstico" : "Caderno de reforço"
   const actions: {
     type: string
     label: string
@@ -208,13 +217,18 @@ export function buildExecutableActionsFromQueue(
   }[] = [
     {
       type: "create_remediation_notebook",
-      label: `Caderno de reforço — ${top.topic_label}`,
+      label: `${notebookLabelPrefix} — ${top.topic_label}`,
       params: {
         subject_id: subjectId,
         tec_topics: [top.topic_label],
         topic_key: top.topic_key,
-        min_wrong_attempts: 1,
-        suggested_name: `Reforço - ${top.topic_label}`,
+        min_wrong_attempts: minWrongAttempts,
+        suggested_name:
+          diagnosticState === "unknown"
+            ? `Diagnóstico - ${top.topic_label}`
+            : `Reforço - ${top.topic_label}`,
+        diagnostic_state: diagnosticState,
+        has_coverage: hasCoverage,
       },
       priority: 1,
       estimated_minutes: 45,

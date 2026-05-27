@@ -25,6 +25,15 @@ export type GenerateDailyStudyPlanOptions = {
   recentWrongTopics?: string[]
 }
 
+type QueueDiagnosticState = "unknown" | "developing" | "validated"
+
+function diagnosticStateFromReason(reason?: string | null): QueueDiagnosticState {
+  const raw = String(reason ?? "").toLowerCase()
+  if (raw.includes("diag=unknown")) return "unknown"
+  if (raw.includes("diag=developing")) return "developing"
+  return "validated"
+}
+
 export async function generateDailyStudyPlan(
   userId: string,
   force = false,
@@ -94,7 +103,7 @@ export async function generateDailyStudyPlan(
   const mode = ctx.prefs.study_mode
   const blocks: DailyStudyBlock[] = []
   let questionsBudget = limits.questions
-  let flashBudget = limits.flashcards
+  const flashBudget = limits.flashcards
   let errorBudget = limits.error_reviews ?? 10
   let summariesBudget = limits.summaries
 
@@ -156,23 +165,52 @@ export async function generateDailyStudyPlan(
   for (const subjectId of pickedSubjects) {
     if (questionsBudget <= 0) break
     const topTopics = (queueBySubject.get(subjectId) ?? []).slice(0, 3)
-    const topic =
-      (topTopics[0]?.topic_label as string | undefined) ??
-      (topTopics[0]?.topic_key as string | undefined)
-    if (topic) questionTopicsUsed.push(topic)
+    const topTopic = topTopics[0]
+    const diagnosticState = diagnosticStateFromReason(topTopic?.reason)
 
     const count = Math.min(
       mode === "reta_final" ? 15 : 12,
       Math.ceil(questionsBudget / Math.max(1, pickedSubjects.length))
     )
 
-    const questionIds = await pickQuestionIdsFromPerformance(userId, {
-      subject_id: subjectId,
-      wrong_only: true,
-      min_wrong_attempts: 1,
-      tec_topics: topic ? [topic] : undefined,
-      limit: count,
-    })
+    let selectedTopic: string | undefined
+    let questionIds: string[] = []
+
+    for (const candidate of topTopics) {
+      const topic =
+        (candidate.topic_label as string | undefined) ??
+        (candidate.topic_key as string | undefined)
+      if (!topic) continue
+
+      const preferWrongOnly = diagnosticState !== "unknown"
+      const firstTry = await pickQuestionIdsFromPerformance(userId, {
+        subject_id: subjectId,
+        wrong_only: preferWrongOnly,
+        min_wrong_attempts: preferWrongOnly ? 1 : 0,
+        tec_topics: [topic],
+        limit: count,
+      })
+      if (firstTry.length) {
+        selectedTopic = topic
+        questionIds = firstTry
+        break
+      }
+
+      const fallbackTry = await pickQuestionIdsFromPerformance(userId, {
+        subject_id: subjectId,
+        wrong_only: false,
+        min_wrong_attempts: 0,
+        tec_topics: [topic],
+        limit: Math.max(4, Math.min(count, 8)),
+      })
+      if (fallbackTry.length) {
+        selectedTopic = topic
+        questionIds = fallbackTry
+        break
+      }
+    }
+    if (!questionIds.length) continue
+    if (selectedTopic) questionTopicsUsed.push(selectedTopic)
 
     for (const qid of questionIds) {
       if (seenQ.has(qid)) continue
@@ -251,27 +289,51 @@ export async function generateDailyStudyPlan(
     })
 
     const errCount = wrongRows.length > 0 ? wrongRows.length : Math.min(3, errorBudget)
+    if (wrongRows.length > 0) {
+      blocks.push({
+        subject_id: subjectId,
+        subject_name: subName,
+        type: "error_review",
+        count: errCount,
+        minutes: errCount * 3,
+        label: `Revisar ${errCount} erros classificados — ${subName ?? "matéria"}`,
+        params: {
+          block_key: `error_review:${subjectId}:${topicKey ?? "all"}`,
+          subject_id: subjectId,
+          topic_key: topicKey,
+          attempt_ids: wrongRows.map((r) => r.attempt_id),
+          question_ids: wrongRows.map((r) => r.question_id),
+          queue_reason: top?.reason ?? topQueueReasonForSubject(queue, subjectId),
+        },
+      })
+      errorBudget -= errCount
+      continue
+    }
 
+    const mixedIds = await pickQuestionIdsFromPerformance(userId, {
+      subject_id: subjectId,
+      wrong_only: false,
+      min_wrong_attempts: 0,
+      tec_topics: topicLabel ? [topicLabel] : undefined,
+      limit: Math.min(5, errorBudget),
+    })
+    if (!mixedIds.length) continue
     blocks.push({
       subject_id: subjectId,
       subject_name: subName,
-      type: "error_review",
-      count: errCount,
-      minutes: errCount * 3,
-      label:
-        wrongRows.length > 0
-          ? `Revisar ${errCount} erros classificados — ${subName ?? "matéria"}`
-          : `Revisar erros — ${subName ?? "matéria"}`,
+      type: "questions",
+      count: mixedIds.length,
+      minutes: mixedIds.length * 4,
+      label: `Sondagem guiada — ${subName ?? "matéria"}`,
       params: {
-        block_key: `error_review:${subjectId}:${topicKey ?? "all"}`,
-        subject_id: subjectId,
-        topic_key: topicKey,
-        attempt_ids: wrongRows.map((r) => r.attempt_id),
-        question_ids: wrongRows.map((r) => r.question_id),
+        block_key: `questions_fallback:${subjectId}:${topicKey ?? "all"}`,
+        question_ids: mixedIds,
         queue_reason: top?.reason ?? topQueueReasonForSubject(queue, subjectId),
+        topic_keys: topicLabel ? [topicLabel] : [],
+        fallback_mixed: true,
       },
     })
-    errorBudget -= errCount
+    errorBudget -= mixedIds.length
   }
 
   if (flashBudget > 0 && ctx.flashcards_due > 0) {

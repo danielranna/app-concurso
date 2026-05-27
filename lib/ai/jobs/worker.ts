@@ -233,23 +233,10 @@ export async function processJob(job: {
           payload: {
             exclude_subject_id: subjectId,
             recent_wrong_topics: recentWrongTopics,
+            enqueue_execution: Boolean(payload.enqueue_execution),
           },
           priority: 5,
         })
-
-        if (payload.enqueue_execution) {
-          await enqueueJob({
-            userId,
-            jobType: "execution_plan_today",
-            idempotencyKey: `daily_plan:${userId}:${new Date().toISOString().slice(0, 10)}`,
-            payload: {
-              force: false,
-              subject_id: subjectId,
-              recent_wrong_topics: recentWrongTopics,
-            },
-            priority: 6,
-          })
-        }
         break
       }
 
@@ -270,6 +257,22 @@ export async function processJob(job: {
               top_topic_label: r.top_topic_label,
             })),
         })
+
+        if (payload.enqueue_execution) {
+          await enqueueJob({
+            userId,
+            jobType: "execution_plan_today",
+            idempotencyKey: `daily_plan:${userId}:${new Date().toISOString().slice(0, 10)}`,
+            payload: {
+              force: false,
+              refresh_queue: false,
+              recent_wrong_topics: Array.isArray(payload.recent_wrong_topics)
+                ? (payload.recent_wrong_topics as string[])
+                : undefined,
+            },
+            priority: 6,
+          })
+        }
         break
       }
 

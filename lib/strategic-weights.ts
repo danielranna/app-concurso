@@ -4,6 +4,12 @@ import { normLabel, matchScore } from "./incidence-subject-map"
 
 const MIN_WEIGHT = 0.5
 const WRONG_BOOST = 0.15
+const EVIDENCE_VALIDATED_ATTEMPTS = 12
+const EVIDENCE_DEVELOPING_ATTEMPTS = 4
+type EvidenceThresholds = {
+  developingAttempts: number
+  validatedAttempts: number
+}
 
 export type IncidenceTopicEntry = {
   topic_name: string
@@ -40,15 +46,90 @@ export function computeTopicPriorityScore(params: {
   return Math.round(raw * 1000) / 1000
 }
 
-export function formatPriorityReason(params: {
-  editalWeight: number
-  incidenceWeight: number
+export type DiagnosticState = "unknown" | "developing" | "validated"
+
+export function deriveDiagnosticState(params: {
+  attempts: number
+  hasCoverage: boolean
+  thresholds?: Partial<EvidenceThresholds>
+}): DiagnosticState {
+  const developingAttempts = Math.max(
+    1,
+    Number(params.thresholds?.developingAttempts ?? EVIDENCE_DEVELOPING_ATTEMPTS)
+  )
+  const validatedAttempts = Math.max(
+    developingAttempts + 1,
+    Number(params.thresholds?.validatedAttempts ?? EVIDENCE_VALIDATED_ATTEMPTS)
+  )
+  if (params.attempts < developingAttempts || !params.hasCoverage) {
+    return "unknown"
+  }
+  if (params.attempts < validatedAttempts) {
+    return "developing"
+  }
+  return "validated"
+}
+
+export function computeEvidenceScore(
+  attempts: number,
+  thresholds?: Partial<EvidenceThresholds>
+): number {
+  const developingAttempts = Math.max(
+    1,
+    Number(thresholds?.developingAttempts ?? EVIDENCE_DEVELOPING_ATTEMPTS)
+  )
+  const validatedAttempts = Math.max(
+    developingAttempts + 1,
+    Number(thresholds?.validatedAttempts ?? EVIDENCE_VALIDATED_ATTEMPTS)
+  )
+  if (attempts <= 0) return 0.55
+  if (attempts < developingAttempts) return 0.75
+  if (attempts < validatedAttempts) return 0.92
+  return 1
+}
+
+export function computeCoveragePenalty(hasCoverage: boolean): number {
+  return hasCoverage ? 1 : 0.65
+}
+
+export function computeMasteryGapScore(params: {
   gapScore: number
-  retentionPenalty: number
   wrongCount: number
+  confidenceRisk: number
+}): number {
+  const wrongFactor = Math.min(0.2, params.wrongCount * 0.03)
+  const confidenceFactor = Math.max(0, Math.min(0.25, params.confidenceRisk * 0.35))
+  const base = params.gapScore + wrongFactor + confidenceFactor
+  return Math.max(0.2, Math.min(1.5, Math.round(base * 1000) / 1000))
+}
+
+export function computeFusedPriorityScore(params: {
+  relevanceScore: number
+  masteryGapScore: number
+  retentionPenalty: number
+  evidenceScore: number
+  coveragePenalty: number
+}): number {
+  const raw =
+    params.relevanceScore *
+    params.masteryGapScore *
+    params.retentionPenalty *
+    params.evidenceScore *
+    params.coveragePenalty
+  return Math.round(raw * 1000) / 1000
+}
+
+export function formatPriorityReason(params: {
+  relevanceScore: number
+  masteryGapScore: number
+  evidenceScore: number
+  coveragePenalty: number
+  diagnosticState: DiagnosticState
+  availableQuestionCount: number
+  hasMaterialCoverage: boolean
+  retentionPenalty: number
 }): string {
-  const wrongFactor = 1 + params.wrongCount * WRONG_BOOST
-  return `Edital ×${params.editalWeight.toFixed(1)} × Incid. ×${params.incidenceWeight.toFixed(1)} × gap ${params.gapScore.toFixed(2)} × retenção ×${params.retentionPenalty.toFixed(2)} × erros ×${wrongFactor.toFixed(2)}`
+  return `Relevância ×${params.relevanceScore.toFixed(2)} × lacuna ×${params.masteryGapScore.toFixed(2)} × retenção ×${params.retentionPenalty.toFixed(2)} × evidência ×${params.evidenceScore.toFixed(2)} × cobertura ×${params.coveragePenalty.toFixed(2)} · diagnóstico ${params.diagnosticState} · questões ${params.availableQuestionCount} · material ${params.hasMaterialCoverage ? "ok" : "não"}`
 }
 
 export function editalWeightFromRankRow(row: {

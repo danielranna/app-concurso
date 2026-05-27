@@ -8,7 +8,11 @@ import { normLabel } from "../incidence-subject-map"
 import { fetchEditalSubjectRank } from "../edital-subject-rank-db"
 import {
   buildIncidenceTopicIndex,
-  computeTopicPriorityScore,
+  computeCoveragePenalty,
+  computeEvidenceScore,
+  computeFusedPriorityScore,
+  computeMasteryGapScore,
+  deriveDiagnosticState,
   formatPriorityReason,
   getActiveExamTargetId,
   getEditalWeightForSubject,
@@ -149,6 +153,19 @@ export async function recomputeStrategicQueue(
     string,
     { displayLabel: string; wrong: number; correct: number; fromIncidence: boolean }
   >()
+  const attemptsDistribution = topicStats
+    .map((t) => Number(t.correct + t.wrong))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b)
+  const p75Attempts =
+    attemptsDistribution.length > 0
+      ? attemptsDistribution[Math.floor((attemptsDistribution.length - 1) * 0.75)]
+      : 0
+  const adaptiveValidatedAttempts = Math.min(20, Math.max(8, Math.round(p75Attempts || 12)))
+  const adaptiveDevelopingAttempts = Math.max(
+    3,
+    Math.min(adaptiveValidatedAttempts - 1, Math.round(adaptiveValidatedAttempts * 0.33))
+  )
 
   for (const t of topicStats) {
     const key = topicBrainKey(t.topic)
@@ -179,6 +196,21 @@ export async function recomputeStrategicQueue(
   const rows: StrategicQueueRow[] = []
   let recentBoostCount = 0
 
+  const signalRiskByTopic = new Map<string, number>()
+  for (const sig of learningSignals) {
+    const fromEntity =
+      sig.entity_type === "tec_topic" && sig.entity_id
+        ? topicBrainKey(String(sig.entity_id))
+        : null
+    const fromMeta = sig.metadata?.tec_topic
+      ? topicBrainKey(String(sig.metadata.tec_topic))
+      : null
+    const key = fromEntity ?? fromMeta
+    if (!key) continue
+    const cur = signalRiskByTopic.get(key) ?? 0
+    signalRiskByTopic.set(key, cur + (Number(sig.score) || 0))
+  }
+
   for (const [topicNorm, t] of topicKeys) {
     const topicLabel = t.displayLabel
     const dominio =
@@ -188,9 +220,19 @@ export async function recomputeStrategicQueue(
     const estabilidade = brainEntry?.estabilidade ?? 0.5
     const retention_penalty =
       estabilidade < 0.4 ? 1.4 : estabilidade < 0.6 ? 1.15 : 1
+    const attempts = t.correct + t.wrong
+    const hasMaterialCoverage = t.fromIncidence || attempts > 0
+    const diagnosticState = deriveDiagnosticState({
+      attempts,
+      hasCoverage: hasMaterialCoverage,
+      thresholds: {
+        developingAttempts: adaptiveDevelopingAttempts,
+        validatedAttempts: adaptiveValidatedAttempts,
+      },
+    })
 
     const match = matchTopicToIncidence(topicLabel, topicIndex)
-    let incidence_weight =
+    const incidence_weight =
       match.weight > 1 || match.matchedTopic
         ? match.weight
         : incidenceByExactKey.get(topicLabel) ??
@@ -201,12 +243,25 @@ export async function recomputeStrategicQueue(
           ) ??
           1
 
-    let priority_score = computeTopicPriorityScore({
-      editalWeight,
-      incidenceWeight: incidence_weight,
+    const relevanceScore = Math.round(editalWeight * incidence_weight * 1000) / 1000
+    const confidenceRisk = Math.min(1, (signalRiskByTopic.get(topicNorm) ?? 0) / 40)
+    const masteryGapScore = computeMasteryGapScore({
       gapScore: gap_score,
-      retentionPenalty: retention_penalty,
       wrongCount: t.wrong,
+      confidenceRisk,
+    })
+    const evidenceScore = computeEvidenceScore(attempts, {
+      developingAttempts: adaptiveDevelopingAttempts,
+      validatedAttempts: adaptiveValidatedAttempts,
+    })
+    const coveragePenalty = computeCoveragePenalty(hasMaterialCoverage)
+
+    let priority_score = computeFusedPriorityScore({
+      relevanceScore,
+      masteryGapScore,
+      retentionPenalty: retention_penalty,
+      evidenceScore,
+      coveragePenalty,
     })
 
     priority_score = applyLearningSignalsToScore(
@@ -224,11 +279,14 @@ export async function recomputeStrategicQueue(
     if (priority_score < 0.15 && dominio > 0.85) continue
 
     const sqlReason = formatPriorityReason({
-      editalWeight,
-      incidenceWeight: incidence_weight,
-      gapScore: gap_score,
+      relevanceScore,
+      masteryGapScore,
+      evidenceScore,
+      coveragePenalty,
+      diagnosticState,
+      availableQuestionCount: attempts,
+      hasMaterialCoverage,
       retentionPenalty: retention_penalty,
-      wrongCount: t.wrong,
     })
 
     const humanReason = formatHumanPriorityReason({
@@ -251,7 +309,10 @@ export async function recomputeStrategicQueue(
       edital_weight: editalWeight,
       gap_score: Math.round(gap_score * 100) / 100,
       retention_penalty,
-      reason: mergeReasonWithLlm(sqlReason, humanReason),
+      reason: mergeReasonWithLlm(
+        sqlReason,
+        `${humanReason} [diag=${diagnosticState}; evid=${evidenceScore.toFixed(2)}; cob=${hasMaterialCoverage ? "ok" : "nao"}; tentativas=${attempts}; limiares=${adaptiveDevelopingAttempts}/${adaptiveValidatedAttempts}]`
+      ),
       source: "sql",
       computed_at: new Date().toISOString(),
       recent_boost: recentBoost,
@@ -277,15 +338,14 @@ export async function recomputeStrategicQueue(
       .from("strategic_queue_items")
       .insert(toInsert)
     if (error) {
-      const fallback = toInsert.map(
-        ({
-          topic_label: _tl,
-          subject_priority: _sp,
-          recent_boost: _rb,
-          edital_weight: _e,
-          ...rest
-        }) => rest
-      )
+      const fallback = toInsert.map((item) => {
+        const copy = { ...item } as Record<string, unknown>
+        delete copy.topic_label
+        delete copy.subject_priority
+        delete copy.recent_boost
+        delete copy.edital_weight
+        return copy
+      })
       const retry = await supabaseServer
         .from("strategic_queue_items")
         .insert(fallback)
