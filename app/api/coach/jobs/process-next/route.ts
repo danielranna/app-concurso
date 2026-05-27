@@ -25,7 +25,9 @@ export async function POST(req: Request) {
         ? ("embed_only" as const)
         : body.mode === "chunk_backfill"
           ? ("chunk_backfill" as const)
-          : ("full" as const)
+          : body.mode === "full"
+            ? ("full" as const)
+            : ("auto" as const)
     const result = await processNextIngestDocument(userId, {
       random,
       includeFailed,

@@ -9,6 +9,12 @@ import {
   ragStatusFromCounts,
   tryFinalizeReadyIfChunked,
 } from "./pipeline.js"
+import {
+  buildIngestStatusItems,
+  pickNextStatusItem,
+  readIngestStatusSummary,
+  emptyStepSummary,
+} from "./ingest-status.js"
 
 const SERIAL_INGEST_TYPES = [
   "document_parse",
@@ -25,6 +31,15 @@ const STUCK_PROCESSING_MS = 3 * 60 * 1000
 
 /** Evita dois process-next simultâneos para o mesmo usuário na mesma instância. */
 const usersProcessing = new Set()
+const batchCancel = new Set()
+
+export function requestBatchCancel(userId) {
+  batchCancel.add(userId)
+}
+
+export function isBatchRunning(userId) {
+  return usersProcessing.has(userId)
+}
 
 function subjectNameFromRow(row) {
   const s = row.subjects
@@ -429,7 +444,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
 }
 
 /**
- * Processa o próximo PDF da fila (pipeline completa na VPS).
+ * Processa o próximo PDF (modo auto ou legado) na VPS.
  */
 export async function processNextIngestDocument(supabase, config, userId, options) {
   const mode =
@@ -437,7 +452,10 @@ export async function processNextIngestDocument(supabase, config, userId, option
       ? "embed_only"
       : options?.mode === "chunk_backfill"
         ? "chunk_backfill"
-        : "full"
+        : options?.mode === "full"
+          ? "full"
+          : "auto"
+  const useAuto = mode === "auto"
   const embedOnly = mode === "embed_only"
   const chunkBackfill = mode === "chunk_backfill"
 
@@ -454,23 +472,43 @@ export async function processNextIngestDocument(supabase, config, userId, option
   try {
     await healStaleRunningJobs(supabase, userId)
     await skipPendingIngestJobs(supabase, userId)
-    if (!embedOnly && !chunkBackfill) await resetOrphanPipelineDocs(supabase, userId)
+    if (useAuto || (!embedOnly && !chunkBackfill)) {
+      await resetOrphanPipelineDocs(supabase, userId)
+    }
 
-    const all = await fetchAllStudyDocs(supabase, userId)
-    const embedStatus =
-      embedOnly || chunkBackfill || mode === "full"
-        ? await getEmbedStatusByDocument(supabase, userId)
-        : undefined
+    let targetId = null
+    let statusItem = null
+    let doc = null
 
-    const targetId = pickNextPendingId(all, {
-      random: options?.random,
-      includeFailed: options?.includeFailed && !chunkBackfill,
-      embedOnly,
-      chunkBackfill,
-      embedStatus,
-    })
+    if (useAuto) {
+      const items = await buildIngestStatusItems(supabase, userId)
+      statusItem = pickNextStatusItem(items, {
+        stepFilter: options?.stepFilter,
+        random: options?.random,
+      })
+      targetId = statusItem?.id ?? null
+      if (targetId) {
+        const all = await fetchAllStudyDocs(supabase, userId)
+        doc = all.find((d) => d.id === targetId)
+      }
+    } else {
+      const all = await fetchAllStudyDocs(supabase, userId)
+      const embedStatus =
+        embedOnly || chunkBackfill || mode === "full"
+          ? await getEmbedStatusByDocument(supabase, userId)
+          : undefined
 
-    if (!targetId) {
+      targetId = pickNextPendingId(all, {
+        random: options?.random,
+        includeFailed: options?.includeFailed && !chunkBackfill,
+        embedOnly,
+        chunkBackfill,
+        embedStatus,
+      })
+      doc = targetId ? all.find((d) => d.id === targetId) : null
+    }
+
+    if (!targetId || !doc) {
       return {
         status: "idle",
         mode,
@@ -478,12 +516,21 @@ export async function processNextIngestDocument(supabase, config, userId, option
       }
     }
 
-    const doc = all.find((d) => d.id === targetId)
-    if (!embedOnly && !chunkBackfill && doc?.ingest_stage === "failed") {
+    const embedSteps = ["needs_embed", "rag_partial"]
+    const shouldEmbedOnly = useAuto
+      ? embedSteps.includes(statusItem.effective_step)
+      : embedOnly
+
+    if (
+      !useAuto &&
+      !shouldEmbedOnly &&
+      !chunkBackfill &&
+      doc.ingest_stage === "failed"
+    ) {
       await requeueDocumentForIngest(supabase, userId, targetId)
     }
 
-    if (embedOnly) {
+    if (shouldEmbedOnly) {
       await supabase
         .from("subject_documents")
         .update({
@@ -497,7 +544,7 @@ export async function processNextIngestDocument(supabase, config, userId, option
     }
 
     try {
-      if (embedOnly) {
+      if (shouldEmbedOnly) {
         const result = await embedOnlyDocument(
           supabase,
           config,
@@ -507,6 +554,7 @@ export async function processNextIngestDocument(supabase, config, userId, option
         return {
           status: "ready",
           mode,
+          effective_step: statusItem?.effective_step,
           document_id: targetId,
           title: doc.title,
           chunks: result.chunks,
@@ -524,6 +572,7 @@ export async function processNextIngestDocument(supabase, config, userId, option
       return {
         status: "ready",
         mode,
+        effective_step: statusItem?.effective_step,
         document_id: targetId,
         title: doc.title,
         chunks: result.chunks,
@@ -534,11 +583,12 @@ export async function processNextIngestDocument(supabase, config, userId, option
       const msg = e instanceof Error ? e.message : "Erro na indexação"
       const timedOut = isIngestTimeoutError(e)
 
-      if (!embedOnly && (await tryFinalizeReadyIfChunked(supabase, targetId))) {
+      if (!shouldEmbedOnly && (await tryFinalizeReadyIfChunked(supabase, targetId))) {
         const counts = await getChunkEmbedCounts(supabase, targetId)
         return {
           status: "ready",
           mode,
+          effective_step: statusItem?.effective_step,
           document_id: targetId,
           title: doc.title,
           chunks: counts.total,
@@ -552,12 +602,13 @@ export async function processNextIngestDocument(supabase, config, userId, option
         ? "PDF muito grande para extrair no tempo limite. Aumente INGEST_PDF_TIMEOUT_MS na VPS ou divida o arquivo."
         : msg
 
-      if (!embedOnly || !msg.includes("Configure chave OpenAI")) {
+      if (!shouldEmbedOnly || !msg.includes("Configure chave OpenAI")) {
         await failDocumentIngest(supabase, targetId, failMsg)
       }
       return {
         status: "failed",
         mode,
+        effective_step: statusItem?.effective_step,
         document_id: targetId,
         title: doc.title,
         error: failMsg,
@@ -566,5 +617,103 @@ export async function processNextIngestDocument(supabase, config, userId, option
     }
   } finally {
     usersProcessing.delete(userId)
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Loop interno na VPS: processa até max_documents ou max_seconds.
+ */
+export async function runIngestBatch(supabase, config, userId, options = {}) {
+  if (usersProcessing.has(userId)) {
+    return {
+      processed: 0,
+      ok: 0,
+      failed: 0,
+      last_error: "Já há processamento em andamento.",
+      summary_snapshot: emptyStepSummary(),
+      stopped_reason: "busy",
+    }
+  }
+
+  const maxDocuments = Math.min(
+    Math.max(Number(options.max_documents ?? 50), 1),
+    500
+  )
+  const maxSeconds = Math.min(
+    Math.max(Number(options.max_seconds ?? 3600), 60),
+    86_400
+  )
+  const stepFilter = options.step ?? undefined
+
+  batchCancel.delete(userId)
+
+  let processed = 0
+  let ok = 0
+  let failed = 0
+  let lastError = null
+  let stoppedReason = "idle"
+  const started = Date.now()
+
+  try {
+    while (processed < maxDocuments && Date.now() - started < maxSeconds * 1000) {
+      if (batchCancel.has(userId)) {
+        stoppedReason = "cancelled"
+        break
+      }
+
+      const result = await processNextIngestDocument(supabase, config, userId, {
+        mode: "auto",
+        stepFilter,
+      })
+
+      if (result.status === "idle") {
+        stoppedReason = "idle"
+        break
+      }
+
+      if (result.status === "retry") {
+        await sleep(2000)
+        continue
+      }
+
+      processed++
+      if (result.status === "ready") ok++
+      if (result.status === "failed") {
+        failed++
+        lastError = result.error ?? lastError
+      }
+    }
+
+    if (
+      processed >= maxDocuments &&
+      stoppedReason !== "idle" &&
+      stoppedReason !== "cancelled"
+    ) {
+      stoppedReason = "max_documents"
+    }
+    if (
+      Date.now() - started >= maxSeconds * 1000 &&
+      stoppedReason !== "idle" &&
+      stoppedReason !== "cancelled"
+    ) {
+      stoppedReason = "max_seconds"
+    }
+  } finally {
+    batchCancel.delete(userId)
+  }
+
+  const { summary } = await readIngestStatusSummary(supabase, userId)
+
+  return {
+    processed,
+    ok,
+    failed,
+    last_error: lastError,
+    summary_snapshot: summary,
+    stopped_reason: stoppedReason,
   }
 }

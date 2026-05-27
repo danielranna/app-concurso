@@ -1,9 +1,17 @@
-/** Fila global — controle manual (botão), sem polling automático de processamento. */
+/** Pipeline de indexação — leitura na Vercel, processamento na VPS. */
 
+import {
+  EFFECTIVE_STEP_LABELS,
+  workRemainingFromSummary,
+  type EffectiveIngestStep,
+} from "@/lib/ai/ingest-effective-step"
 import {
   getCoachUploadAuthHeaders,
   getCoachUploadBaseUrl,
 } from "@/lib/coach-upload-client"
+
+export type { EffectiveIngestStep }
+export { EFFECTIVE_STEP_LABELS, workRemainingFromSummary }
 
 const INGEST_DEBUG =
   process.env.NEXT_PUBLIC_COACH_INGEST_DEBUG !== "0"
@@ -111,7 +119,133 @@ export async function fetchIngestQueueDetails(
   return data as IngestQueueDetails
 }
 
-export type IngestProcessMode = "full" | "embed_only" | "chunk_backfill"
+export type IngestStatusItem = {
+  id: string
+  title: string
+  subject_id: string | null
+  subject_name: string | null
+  ingest_stage: string
+  effective_step: EffectiveIngestStep
+  has_source_text: boolean
+  chunks_db: number
+  embedded_db: number
+  ingest_error?: string | null
+  page_count?: number | null
+  created_at: string
+}
+
+export type IngestStatusDetails = {
+  summary: Record<EffectiveIngestStep, number>
+  total: number
+  filtered_total: number
+  items: IngestStatusItem[]
+  offset: number
+  limit: number
+  has_more: boolean
+  batch_running: boolean
+}
+
+export async function fetchIngestStatus(
+  userId: string,
+  options?: {
+    step?: EffectiveIngestStep
+    limit?: number
+    offset?: number
+    q?: string
+  }
+): Promise<IngestStatusDetails> {
+  const params = new URLSearchParams({ user_id: userId })
+  if (options?.step) params.set("step", options.step)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  if (options?.offset != null) params.set("offset", String(options.offset))
+  if (options?.q) params.set("q", options.q)
+
+  const url = `/api/coach/documents/ingest-status?${params}`
+  logIngest("Status pipeline", { url })
+
+  const res = await fetch(url, { cache: "no-store" })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error ?? "Falha ao consultar status")
+  }
+  return data as IngestStatusDetails
+}
+
+export type RunIngestBatchResult = {
+  processed: number
+  ok: number
+  failed: number
+  last_error?: string | null
+  summary_snapshot: Record<EffectiveIngestStep, number>
+  stopped_reason: "idle" | "max_documents" | "max_seconds" | "cancelled" | "busy"
+}
+
+export async function runIngestBatchOnVps(
+  userId: string,
+  options?: {
+    maxDocuments?: number
+    maxSeconds?: number
+    step?: EffectiveIngestStep
+  }
+): Promise<RunIngestBatchResult> {
+  const external = getCoachUploadBaseUrl()
+  const headers = external ? await getCoachUploadAuthHeaders() : null
+
+  if (!external || !headers) {
+    throw new Error("Configure NEXT_PUBLIC_COACH_UPLOAD_URL e faça login.")
+  }
+
+  const controller = new AbortController()
+  const maxSeconds = options?.maxSeconds ?? 540
+  const timer = setTimeout(
+    () => controller.abort(),
+    (maxSeconds + 30) * 1000
+  )
+
+  const url = `${external}/coach/jobs/run-batch`
+  logIngest("Lote VPS", { url, maxSeconds })
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        user_id: userId,
+        max_documents: options?.maxDocuments ?? 20,
+        max_seconds: maxSeconds,
+        step: options?.step,
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error ?? "Falha no lote")
+    }
+    return data as RunIngestBatchResult
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function cancelIngestBatchOnVps(userId: string) {
+  const external = getCoachUploadBaseUrl()
+  const headers = external ? await getCoachUploadAuthHeaders() : null
+  if (!external || !headers) return
+
+  await fetch(`${external}/coach/jobs/cancel-batch`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ user_id: userId }),
+    cache: "no-store",
+  })
+}
+
+export type IngestProcessMode =
+  | "full"
+  | "embed_only"
+  | "chunk_backfill"
+  | "auto"
 
 export type ProcessNextResult = {
   status: "ready" | "failed" | "idle" | "retry"
@@ -148,7 +282,7 @@ export async function processNextIngest(
     : "/api/coach/jobs/process-next"
 
   const runtime = external ? "VPS" : "Vercel"
-  const mode = options?.mode ?? "full"
+  const mode = options?.mode ?? "auto"
   logIngest(`Processar próximo: ${runtime}`, {
     url,
     uploadBaseUrl: external ?? "(NEXT_PUBLIC_COACH_UPLOAD_URL não definida no build)",

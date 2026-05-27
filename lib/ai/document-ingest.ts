@@ -204,6 +204,14 @@ export async function loadDocumentText(
   return String(pt.full_text ?? pt.text_excerpt ?? "")
 }
 
+export async function hasStoredDocumentText(
+  documentId: string,
+  doc?: { parsed_tables?: Record<string, unknown> | null }
+): Promise<boolean> {
+  const text = await loadDocumentText(documentId, doc)
+  return text.trim().length >= MIN_CHUNK
+}
+
 export async function parseDocumentFromStorage(
   userId: string,
   documentId: string
@@ -382,8 +390,8 @@ export async function embedOnlyDocument(
 ): Promise<{ chunks: number; embedded: number }> {
   const doc = await getDocumentById(userId, documentId)
   if (!doc) throw new Error("Documento não encontrado")
-  if (doc.ingest_stage !== "ready") {
-    throw new Error("Só é possível vetorizar documentos já indexados (ready)")
+  if (doc.ingest_stage !== "ready" && doc.ingest_stage !== "failed") {
+    throw new Error("Só é possível vetorizar documentos prontos ou em retry")
   }
 
   const before = await getChunkEmbedCounts(documentId)
@@ -467,7 +475,7 @@ export async function embedDocumentChunks(
 export async function ingestDocumentPipeline(
   userId: string,
   documentId: string,
-  options?: { skipEmbed?: boolean }
+  options?: { skipEmbed?: boolean; skipParse?: boolean }
 ): Promise<{
   chunks: number
   embedded: number
@@ -475,7 +483,28 @@ export async function ingestDocumentPipeline(
   char_count?: number
 }> {
   try {
-    const parsed = await parseDocumentFromStorage(userId, documentId)
+    const doc = await getDocumentById(userId, documentId)
+    if (!doc) throw new Error("Documento não encontrado")
+
+    let page_count = Number(doc.page_count ?? 0)
+    let char_count = Number(doc.char_count ?? 0)
+
+    const skipParse =
+      options?.skipParse ?? (await hasStoredDocumentText(documentId, doc))
+
+    if (!skipParse) {
+      const parsed = await parseDocumentFromStorage(userId, documentId)
+      page_count = parsed.page_count
+      char_count = parsed.char_count
+    } else {
+      const text = await loadDocumentText(documentId, doc)
+      char_count = text.length
+      if (!page_count) {
+        const pt = (doc.parsed_tables ?? {}) as { page_count?: number }
+        page_count = Number(pt.page_count ?? 0)
+      }
+    }
+
     const { chunks } = await chunkDocument(userId, documentId)
 
     let embedded = 0
@@ -502,8 +531,8 @@ export async function ingestDocumentPipeline(
     return {
       chunks,
       embedded,
-      page_count: parsed.page_count,
-      char_count: parsed.char_count,
+      page_count: page_count || undefined,
+      char_count: char_count || undefined,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro na ingestão"

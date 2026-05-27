@@ -2,7 +2,7 @@
 
 import CoachHeader from "@/components/coach/CoachHeader"
 import CoachSubNav from "@/components/coach/CoachSubNav"
-import IngestQueuePanel from "@/components/coach/IngestQueuePanel"
+import IngestPipelinePanel from "@/components/coach/IngestPipelinePanel"
 
 export default function CoachLayout({
   children,
@@ -13,7 +13,7 @@ export default function CoachLayout({
     <div className="p-6">
       <CoachHeader />
       <CoachSubNav />
-      <IngestQueuePanel />
+      <IngestPipelinePanel />
       {children}
     </div>
   )

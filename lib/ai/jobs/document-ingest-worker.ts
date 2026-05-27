@@ -10,6 +10,12 @@ import {
   tryFinalizeReadyIfChunked,
   type RagDocStatus,
 } from "../document-ingest"
+import {
+  buildIngestStatusItems,
+  pickNextStatusItem,
+  type IngestStatusItem,
+} from "../ingest-status"
+import type { EffectiveIngestStep } from "../ingest-effective-step"
 import { DOCUMENT_PIPELINE_JOB_TYPES } from "./document-enqueue"
 import type { JobType } from "./queue"
 
@@ -408,7 +414,11 @@ export async function requeueDocumentForIngest(
     .eq("id", documentId)
 }
 
-export type IngestProcessMode = "full" | "embed_only" | "chunk_backfill"
+export type IngestProcessMode =
+  | "full"
+  | "embed_only"
+  | "chunk_backfill"
+  | "auto"
 
 export type ProcessNextResult = {
   status: "ready" | "failed" | "idle" | "retry"
@@ -417,13 +427,22 @@ export type ProcessNextResult = {
   error?: string
   chunks?: number
   embedded?: number
+  effective_step?: EffectiveIngestStep
   mode?: IngestProcessMode
   queue: IngestQueueDetails
 }
 
+export type RunIngestBatchResult = {
+  processed: number
+  ok: number
+  failed: number
+  last_error?: string | null
+  summary_snapshot: Record<EffectiveIngestStep, number>
+  stopped_reason: "idle" | "max_documents" | "max_seconds" | "cancelled" | "busy"
+}
+
 /**
- * Loop do botão: SELECT na DB → processa 1 PDF inteiro → SELECT de novo.
- * Sem fila ai_jobs no caminho feliz.
+ * Processa 1 PDF conforme effective_step (modo auto) ou modos legados.
  */
 export async function processNextIngestDocument(
   userId: string,
@@ -431,31 +450,53 @@ export async function processNextIngestDocument(
     random?: boolean
     includeFailed?: boolean
     mode?: IngestProcessMode
+    stepFilter?: EffectiveIngestStep
   }
 ): Promise<ProcessNextResult> {
-  const mode = options?.mode ?? "full"
+  const mode = options?.mode ?? "auto"
+  const useAuto = mode === "auto"
   const embedOnly = mode === "embed_only"
   const chunkBackfill = mode === "chunk_backfill"
 
   await healStaleRunningJobs(userId)
   await skipPendingIngestJobs(userId)
-  if (!embedOnly && !chunkBackfill) await resetOrphanPipelineDocs(userId)
+  if (useAuto || (!embedOnly && !chunkBackfill)) {
+    await resetOrphanPipelineDocs(userId)
+  }
 
-  const all = await fetchAllStudyDocs(userId)
-  const embedStatus =
-    embedOnly || chunkBackfill || mode === "full"
-      ? await getEmbedStatusByDocument(userId)
-      : undefined
+  let targetId: string | null = null
+  let statusItem: IngestStatusItem | null = null
+  let doc: DocRow | undefined
 
-  const targetId = pickNextPendingId(all, {
-    random: options?.random,
-    includeFailed: options?.includeFailed && !chunkBackfill,
-    embedOnly,
-    chunkBackfill,
-    embedStatus,
-  })
+  if (useAuto) {
+    const items = await buildIngestStatusItems(userId)
+    statusItem = pickNextStatusItem(items, {
+      stepFilter: options?.stepFilter,
+      random: options?.random,
+    })
+    targetId = statusItem?.id ?? null
+    if (targetId) {
+      const all = await fetchAllStudyDocs(userId)
+      doc = all.find((d) => d.id === targetId)
+    }
+  } else {
+    const all = await fetchAllStudyDocs(userId)
+    const embedStatus =
+      embedOnly || chunkBackfill || mode === "full"
+        ? await getEmbedStatusByDocument(userId)
+        : undefined
 
-  if (!targetId) {
+    targetId = pickNextPendingId(all, {
+      random: options?.random,
+      includeFailed: options?.includeFailed && !chunkBackfill,
+      embedOnly,
+      chunkBackfill,
+      embedStatus,
+    })
+    doc = targetId ? all.find((d) => d.id === targetId) : undefined
+  }
+
+  if (!targetId || !doc) {
     return {
       status: "idle",
       mode,
@@ -463,12 +504,21 @@ export async function processNextIngestDocument(
     }
   }
 
-  const doc = all.find((d) => d.id === targetId)!
-  if (!embedOnly && !chunkBackfill && doc.ingest_stage === "failed") {
+  const embedSteps: EffectiveIngestStep[] = ["needs_embed", "rag_partial"]
+  const shouldEmbedOnly = useAuto
+    ? embedSteps.includes(statusItem!.effective_step)
+    : embedOnly
+
+  if (
+    !useAuto &&
+    !shouldEmbedOnly &&
+    !chunkBackfill &&
+    doc.ingest_stage === "failed"
+  ) {
     await requeueDocumentForIngest(userId, targetId)
   }
 
-  if (embedOnly) {
+  if (shouldEmbedOnly) {
     await supabaseServer
       .from("subject_documents")
       .update({
@@ -482,11 +532,12 @@ export async function processNextIngestDocument(
   }
 
   try {
-    if (embedOnly) {
+    if (shouldEmbedOnly) {
       const result = await embedOnlyDocument(userId, targetId)
       return {
         status: "ready",
         mode,
+        effective_step: statusItem?.effective_step,
         document_id: targetId,
         title: doc.title,
         chunks: result.chunks,
@@ -499,6 +550,7 @@ export async function processNextIngestDocument(
     return {
       status: "ready",
       mode,
+      effective_step: statusItem?.effective_step,
       document_id: targetId,
       title: doc.title,
       chunks: result.chunks,
@@ -509,11 +561,12 @@ export async function processNextIngestDocument(
     const msg = e instanceof Error ? e.message : "Erro na indexação"
     const timedOut = isIngestTimeoutError(e)
 
-    if (!embedOnly && (await tryFinalizeReadyIfChunked(targetId))) {
+    if (!shouldEmbedOnly && (await tryFinalizeReadyIfChunked(targetId))) {
       const counts = await getChunkEmbedCounts(targetId)
       return {
         status: "ready",
         mode,
+        effective_step: statusItem?.effective_step,
         document_id: targetId,
         title: doc.title,
         chunks: counts.total,
@@ -527,12 +580,13 @@ export async function processNextIngestDocument(
       ? "PDF muito grande para processar de uma vez (timeout). Configure a VPS para indexação ou divida o arquivo."
       : msg
 
-    if (!embedOnly || !msg.includes("Configure chave OpenAI")) {
+    if (!shouldEmbedOnly || !msg.includes("Configure chave OpenAI")) {
       await failDocumentIngest(targetId, failMsg)
     }
     return {
       status: "failed",
       mode,
+      effective_step: statusItem?.effective_step,
       document_id: targetId,
       title: doc.title,
       error: failMsg,

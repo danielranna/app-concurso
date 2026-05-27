@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js"
 import { resolveUserFromRequest } from "./auth.js"
 import { uploadStudyMaterialPdf } from "./upload.js"
 import { getServiceClient } from "./supabase.js"
-import { processNextIngestDocument } from "./ingest/worker.js"
+import { processNextIngestDocument, runIngestBatch, requestBatchCancel } from "./ingest/worker.js"
 
 const config = loadConfig()
 const app = express()
@@ -55,16 +55,74 @@ app.post("/coach/jobs/process-next", express.json(), async (req, res) => {
         ? "embed_only"
         : req.body?.mode === "chunk_backfill"
           ? "chunk_backfill"
-          : "full"
+          : req.body?.mode === "full"
+            ? "full"
+            : "auto"
     const supabase = getServiceClient(config)
     const result = await processNextIngestDocument(supabase, config, bodyUserId, {
       random,
       includeFailed,
       mode,
+      stepFilter: req.body?.step,
     })
     return res.json(result)
   } catch (e) {
     console.error("[ingest] process-next", e)
+    const msg = e instanceof Error ? e.message : "Erro interno"
+    return res.status(500).json({ error: msg })
+  }
+})
+
+app.post("/coach/jobs/run-batch", express.json(), async (req, res) => {
+  try {
+    const auth = await resolveUserFromRequest(req, config)
+    if (auth.error) {
+      return res.status(auth.status).json({ error: auth.error })
+    }
+
+    const bodyUserId =
+      typeof req.body?.user_id === "string" ? req.body.user_id.trim() : ""
+    if (!bodyUserId) {
+      return res.status(400).json({ error: "user_id obrigatório" })
+    }
+    if (bodyUserId !== auth.userId) {
+      return res.status(403).json({ error: "user_id não corresponde à sessão" })
+    }
+
+    const supabase = getServiceClient(config)
+    const result = await runIngestBatch(supabase, config, bodyUserId, {
+      max_documents: req.body?.max_documents,
+      max_seconds: req.body?.max_seconds,
+      step: req.body?.step,
+    })
+    return res.json(result)
+  } catch (e) {
+    console.error("[ingest] run-batch", e)
+    const msg = e instanceof Error ? e.message : "Erro interno"
+    return res.status(500).json({ error: msg })
+  }
+})
+
+app.post("/coach/jobs/cancel-batch", express.json(), async (req, res) => {
+  try {
+    const auth = await resolveUserFromRequest(req, config)
+    if (auth.error) {
+      return res.status(auth.status).json({ error: auth.error })
+    }
+
+    const bodyUserId =
+      typeof req.body?.user_id === "string" ? req.body.user_id.trim() : ""
+    if (!bodyUserId) {
+      return res.status(400).json({ error: "user_id obrigatório" })
+    }
+    if (bodyUserId !== auth.userId) {
+      return res.status(403).json({ error: "user_id não corresponde à sessão" })
+    }
+
+    requestBatchCancel(bodyUserId)
+    return res.json({ ok: true })
+  } catch (e) {
+    console.error("[ingest] cancel-batch", e)
     const msg = e instanceof Error ? e.message : "Erro interno"
     return res.status(500).json({ error: msg })
   }

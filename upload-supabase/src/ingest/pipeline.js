@@ -151,6 +151,11 @@ export async function loadDocumentText(supabase, documentId, doc) {
   return String(pt.full_text ?? pt.text_excerpt ?? "")
 }
 
+export async function hasStoredDocumentText(supabase, documentId, doc) {
+  const text = await loadDocumentText(supabase, documentId, doc)
+  return text.trim().length >= MIN_CHUNK
+}
+
 export async function parseDocumentFromStorage(
   supabase,
   config,
@@ -317,8 +322,8 @@ async function persistRagMetadata(supabase, documentId, doc, counts) {
 export async function embedOnlyDocument(supabase, config, userId, documentId) {
   const doc = await getDocumentById(supabase, userId, documentId)
   if (!doc) throw new Error("Documento não encontrado")
-  if (doc.ingest_stage !== "ready") {
-    throw new Error("Só é possível vetorizar documentos já indexados (ready)")
+  if (doc.ingest_stage !== "ready" && doc.ingest_stage !== "failed") {
+    throw new Error("Só é possível vetorizar documentos prontos ou em retry")
   }
 
   const before = await getChunkEmbedCounts(supabase, documentId)
@@ -404,12 +409,34 @@ export async function ingestDocumentPipeline(
   options = {}
 ) {
   try {
-    const parsed = await parseDocumentFromStorage(
-      supabase,
-      config,
-      userId,
-      documentId
-    )
+    const doc = await getDocumentById(supabase, userId, documentId)
+    if (!doc) throw new Error("Documento não encontrado")
+
+    let page_count = Number(doc.page_count ?? 0)
+    let char_count = Number(doc.char_count ?? 0)
+
+    const skipParse =
+      options.skipParse ??
+      (await hasStoredDocumentText(supabase, documentId, doc))
+
+    if (!skipParse) {
+      const parsed = await parseDocumentFromStorage(
+        supabase,
+        config,
+        userId,
+        documentId
+      )
+      page_count = parsed.page_count
+      char_count = parsed.char_count
+    } else {
+      const text = await loadDocumentText(supabase, documentId, doc)
+      char_count = text.length
+      if (!page_count) {
+        const pt = doc.parsed_tables ?? {}
+        page_count = Number(pt.page_count ?? 0)
+      }
+    }
+
     const { chunks } = await chunkDocument(supabase, userId, documentId)
 
     let embedded = 0
@@ -441,8 +468,8 @@ export async function ingestDocumentPipeline(
     return {
       chunks,
       embedded,
-      page_count: parsed.page_count,
-      char_count: parsed.char_count,
+      page_count: page_count || undefined,
+      char_count: char_count || undefined,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro na ingestão"

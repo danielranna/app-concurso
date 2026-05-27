@@ -307,7 +307,11 @@ Enquanto não tiver HTTPS, o app continua usando a rota da Vercel (4 MB). Não c
 | Rota | Função |
 |------|--------|
 | `POST /coach/documents/upload` | Upload rápido → `ingest_stage: uploaded` |
-| `POST /coach/jobs/process-next` | Parse + chunk + embed de 1 PDF da fila |
+| `POST /coach/jobs/process-next` | 1 PDF — modo `auto` (padrão): só faz o passo que falta |
+| `POST /coach/jobs/run-batch` | Lote na VPS (`max_documents`, `max_seconds`, `step` opcional) |
+| `POST /coach/jobs/cancel-batch` | Cancela lote em andamento para o usuário |
+
+No app (Coach), o painel **Pipeline de indexação** mostra cada PDF por etapa real (`needs_chunk`, `needs_embed`, etc.) e o botão **Completar até RAG (VPS)** dispara lotes até acabar.
 
 Variáveis no `.env` da VPS:
 
@@ -316,16 +320,21 @@ Variáveis no `.env` da VPS:
 | `AI_CREDENTIALS_SECRET` | **Obrigatório para RAG** — mesmo valor da Vercel (descriptografa chave OpenAI do usuário) |
 | `INGEST_PDF_TIMEOUT_MS` | `0` = sem limite na extração; ou ex. `1800000` (30 min) |
 
-Sem `AI_CREDENTIALS_SECRET`, os PDFs ficam **prontos** com texto/chunks mas **sem vetores** (barra RAG baixa no app). Use **Vetorizar pendentes (RAG)** após corrigir o secret.
+Sem `AI_CREDENTIALS_SECRET`, os PDFs ficam com texto/chunks mas **sem vetores**. Corrija o secret e rode o lote de novo.
 
 Diagnóstico no Supabase: rode `sql-rag-ingest-audit.sql` na raiz do projeto Next.
 
 Backfill sem browser (cron):
 
 ```bash
-# No .env: INGEST_CRON_USER_IDS=seu-user-uuid
+# No .env:
+# INGEST_CRON_USER_IDS=seu-user-uuid
+# INGEST_CRON_MAX_PER_USER=20
+# INGEST_CRON_MAX_SECONDS=540
 node scripts/process-queue-once.js
 ```
+
+O cron usa `mode: auto` — pula re-parse se o texto já está em `document_source_text`.
 
 PDFs travados sem chunks: rode `sql-heal-ingest-backlog.sql` no Supabase (na raiz do repo Next).
 
@@ -337,9 +346,11 @@ Avisos `TT: undefined function` e `Buffer() deprecated` no log são **ruído do 
 
 ```
 upload-supabase/
-  src/index.js           # Express: upload + process-next
+  src/index.js           # Express: upload + process-next + run-batch
   src/upload.js          # grava PDF no Storage + subject_documents
   src/ingest/            # pipeline (sync com lib/ai/document-ingest.ts)
+  src/ingest/effective-step.js
+  src/ingest/ingest-status.js
   scripts/process-queue-once.js
   ecosystem.config.cjs
   .env.example
