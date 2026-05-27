@@ -31,6 +31,8 @@ export type IngestStatusResponse = {
   total: number
   filtered_total: number
   items: IngestStatusItem[]
+  current_item: IngestStatusItem | null
+  recent_errors: IngestStatusItem[]
   offset: number
   limit: number
   has_more: boolean
@@ -177,12 +179,21 @@ export async function readIngestStatus(
 
   const totalFiltered = filtered.length
   const page = filtered.slice(offset, offset + limit)
+  const currentProcessing =
+    allItems.find((i) => i.effective_step === "processing") ?? null
+  const currentItem =
+    currentProcessing ?? pickNextStatusItem(allItems) ?? null
+  const recentErrors = allItems
+    .filter((i) => i.effective_step === "failed" && i.ingest_error)
+    .slice(0, 5)
 
   return {
     summary,
     total: allItems.length,
     filtered_total: totalFiltered,
     items: page,
+    current_item: currentItem,
+    recent_errors: recentErrors,
     offset,
     limit,
     has_more: offset + limit < totalFiltered,

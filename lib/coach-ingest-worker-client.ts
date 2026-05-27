@@ -139,6 +139,8 @@ export type IngestStatusDetails = {
   total: number
   filtered_total: number
   items: IngestStatusItem[]
+  current_item: IngestStatusItem | null
+  recent_errors: IngestStatusItem[]
   offset: number
   limit: number
   has_more: boolean
