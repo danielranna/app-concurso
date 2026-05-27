@@ -22,20 +22,54 @@ export async function enqueueJob(params: {
   priority?: number
   scheduledAt?: Date
 }) {
-  const { data, error } = await supabaseServer
+  const nowIso = (params.scheduledAt ?? new Date()).toISOString()
+
+  const { data: existing, error: existingErr } = await supabaseServer
     .from("ai_jobs")
-    .upsert(
-      {
-        user_id: params.userId,
+    .select("id, status")
+    .eq("user_id", params.userId)
+    .eq("idempotency_key", params.idempotencyKey)
+    .maybeSingle()
+
+  if (existingErr) throw new Error(existingErr.message)
+
+  if (existing?.status === "running") {
+    return existing
+  }
+
+  if (existing) {
+    const { data, error } = await supabaseServer
+      .from("ai_jobs")
+      .update({
         job_type: params.jobType,
-        idempotency_key: params.idempotencyKey,
         payload: params.payload ?? {},
         status: "pending",
         priority: params.priority ?? 0,
-        scheduled_at: (params.scheduledAt ?? new Date()).toISOString(),
-      },
-      { onConflict: "user_id,idempotency_key", ignoreDuplicates: true }
-    )
+        scheduled_at: nowIso,
+        started_at: null,
+        completed_at: null,
+        error_message: null,
+        result: {},
+      })
+      .eq("id", existing.id)
+      .select("id, status")
+      .maybeSingle()
+
+    if (error) throw new Error(error.message)
+    return data
+  }
+
+  const { data, error } = await supabaseServer
+    .from("ai_jobs")
+    .insert({
+      user_id: params.userId,
+      job_type: params.jobType,
+      idempotency_key: params.idempotencyKey,
+      payload: params.payload ?? {},
+      status: "pending",
+      priority: params.priority ?? 0,
+      scheduled_at: nowIso,
+    })
     .select("id, status")
     .maybeSingle()
 
