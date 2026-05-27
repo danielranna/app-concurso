@@ -364,11 +364,18 @@ export default function CoachInsightsPage() {
             Recalcular
           </button>
         </div>
-        <p className="mb-3 text-xs text-slate-600">
-          Top {Math.min(5, queueItems.length)} por prioridade. Quando o cérebro tiver
-          dados de relatório, cada tópico pode mostrar o equívoco específico — não só
-          “bom ou ruim”.
+        <p className="mb-2 text-xs text-slate-600">
+          Top {Math.min(5, queueItems.length)} do ranking <strong>cruzado</strong>{" "}
+          (edital × incidência × seu desempenho). Tópicos de alta incidência sem
+          nenhuma questão feita não entram aqui — aparecem na página de prioridades
+          em “Ainda não estudado”.
         </p>
+        <Link
+          href={`/coach/materias/${subjectId}/prioridades`}
+          className="mb-3 inline-flex text-xs font-medium text-violet-700 hover:underline"
+        >
+          Ver prioridades completas (Edital × Cérebro × Cruzado) →
+        </Link>
         <StrategicQueueList
           items={queueItems}
           loading={loading && !queueItems.length}
