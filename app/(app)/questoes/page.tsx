@@ -52,7 +52,7 @@ export default function QuestoesHomePage() {
   }, [router])
 
   return (
-    <div className="p-6">
+    <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Questões</h1>
