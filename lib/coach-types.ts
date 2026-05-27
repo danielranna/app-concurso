@@ -197,6 +197,23 @@ export type StrategicQueueItem = {
   computed_at: string
 }
 
+export type PlanGenerationMeta = {
+  question_mode: "round_robin" | "top_queue"
+  distribution_mode: "fixed_per_subject" | "equal_split"
+  questions_per_round: number
+  subject_order: { subject_id: string; name: string }[]
+  rounds: {
+    round: number
+    subject_id: string
+    subject_name: string
+    count: number
+    topic?: string
+    reason?: string
+  }[]
+  total_questions: number
+  inbox_drafts: { flashcards: number; summaries: number }
+}
+
 export type DailyStudyBlock = {
   subject_id: string
   subject_name?: string
@@ -206,6 +223,7 @@ export type DailyStudyBlock = {
     | "error_review"
     | "read_material"
     | "notebook_create"
+    | "inbox_pending"
   count: number
   minutes: number
   label: string
@@ -229,6 +247,7 @@ export type DailyStudyPlan = {
   combined_question_count?: number
   user_pinned?: boolean
   completed_block_keys?: string[]
+  generation_meta?: PlanGenerationMeta
 }
 
 export type EditalSubjectRankRow = {

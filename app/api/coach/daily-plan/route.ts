@@ -30,12 +30,16 @@ export async function GET(req: Request) {
   }
 
   const plan = planRowToDailyStudyPlan(data)
+  const generation_meta =
+    (data as { generation_meta?: unknown }).generation_meta ??
+    plan.generation_meta
   return NextResponse.json({
     plan: {
       ...data,
       ...plan,
       plan_date: plan.date,
       completed_block_keys,
+      generation_meta,
     },
   })
 }

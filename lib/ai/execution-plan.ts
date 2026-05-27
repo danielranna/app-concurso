@@ -1,7 +1,6 @@
 import { supabaseServer } from "../supabase-server"
-import type { DailyStudyBlock, DailyStudyPlan } from "../coach-types"
+import type { DailyStudyBlock, DailyStudyPlan, PlanGenerationMeta } from "../coach-types"
 import { buildExecutionContext } from "./context-builder"
-import { pickQuestionIdsFromPerformance } from "../notebook-from-performance"
 import { createNotebookFromQuestionIds } from "../notebook-from-performance"
 import { runExecutionNarrativeAgent } from "./agents/execution"
 import {
@@ -9,13 +8,18 @@ import {
   recomputeStrategicQueue,
 } from "./strategic-queue"
 import {
-  buildBlockKey,
-  buildSummaryBlocks,
-  pickClassifiedWrongAttempts,
-  pickDueFlashcardStateIds,
+  getExecutorStudyPreferences,
+  resolveExecutorSubjectPool,
+} from "./execution-subjects"
+import {
+  buildRoundRobinQuestionSet,
+  buildTopNQuestionSet,
+  type QueueRow,
+} from "./execution-questions"
+import {
+  buildComprehensionSummaryBlocks,
+  enqueueExecutorFlashcardDrafts,
   planRowToDailyStudyPlan,
-  rankSubjectsByQueue,
-  topQueueReasonForSubject,
 } from "./execution-helpers"
 
 export type GenerateDailyStudyPlanOptions = {
@@ -25,21 +29,13 @@ export type GenerateDailyStudyPlanOptions = {
   recentWrongTopics?: string[]
 }
 
-type QueueDiagnosticState = "unknown" | "developing" | "validated"
-
-function diagnosticStateFromReason(reason?: string | null): QueueDiagnosticState {
-  const raw = String(reason ?? "").toLowerCase()
-  if (raw.includes("diag=unknown")) return "unknown"
-  if (raw.includes("diag=developing")) return "developing"
-  return "validated"
-}
-
 export async function generateDailyStudyPlan(
   userId: string,
   force = false,
   options?: GenerateDailyStudyPlanOptions
 ): Promise<DailyStudyPlan & { user_pinned?: boolean; completed_block_keys?: string[] }> {
   let ctx = await buildExecutionContext(userId)
+  const execPrefs = await getExecutorStudyPreferences(userId)
 
   const existingPinned = Boolean(
     (ctx.existing_plan as { user_pinned?: boolean })?.user_pinned
@@ -94,45 +90,24 @@ export async function generateDailyStudyPlan(
   }
 
   const limits = {
-    questions: Number(ctx.prefs.daily_limits.questions ?? 50),
-    flashcards: Number(ctx.prefs.daily_limits.flashcards ?? 20),
-    summaries: Number(ctx.prefs.daily_limits.summaries ?? 2),
-    error_reviews: Number(ctx.prefs.daily_limits.error_reviews ?? 10),
+    questions: Number(execPrefs.daily_limits.questions ?? 50),
+    flashcards: Number(execPrefs.daily_limits.flashcards ?? 20),
+    summaries: Number(execPrefs.daily_limits.summaries ?? 2),
+    error_reviews: Number(execPrefs.daily_limits.error_reviews ?? 10),
   }
 
-  const mode = ctx.prefs.study_mode
+  const mode = execPrefs.study_mode
   const blocks: DailyStudyBlock[] = []
-  let questionsBudget = limits.questions
+  const questionsBudget = limits.questions
   const flashBudget = limits.flashcards
-  let errorBudget = limits.error_reviews ?? 10
-  let summariesBudget = limits.summaries
+  const summariesBudget = limits.summaries
 
-  const subjectIds = ctx.subjects.map((s) => s.id)
-  const subjectNames = new Map(ctx.subjects.map((s) => [s.id, s.name]))
-  const rotate = ctx.prefs.rotate_subjects && mode !== "reta_final"
-  const excludeRotation = rotate
-    ? ctx.yesterday_subject_ids.filter((id): id is string => Boolean(id))
-    : []
-  const completedTopics = new Set(
-    ctx.completed_block_keys
-      .map((k) => {
-        const parts = k.split(":")
-        return parts.length >= 3 ? `${parts[1]}:${parts[2]}` : null
-      })
-      .filter(Boolean) as string[]
-  )
+  const rotate =
+    execPrefs.rotate_subjects && mode !== "reta_final"
 
-  const queue = ctx.queue as {
-    subject_id: string
-    topic_key: string
-    topic_label?: string
-    priority_score: number
-    edital_weight?: number
-    subject_priority?: number
-    reason?: string | null
-  }[]
+  const queue = ctx.queue as QueueRow[]
 
-  const queueBySubject = new Map<string, typeof queue>()
+  const queueBySubject = new Map<string, QueueRow[]>()
   for (const item of queue) {
     const list = queueBySubject.get(item.subject_id) ?? []
     list.push(item)
@@ -142,93 +117,50 @@ export async function generateDailyStudyPlan(
     list.sort((a, b) => Number(b.priority_score) - Number(a.priority_score))
   }
 
-  const rankedSubjects = rankSubjectsByQueue(subjectIds, queue, excludeRotation)
+  const pool = await resolveExecutorSubjectPool(userId, queue)
+  const { subjectNames, orderedForCycle } = pool
 
-  const maxSubjectsPerDay =
-    mode === "reta_final"
-      ? Math.min(3, rankedSubjects.length)
-      : Math.min(5, rankedSubjects.length)
+  const perRound = Math.max(
+    1,
+    Number(execPrefs.questions_per_subject_round ?? 5)
+  )
 
-  const pickedSubjects = rankedSubjects
-    .filter((sid) => {
-      const top = queueBySubject.get(sid)?.[0]
-      if (!top) return true
-      return !completedTopics.has(`${sid}:${top.topic_key}`)
-    })
-    .slice(0, maxSubjectsPerDay)
-
-  const allQuestionIds: string[] = []
-  const seenQ = new Set<string>()
-  let primarySubjectId: string | null = null
-  const questionTopicsUsed: string[] = []
-
-  for (const subjectId of pickedSubjects) {
-    if (questionsBudget <= 0) break
-    const topTopics = (queueBySubject.get(subjectId) ?? []).slice(0, 3)
-    const topTopic = topTopics[0]
-    const diagnosticState = diagnosticStateFromReason(topTopic?.reason)
-
-    const count = Math.min(
-      mode === "reta_final" ? 15 : 12,
-      Math.ceil(questionsBudget / Math.max(1, pickedSubjects.length))
-    )
-
-    let selectedTopic: string | undefined
-    let questionIds: string[] = []
-
-    for (const candidate of topTopics) {
-      const topic =
-        (candidate.topic_label as string | undefined) ??
-        (candidate.topic_key as string | undefined)
-      if (!topic) continue
-
-      const preferWrongOnly = diagnosticState !== "unknown"
-      const firstTry = await pickQuestionIdsFromPerformance(userId, {
-        subject_id: subjectId,
-        wrong_only: preferWrongOnly,
-        min_wrong_attempts: preferWrongOnly ? 1 : 0,
-        tec_topics: [topic],
-        limit: count,
+  const questionResult = rotate
+    ? await buildRoundRobinQuestionSet({
+        userId,
+        orderedSubjectIds: orderedForCycle,
+        queueBySubject,
+        subjectNames,
+        budget: questionsBudget,
+        perSubjectRound: perRound,
+        distributionMode: execPrefs.question_distribution_mode,
       })
-      if (firstTry.length) {
-        selectedTopic = topic
-        questionIds = firstTry
-        break
-      }
-
-      const fallbackTry = await pickQuestionIdsFromPerformance(userId, {
-        subject_id: subjectId,
-        wrong_only: false,
-        min_wrong_attempts: 0,
-        tec_topics: [topic],
-        limit: Math.max(4, Math.min(count, 8)),
+    : await buildTopNQuestionSet({
+        userId,
+        queue: queue.filter((q) =>
+          pool.allowlist.includes(q.subject_id)
+        ),
+        subjectNames,
+        budget: questionsBudget,
       })
-      if (fallbackTry.length) {
-        selectedTopic = topic
-        questionIds = fallbackTry
-        break
-      }
-    }
-    if (!questionIds.length) continue
-    if (selectedTopic) questionTopicsUsed.push(selectedTopic)
 
-    for (const qid of questionIds) {
-      if (seenQ.has(qid)) continue
-      seenQ.add(qid)
-      allQuestionIds.push(qid)
-      if (!primarySubjectId) primarySubjectId = subjectId
-      questionsBudget--
-      if (questionsBudget <= 0) break
-    }
-  }
-
+  const allQuestionIds = questionResult.questionIds
   let combinedNotebookId: string | null = null
+  const primarySubjectId =
+    questionResult.rounds[0]?.subject_id ??
+    orderedForCycle[0] ??
+    pool.allowlist[0] ??
+    null
+
+  const subjectsInNotebook = [
+    ...new Set(questionResult.rounds.map((r) => r.subject_id)),
+  ]
 
   if (allQuestionIds.length > 0 && primarySubjectId) {
-    const subjectLabels = pickedSubjects
+    const subjectLabels = subjectsInNotebook
       .map((id) => subjectNames.get(id))
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 5)
 
     combinedNotebookId = await createNotebookFromQuestionIds(
       userId,
@@ -242,132 +174,81 @@ export async function generateDailyStudyPlan(
       false
     )
 
-    const topReason = pickedSubjects
-      .map((id) => topQueueReasonForSubject(queue, id))
-      .find(Boolean)
-
     blocks.push({
       subject_id: primarySubjectId,
       subject_name: subjectLabels.join(" · ") || "Várias matérias",
       type: "questions",
       count: allQuestionIds.length,
       minutes: Math.min(90, allQuestionIds.length * 4),
-      label: `Caderno do dia (${allQuestionIds.length} questões)`,
+      label: `Caderno do dia (${allQuestionIds.length} questões erradas)`,
       params: {
         block_key: `questions:${primarySubjectId}:combined`,
         question_ids: allQuestionIds,
         notebook_id: combinedNotebookId,
         is_combined: true,
-        subject_ids: pickedSubjects,
-        queue_reason: topReason,
-        topic_keys: questionTopicsUsed.slice(0, 5),
+        subject_ids: subjectsInNotebook,
+        topic_keys: questionResult.topicsUsed.slice(0, 8),
       },
     })
   }
 
-  const summaryBlocks = await buildSummaryBlocks(
-    userId,
-    pickedSubjects,
-    queue,
-    queueBySubject,
-    summariesBudget,
-    subjectNames
-  )
-  blocks.push(...summaryBlocks)
-  summariesBudget -= summaryBlocks.length
+  const cycleSubjects =
+    subjectsInNotebook.length > 0 ? subjectsInNotebook : orderedForCycle
 
-  for (const subjectId of pickedSubjects) {
-    if (errorBudget <= 0) break
-    const subName = subjectNames.get(subjectId)
-    const top = (queueBySubject.get(subjectId) ?? [])[0]
-    const topicKey = top?.topic_key
-    const topicLabel = top?.topic_label ?? topicKey
-
-    const wrongRows = await pickClassifiedWrongAttempts(userId, subjectId, {
-      topicKey,
-      limit: Math.min(5, errorBudget),
-    })
-
-    const errCount = wrongRows.length > 0 ? wrongRows.length : Math.min(3, errorBudget)
-    if (wrongRows.length > 0) {
-      blocks.push({
-        subject_id: subjectId,
-        subject_name: subName,
-        type: "error_review",
-        count: errCount,
-        minutes: errCount * 3,
-        label: `Revisar ${errCount} erros classificados — ${subName ?? "matéria"}`,
-        params: {
-          block_key: `error_review:${subjectId}:${topicKey ?? "all"}`,
-          subject_id: subjectId,
-          topic_key: topicKey,
-          attempt_ids: wrongRows.map((r) => r.attempt_id),
-          question_ids: wrongRows.map((r) => r.question_id),
-          queue_reason: top?.reason ?? topQueueReasonForSubject(queue, subjectId),
-        },
-      })
-      errorBudget -= errCount
-      continue
-    }
-
-    const mixedIds = await pickQuestionIdsFromPerformance(userId, {
-      subject_id: subjectId,
-      wrong_only: false,
-      min_wrong_attempts: 0,
-      tec_topics: topicLabel ? [topicLabel] : undefined,
-      limit: Math.min(5, errorBudget),
-    })
-    if (!mixedIds.length) continue
-    blocks.push({
-      subject_id: subjectId,
-      subject_name: subName,
-      type: "questions",
-      count: mixedIds.length,
-      minutes: mixedIds.length * 4,
-      label: `Sondagem guiada — ${subName ?? "matéria"}`,
-      params: {
-        block_key: `questions_fallback:${subjectId}:${topicKey ?? "all"}`,
-        question_ids: mixedIds,
-        queue_reason: top?.reason ?? topQueueReasonForSubject(queue, subjectId),
-        topic_keys: topicLabel ? [topicLabel] : [],
-        fallback_mixed: true,
-      },
-    })
-    errorBudget -= mixedIds.length
-  }
-
-  if (flashBudget > 0 && ctx.flashcards_due > 0) {
-    const { stateIds, bySubject } = await pickDueFlashcardStateIds(
+  const { blocks: summaryBlocks, inboxDrafts: summaryDrafts } =
+    await buildComprehensionSummaryBlocks({
       userId,
-      pickedSubjects,
-      Math.min(flashBudget, ctx.flashcards_due, 20)
-    )
-    if (stateIds.length > 0) {
-      const primaryFcSubject = pickedSubjects.find((id) => (bySubject[id] ?? 0) > 0)
-      blocks.push({
-        subject_id: primaryFcSubject ?? pickedSubjects[0] ?? subjectIds[0] ?? "",
-        subject_name: primaryFcSubject
-          ? subjectNames.get(primaryFcSubject)
-          : undefined,
-        type: "flashcards",
-        count: stateIds.length,
-        minutes: stateIds.length * 2,
-        label: `${stateIds.length} flashcards (fila estratégica)`,
-        params: {
-          block_key: `flashcards:${primaryFcSubject ?? "all"}:due`,
-          state_ids: stateIds,
-          by_subject: bySubject,
-          queue_reason: primaryFcSubject
-            ? topQueueReasonForSubject(queue, primaryFcSubject)
-            : undefined,
-        },
-      })
-    }
+      subjectIds: cycleSubjects,
+      queueBySubject,
+      summariesBudget,
+      subjectNames,
+    })
+  blocks.push(...summaryBlocks)
+
+  const flashDrafts = await enqueueExecutorFlashcardDrafts({
+    userId,
+    subjectIds: cycleSubjects,
+    queueBySubject,
+    limit: flashBudget,
+  })
+
+  const totalInboxDrafts = flashDrafts + summaryDrafts
+  if (totalInboxDrafts > 0) {
+    blocks.push({
+      subject_id: primarySubjectId ?? cycleSubjects[0] ?? "",
+      subject_name: "Inbox",
+      type: "inbox_pending",
+      count: totalInboxDrafts,
+      minutes: totalInboxDrafts * 2,
+      label: `${totalInboxDrafts} rascunho(s) na Inbox (flashcards e resumos)`,
+      params: {
+        block_key: `inbox_pending:${ctx.today}`,
+        href: "/coach/inbox",
+        flashcard_drafts: flashDrafts,
+        summary_drafts: summaryDrafts,
+      },
+    })
+  }
+
+  const generation_meta: PlanGenerationMeta = {
+    question_mode: rotate ? "round_robin" : "top_queue",
+    distribution_mode: execPrefs.question_distribution_mode,
+    questions_per_round: perRound,
+    subject_order: orderedForCycle.map((id) => ({
+      subject_id: id,
+      name: subjectNames.get(id) ?? id,
+    })),
+    rounds: questionResult.rounds,
+    total_questions: allQuestionIds.length,
+    inbox_drafts: {
+      flashcards: flashDrafts,
+      summaries: summaryDrafts,
+    },
   }
 
   const rotation_note = rotate
-    ? `Rotação: ${pickedSubjects.length} matérias por score da fila. Caderno único.`
-    : `Prioridade pela fila estratégica (${mode}). Caderno único.`
+    ? `Rodízio: ${perRound} questões erradas por matéria (${execPrefs.question_distribution_mode === "equal_split" ? "quota igual no ciclo" : "fixo"}). ${orderedForCycle.length} matérias no ciclo.`
+    : `Top da fila cruzada até ${questionsBudget} questões erradas (sem consolidar).`
 
   const plan: DailyStudyPlan = {
     date: ctx.today,
@@ -377,6 +258,7 @@ export async function generateDailyStudyPlan(
     rotation_note,
     combined_notebook_id: combinedNotebookId,
     combined_question_count: allQuestionIds.length,
+    generation_meta,
   }
 
   plan.narrative_summary = await runExecutionNarrativeAgent({
@@ -402,6 +284,7 @@ export async function generateDailyStudyPlan(
     narrative_summary: plan.narrative_summary,
     user_pinned: userPinned,
     combined_notebook_id: combinedNotebookId,
+    generation_meta,
   }
 
   const { data: row, error } = await supabaseServer
@@ -414,9 +297,11 @@ export async function generateDailyStudyPlan(
     const fallback = { ...upsertPayload }
     delete fallback.user_pinned
     delete fallback.combined_notebook_id
+    delete fallback.generation_meta
     fallback.limits = {
       ...plan.limits,
       combined_notebook_id: combinedNotebookId,
+      generation_meta,
     }
     const { data: row2, error: err2 } = await supabaseServer
       .from("daily_study_plans")
@@ -463,4 +348,4 @@ export async function markPlanBlockComplete(
   return { ok: true }
 }
 
-export { buildBlockKey }
+export { buildBlockKey } from "./execution-helpers"

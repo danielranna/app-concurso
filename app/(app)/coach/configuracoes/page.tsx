@@ -16,7 +16,7 @@ const MODE_LABELS: Record<StudyMode, string> = {
 
 const MODE_HELP: Record<StudyMode, string> = {
   pre_edital:
-    "Prioriza a fila estratégica e rotaciona matérias ao longo da semana.",
+    "Rodízio de questões erradas entre todas as matérias do executor (ver página Executor).",
   pos_edital:
     "Mais peso em incidência e matérias do edital ativo.",
   reta_final:
@@ -162,8 +162,13 @@ export default function CoachConfiguracoesPage() {
             onChange={(e) => setRotateSubjects(e.target.checked)}
             disabled={studyMode === "reta_final"}
           />
-          Rotacionar matérias entre os dias (não repetir as de ontem)
+          Rotacionar matérias no plano (erradas por matéria por rodada até o limite)
         </label>
+        <p className="text-xs text-slate-500">
+          <Link href="/coach/executor" className="font-medium text-violet-700 hover:underline">
+            Gerenciar matérias do executor →
+          </Link>
+        </p>
       </section>
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
@@ -217,8 +222,9 @@ export default function CoachConfiguracoesPage() {
           </label>
         </div>
         <p className="text-xs text-slate-500">
-          As questões do dia vão para <strong>um único caderno</strong> (várias
-          matérias misturadas, na ordem da fila).
+          As questões do dia vão para <strong>um único caderno</strong> — só
+          questões que você já errou e tópicos não consolidados no cérebro.
+          Flashcards e resumos vão para a Inbox como rascunhos.
         </p>
       </section>
 

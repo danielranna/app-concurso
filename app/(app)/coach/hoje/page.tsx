@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import type { DailyStudyBlock, DailyStudyPlan } from "@/lib/coach-types"
+import type {
+  DailyStudyBlock,
+  DailyStudyPlan,
+  PlanGenerationMeta,
+} from "@/lib/coach-types"
 import {
   Loader2,
   RefreshCw,
@@ -71,6 +75,12 @@ function blockAction(
       }
     }
   }
+  if (block.type === "inbox_pending" && typeof block.params?.href === "string") {
+    return {
+      href: block.params.href as string,
+      label: "Ver Inbox",
+    }
+  }
   return null
 }
 
@@ -88,6 +98,7 @@ function parsePlanFromApi(p: Record<string, unknown>): DailyStudyPlan {
     combined_question_count: blocks.find((b) => b.params?.is_combined)?.count,
     user_pinned: Boolean(p.user_pinned),
     completed_block_keys: (p.completed_block_keys as string[]) ?? [],
+    generation_meta: p.generation_meta as PlanGenerationMeta | undefined,
   }
 }
 
@@ -99,6 +110,7 @@ export default function CoachHojePage() {
   const [generating, setGenerating] = useState(false)
   const [pinning, setPinning] = useState(false)
   const [completingKey, setCompletingKey] = useState<string | null>(null)
+  const [metaExpanded, setMetaExpanded] = useState(false)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -211,13 +223,24 @@ export default function CoachHojePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Plano de hoje</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Matérias ordenadas pela fila estratégica ·{" "}
+            Um caderno único de questões erradas ·{" "}
+            <Link
+              href="/coach/executor"
+              className="font-medium text-violet-700 hover:underline"
+            >
+              Executor
+            </Link>
+            {" · "}
             <Link
               href="/coach/configuracoes"
               className="font-medium text-violet-700 hover:underline"
             >
               Configurações
             </Link>
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            O plano de hoje não muda sozinho ao estudar — gere de manhã ou
+            regenere quando quiser. A fila atualiza para o próximo plano.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -303,7 +326,7 @@ export default function CoachHojePage() {
                     {plan.combined_question_count ??
                       combinedBlock?.count ??
                       0}{" "}
-                    questões na ordem da fila estratégica
+                    questões erradas (não consolidadas) — ver detalhes abaixo
                   </p>
                   {typeof combinedBlock?.params?.queue_reason === "string" && (
                     <p className="mt-1 text-xs text-violet-700">
@@ -332,6 +355,77 @@ export default function CoachHojePage() {
             </div>
           )}
 
+          {plan.generation_meta && (
+            <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <button
+                type="button"
+                onClick={() => setMetaExpanded((v) => !v)}
+                className="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-800"
+              >
+                Como este plano foi montado
+                <span className="text-xs font-normal text-slate-500">
+                  {metaExpanded ? "Ocultar" : "Expandir"}
+                </span>
+              </button>
+              {metaExpanded && (
+                <div className="mt-3 space-y-3 text-sm text-slate-700">
+                  <p>
+                    Modo:{" "}
+                    <strong>
+                      {plan.generation_meta.question_mode === "round_robin"
+                        ? "Rodízio por matéria"
+                        : "Top da fila cruzada"}
+                    </strong>
+                    {" · "}
+                    {plan.generation_meta.distribution_mode === "equal_split"
+                      ? "Quota igual no ciclo"
+                      : `${plan.generation_meta.questions_per_round} questões/matéria/rodada`}
+                  </p>
+                  {plan.generation_meta.subject_order.length > 0 && (
+                    <p>
+                      Ordem:{" "}
+                      {plan.generation_meta.subject_order
+                        .map((s) => s.name)
+                        .join(" → ")}
+                    </p>
+                  )}
+                  {(plan.generation_meta.inbox_drafts.flashcards > 0 ||
+                    plan.generation_meta.inbox_drafts.summaries > 0) && (
+                    <p>
+                      Rascunhos na Inbox:{" "}
+                      {plan.generation_meta.inbox_drafts.flashcards} flashcards,{" "}
+                      {plan.generation_meta.inbox_drafts.summaries} resumos
+                    </p>
+                  )}
+                  {plan.generation_meta.rounds.length > 0 && (
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-100 text-left">
+                          <tr>
+                            <th className="px-2 py-1">Rod.</th>
+                            <th className="px-2 py-1">Matéria</th>
+                            <th className="px-2 py-1">Qtd</th>
+                            <th className="px-2 py-1">Tópico</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plan.generation_meta.rounds.map((r, idx) => (
+                            <tr key={idx} className="border-t border-slate-100">
+                              <td className="px-2 py-1">{r.round}</td>
+                              <td className="px-2 py-1">{r.subject_name}</td>
+                              <td className="px-2 py-1">{r.count}</td>
+                              <td className="px-2 py-1">{r.topic ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
           <div className="grid gap-3">
             {plan.blocks
               .filter((b) => !b.params?.is_combined)
@@ -340,13 +434,15 @@ export default function CoachHojePage() {
                 const key = blockKey(block)
                 const done = completedSet.has(key)
                 const Icon =
-                  block.type === "flashcards"
-                    ? Layers
-                    : block.type === "error_review"
-                      ? AlertCircle
-                      : block.type === "read_material"
-                        ? FileText
-                        : BookOpen
+                  block.type === "inbox_pending"
+                    ? AlertCircle
+                    : block.type === "flashcards"
+                      ? Layers
+                      : block.type === "error_review"
+                        ? AlertCircle
+                        : block.type === "read_material"
+                          ? FileText
+                          : BookOpen
 
                 return (
                   <div

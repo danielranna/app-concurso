@@ -32,6 +32,9 @@ export async function GET(req: Request) {
       study_mode: "pre_edital",
       daily_limits: { questions: 50, flashcards: 20, summaries: 2, error_reviews: 10 },
       rotate_subjects: true,
+      executor_subject_ids: [],
+      question_distribution_mode: "fixed_per_subject",
+      questions_per_subject_round: 5,
     },
   })
 }

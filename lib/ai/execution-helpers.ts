@@ -1,5 +1,6 @@
-import type { DailyStudyBlock, DailyStudyPlan } from "../coach-types"
+import type { DailyStudyBlock, DailyStudyPlan, PlanGenerationMeta } from "../coach-types"
 import { fetchDueStates } from "../flashcard-queue"
+import { ensureSubjectDecks } from "../flashcard-subjects"
 import { loadMappings } from "../tec-mapping"
 import { supabaseServer } from "../supabase-server"
 import { topicBrainKey } from "./brain-helpers"
@@ -251,6 +252,154 @@ export async function buildSummaryBlocks(
   return blocks
 }
 
+export async function enqueueExecutorFlashcardDrafts(params: {
+  userId: string
+  subjectIds: string[]
+  queueBySubject: Map<string, QueueRow[]>
+  limit: number
+}): Promise<number> {
+  const { userId, subjectIds, queueBySubject, limit } = params
+  if (limit <= 0 || !subjectIds.length) return 0
+
+  const { subjects: decks } = await ensureSubjectDecks(userId)
+  const deckBySubject = new Map(decks.map((d) => [d.subject_id, d.deck_id]))
+
+  const topicsDone = new Set<string>()
+  let created = 0
+
+  for (const subjectId of subjectIds) {
+    if (created >= limit) break
+    const deckId = deckBySubject.get(subjectId)
+    if (!deckId) continue
+
+    const wrongRows = await pickClassifiedWrongAttempts(userId, subjectId, {
+      limit: 30,
+    })
+    const memTopics = wrongRows
+      .filter((r) => r.error_taxonomy === "falta_memorizacao")
+      .map((r) => r.tec_topic)
+
+    const queueTopics = (queueBySubject.get(subjectId) ?? [])
+      .slice(0, 3)
+      .map((q) => q.topic_label ?? q.topic_key)
+
+    for (const topic of [...memTopics, ...queueTopics]) {
+      if (created >= limit) break
+      const key = `${subjectId}:${topicBrainKey(topic)}`
+      if (topicsDone.has(key)) continue
+      topicsDone.add(key)
+
+      await supabaseServer.from("ai_action_drafts").insert({
+        user_id: userId,
+        subject_id: subjectId,
+        type: "flashcard_create",
+        label: `Flashcard (memorização): ${topic.slice(0, 60)}`,
+        payload: {
+          deck_id: deckId,
+          type: "basic",
+          front_text: `Conceito: ${topic}`,
+          back_text: "Revise com seu material e complete o verso ao aprovar.",
+          source: "executor_plan",
+          topic,
+        },
+        source_agent: "execution_plan",
+        status: "pending",
+      })
+      created++
+    }
+  }
+
+  return created
+}
+
+export async function buildComprehensionSummaryBlocks(params: {
+  userId: string
+  subjectIds: string[]
+  queueBySubject: Map<string, QueueRow[]>
+  summariesBudget: number
+  subjectNames: Map<string, string>
+}): Promise<{ blocks: DailyStudyBlock[]; inboxDrafts: number }> {
+  const { userId, subjectIds, queueBySubject, summariesBudget, subjectNames } =
+    params
+  const blocks: DailyStudyBlock[] = []
+  let budget = summariesBudget
+  let inboxDrafts = 0
+
+  for (const subjectId of subjectIds) {
+    if (budget <= 0) break
+
+    const wrongRows = await pickClassifiedWrongAttempts(userId, subjectId, {
+      limit: 20,
+    })
+    const comprehensionTopics = new Set(
+      wrongRows
+        .filter((r) => r.error_taxonomy === "falta_compreensao")
+        .map((r) => r.tec_topic)
+    )
+
+    const candidates = (queueBySubject.get(subjectId) ?? []).slice(0, 5)
+    const ordered = [
+      ...candidates.filter((c) =>
+        comprehensionTopics.has(c.topic_label ?? c.topic_key)
+      ),
+      ...candidates,
+    ]
+
+    let done = false
+    for (const top of ordered) {
+      if (budget <= 0 || done) break
+      const topicKey = top.topic_key
+      const searchQuery = top.topic_label ?? topicKey
+      if (!searchQuery) continue
+
+      const chunks = await searchDocumentChunks(userId, subjectId, searchQuery, 1)
+      if (chunks.length) {
+        const chunk = chunks[0]!
+        blocks.push({
+          subject_id: subjectId,
+          subject_name: subjectNames.get(subjectId),
+          type: "read_material",
+          count: 1,
+          minutes: 15,
+          label: `Leitura: ${chunk.title}`,
+          params: {
+            block_key: `read_material:${subjectId}:${topicKey}`,
+            topic_key: topicKey,
+            document_id: chunk.document_id,
+            material_title: chunk.title,
+            excerpt: chunk.content.slice(0, 400),
+            queue_reason: top.reason ?? undefined,
+            error_focus: "falta_compreensao",
+          },
+        })
+        budget--
+        done = true
+        continue
+      }
+
+      await supabaseServer.from("ai_action_drafts").insert({
+        user_id: userId,
+        subject_id: subjectId,
+        type: "summary_suggest",
+        label: `Resumo sugerido: ${searchQuery.slice(0, 50)}`,
+        payload: {
+          topic: searchQuery,
+          topic_key: topicKey,
+          reason: top.reason,
+          hint: "Sem material indexado — revise na Inbox ou envie PDF na matéria.",
+        },
+        source_agent: "execution_plan",
+        status: "pending",
+      })
+      inboxDrafts++
+      budget--
+      done = true
+    }
+  }
+
+  return { blocks, inboxDrafts }
+}
+
 export function planRowToDailyStudyPlan(row: {
   id: string
   plan_date: string
@@ -261,6 +410,7 @@ export function planRowToDailyStudyPlan(row: {
   narrative_summary?: string | null
   combined_notebook_id?: string | null
   user_pinned?: boolean
+  generation_meta?: unknown
 }): {
   id: string
   date: string
@@ -272,6 +422,7 @@ export function planRowToDailyStudyPlan(row: {
   combined_notebook_id: string | null
   combined_question_count: number
   user_pinned?: boolean
+  generation_meta?: PlanGenerationMeta
 } {
   const limits = (row.limits ?? {}) as Record<string, unknown> & {
     questions?: number
@@ -301,5 +452,6 @@ export function planRowToDailyStudyPlan(row: {
       .filter((b) => b.type === "questions" && b.params?.is_combined)
       .reduce((s, b) => s + b.count, 0),
     user_pinned: row.user_pinned ?? false,
+    generation_meta: (row.generation_meta as PlanGenerationMeta) ?? undefined,
   }
 }
