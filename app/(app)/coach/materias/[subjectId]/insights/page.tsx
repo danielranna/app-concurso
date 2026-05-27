@@ -18,16 +18,11 @@ import StrategicQueueList, {
   type QueueItem,
 } from "@/components/coach/StrategicQueueList"
 import type { LearningSignal, SubjectBrainState } from "@/lib/coach-types"
-import { BRAIN_STATUS_LABELS, ERROR_TAXONOMY_LABELS } from "@/lib/coach-labels"
-
-const SIGNAL_LABELS: Record<string, string> = {
-  high_recurrence: "Alta reincidência",
-  consolidated: "Consolidado",
-  false_positive_pattern: "Falso positivo recorrente",
-  slow_struggle: "Lentidão + insegurança",
-  fast_guess_wrong: "Chute rápido errado",
-  time_improving: "Tempo melhorando",
-}
+import {
+  BRAIN_STATUS_LABELS,
+  ERROR_TAXONOMY_LABELS,
+  SIGNAL_LABELS,
+} from "@/lib/coach-labels"
 
 export default function CoachInsightsPage() {
   const params = useParams()
@@ -387,9 +382,17 @@ export default function CoachInsightsPage() {
       {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-800">
-              Cérebro da matéria
-            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-800">
+                Cérebro da matéria
+              </h3>
+              <Link
+                href={`/coach/materias/${subjectId}/cerebro`}
+                className="rounded-lg bg-emerald-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-900"
+              >
+                Ver cérebro completo
+              </Link>
+            </div>
             <div className="flex flex-wrap gap-2">
               {brainLastReportId && (
                 <Link
