@@ -38,6 +38,7 @@ export default function CoachHubPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [hub, setHub] = useState<HubData | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [processingNotebookId, setProcessingNotebookId] = useState<string | null>(null)
   const [processMessage, setProcessMessage] = useState<string | null>(null)
 
   function load(uid: string) {
@@ -66,15 +67,19 @@ export default function CoachHubPage() {
       window.removeEventListener("coach-ai-credentials-updated", refresh)
   }, [userId])
 
-  async function processPendingReports() {
+  async function processPendingReports(notebookId?: string) {
     if (!userId) return
-    setProcessing(true)
+    if (notebookId) setProcessingNotebookId(notebookId)
+    else setProcessing(true)
     setProcessMessage(null)
     try {
       const res = await fetch("/api/coach/reports/process-pending", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({
+          user_id: userId,
+          notebook_id: notebookId,
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -86,7 +91,11 @@ export default function CoachHubPage() {
           `Processados ${data.jobs_processed} job(s). Ainda há ${data.still_pending} na fila — tente de novo em instantes.`
         )
       } else if (data.latest_report_id) {
-        setProcessMessage("Relatório pronto!")
+        setProcessMessage(
+          notebookId
+            ? "Relatório deste caderno pronto!"
+            : "Relatório pronto!"
+        )
         router.push(`/coach/relatorios/${data.latest_report_id}`)
       } else if (data.notebooks_found === 0) {
         setProcessMessage("Nenhum caderno pendente de relatório.")
@@ -97,7 +106,8 @@ export default function CoachHubPage() {
     } catch {
       setProcessMessage("Falha de rede ao gerar relatórios.")
     } finally {
-      setProcessing(false)
+      if (notebookId) setProcessingNotebookId(null)
+      else setProcessing(false)
     }
   }
 
@@ -149,14 +159,27 @@ export default function CoachHubPage() {
                 Pendentes agora:
               </p>
               <ul className="mt-1 space-y-1">
-                {hub.pending_report_notebooks.slice(0, 3).map((nb) => (
-                  <li key={nb.id} className="truncate text-xs text-slate-700">
-                    {nb.name?.trim() || "Caderno sem nome"}
+                {hub.pending_report_notebooks.slice(0, 6).map((nb) => (
+                  <li
+                    key={nb.id}
+                    className="flex items-center justify-between gap-2 text-xs text-slate-700"
+                  >
+                    <span className="truncate">
+                      {nb.name?.trim() || "Caderno sem nome"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => processPendingReports(nb.id)}
+                      disabled={processingNotebookId === nb.id || processing}
+                      className="shrink-0 rounded-md border border-violet-200 bg-white px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                    >
+                      {processingNotebookId === nb.id ? "Gerando..." : "Gerar"}
+                    </button>
                   </li>
                 ))}
-                {hub.pending_report_notebooks.length > 3 && (
+                {hub.pending_report_notebooks.length > 6 && (
                   <li className="text-[11px] text-slate-500">
-                    +{hub.pending_report_notebooks.length - 3} outros
+                    +{hub.pending_report_notebooks.length - 6} outros
                   </li>
                 )}
               </ul>
@@ -165,8 +188,8 @@ export default function CoachHubPage() {
           {userId && (
             <button
               type="button"
-              onClick={processPendingReports}
-              disabled={processing}
+              onClick={() => processPendingReports()}
+              disabled={processing || Boolean(processingNotebookId)}
               className="mt-2 rounded-lg bg-violet-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-800 disabled:opacity-50"
             >
               {processing ? "Gerando…" : "Gerar relatórios agora"}

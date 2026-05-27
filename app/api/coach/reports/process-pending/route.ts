@@ -6,44 +6,69 @@ import { runJobWorker } from "@/lib/ai/jobs/worker"
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
   const user_id = body.user_id as string | undefined
+  const notebook_id = body.notebook_id as string | undefined
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
   try {
-    const { data: pendingNotebooks, error: listErr } = await supabaseServer
-      .from("notebooks")
-      .select("id, name, completed_at, report_pending")
-      .eq("user_id", user_id)
-      .eq("report_pending", true)
+    let notebooks: {
+      id: string
+      name: string
+      completed_at: string | null
+      report_pending?: boolean
+    }[] = []
 
-    if (listErr) {
-      return NextResponse.json({ error: listErr.message }, { status: 500 })
-    }
-
-    let notebooks = pendingNotebooks ?? []
-
-    if (notebooks.length === 0) {
-      const { data: completed } = await supabaseServer
+    if (notebook_id) {
+      const { data: chosen, error: chosenErr } = await supabaseServer
+        .from("notebooks")
+        .select("id, name, completed_at, report_pending")
+        .eq("id", notebook_id)
+        .eq("user_id", user_id)
+        .maybeSingle()
+      if (chosenErr) {
+        return NextResponse.json({ error: chosenErr.message }, { status: 500 })
+      }
+      if (!chosen) {
+        return NextResponse.json({ error: "Caderno não encontrado" }, { status: 404 })
+      }
+      notebooks = [chosen]
+    } else {
+      const { data: pendingNotebooks, error: listErr } = await supabaseServer
         .from("notebooks")
         .select("id, name, completed_at, report_pending")
         .eq("user_id", user_id)
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(20)
+        .eq("report_pending", true)
 
-      const ids = (completed ?? []).map((n) => n.id)
-      if (ids.length) {
-        const { data: existingReports } = await supabaseServer
-          .from("subject_notebook_reports")
-          .select("notebook_id")
-          .in("notebook_id", ids)
+      if (listErr) {
+        return NextResponse.json({ error: listErr.message }, { status: 500 })
+      }
 
-        const hasReport = new Set((existingReports ?? []).map((r) => r.notebook_id))
-        notebooks = (completed ?? []).filter((n) => !hasReport.has(n.id))
+      notebooks = pendingNotebooks ?? []
+
+      if (notebooks.length === 0) {
+        const { data: completed } = await supabaseServer
+          .from("notebooks")
+          .select("id, name, completed_at, report_pending")
+          .eq("user_id", user_id)
+          .not("completed_at", "is", null)
+          .order("completed_at", { ascending: false })
+          .limit(20)
+
+        const ids = (completed ?? []).map((n) => n.id)
+        if (ids.length) {
+          const { data: existingReports } = await supabaseServer
+            .from("subject_notebook_reports")
+            .select("notebook_id")
+            .in("notebook_id", ids)
+
+          const hasReport = new Set((existingReports ?? []).map((r) => r.notebook_id))
+          notebooks = (completed ?? []).filter((n) => !hasReport.has(n.id))
+        }
       }
     }
+
     const enqueueResults: {
       notebook_id: string
       name: string
@@ -95,8 +120,18 @@ export async function POST(req: Request) {
       .eq("user_id", user_id)
       .eq("report_pending", true)
 
-    const generated = enqueueResults.filter((r) => !r.skipped || r.report_id)
-    const latestReportId = recentReports?.[0]?.id ?? null
+    let latestReportId = recentReports?.[0]?.id ?? null
+    if (notebook_id) {
+      const { data: chosenReport } = await supabaseServer
+        .from("subject_notebook_reports")
+        .select("id, created_at")
+        .eq("user_id", user_id)
+        .eq("notebook_id", notebook_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      latestReportId = chosenReport?.id ?? latestReportId
+    }
 
     return NextResponse.json({
       ok: true,
@@ -106,6 +141,7 @@ export async function POST(req: Request) {
       still_pending: stillPending ?? 0,
       latest_report_id: latestReportId,
       recent_reports: recentReports ?? [],
+      notebook_id: notebook_id ?? null,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro ao gerar relatórios"
