@@ -1,17 +1,44 @@
 /** Pipeline de indexação — leitura na Vercel, processamento na VPS. */
 
 import {
-  EFFECTIVE_STEP_LABELS,
-  workRemainingFromSummary,
-  type EffectiveIngestStep,
-} from "@/lib/ai/ingest-effective-step"
-import {
   getCoachUploadAuthHeaders,
   getCoachUploadBaseUrl,
 } from "@/lib/coach-upload-client"
 
-export type { EffectiveIngestStep }
-export { EFFECTIVE_STEP_LABELS, workRemainingFromSummary }
+export type EffectiveIngestStep =
+  | "queued"
+  | "processing"
+  | "needs_parse"
+  | "needs_chunk"
+  | "needs_embed"
+  | "rag_partial"
+  | "rag_done"
+  | "failed"
+
+export const EFFECTIVE_STEP_LABELS: Record<EffectiveIngestStep, string> = {
+  queued: "Na fila",
+  processing: "Processando",
+  needs_parse: "Sem texto",
+  needs_chunk: "Com texto, sem trechos",
+  needs_embed: "Trechos sem vetor",
+  rag_partial: "RAG parcial",
+  rag_done: "RAG completo",
+  failed: "Erro",
+}
+
+export function workRemainingFromSummary(
+  summary: Record<EffectiveIngestStep, number>
+): number {
+  return (
+    summary.queued +
+    summary.processing +
+    summary.needs_parse +
+    summary.needs_chunk +
+    summary.needs_embed +
+    summary.rag_partial +
+    summary.failed
+  )
+}
 
 const INGEST_DEBUG =
   process.env.NEXT_PUBLIC_COACH_INGEST_DEBUG !== "0"
