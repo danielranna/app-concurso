@@ -51,7 +51,11 @@ app.post("/coach/jobs/process-next", express.json(), async (req, res) => {
     const random = Boolean(req.body?.random)
     const includeFailed = Boolean(req.body?.include_failed)
     const mode =
-      req.body?.mode === "embed_only" ? "embed_only" : "full"
+      req.body?.mode === "embed_only"
+        ? "embed_only"
+        : req.body?.mode === "chunk_backfill"
+          ? "chunk_backfill"
+          : "full"
     const supabase = getServiceClient(config)
     const result = await processNextIngestDocument(supabase, config, bodyUserId, {
       random,

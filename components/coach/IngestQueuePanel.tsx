@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import {
+  chunkWorkRemaining,
   deferDocumentInQueue,
   embedWorkRemaining,
   fetchIngestQueueDetails,
@@ -20,6 +21,7 @@ import {
   processNextIngest,
   queueRag,
   reindexDocumentInQueue,
+  type IngestProcessMode,
   type IngestQueueDetails,
 } from "@/lib/coach-ingest-worker-client"
 
@@ -134,10 +136,11 @@ export default function IngestQueuePanel() {
       options: {
         processAll: boolean
         random?: boolean
-        mode?: "full" | "embed_only"
+        mode?: IngestProcessMode
       }
     ) => {
       const embedOnly = options.mode === "embed_only"
+      const chunkBackfill = options.mode === "chunk_backfill"
       stopLoopRef.current = false
       setProcessing(true)
       setStatusMsg(null)
@@ -152,16 +155,22 @@ export default function IngestQueuePanel() {
           const before = await loadQueue(uid, limit)
           const remainingBefore = embedOnly
             ? embedWorkRemaining(before)
-            : ingestWorkRemaining(before)
+            : chunkBackfill
+              ? chunkWorkRemaining(before)
+              : ingestWorkRemaining(before)
           if (remainingBefore === 0) {
             setStatusMsg(
               options.processAll
                 ? embedOnly
                   ? `Vetorização concluída (${stats.ok} com RAG completo).`
-                  : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+                  : chunkBackfill
+                    ? `Trechos gerados (${stats.ok} indexados, ${stats.failed} com erro).`
+                    : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
                 : embedOnly
                   ? "Nenhum PDF pendente de vetorização."
-                  : "Nada pendente na fila."
+                  : chunkBackfill
+                    ? "Nenhum PDF pronto sem trechos."
+                    : "Nada pendente na fila."
             )
             break
           }
@@ -177,13 +186,16 @@ export default function IngestQueuePanel() {
             setStatusMsg(
               embedOnly
                 ? `Vetorizando… ${stats.done + 1} feito(s) · ~${remainingBefore} sem vetor completo`
-                : `Processando… ${stats.done + 1} concluído(s) · ~${remainingBefore} restante(s) (fila + erros)`
+                : chunkBackfill
+                  ? `Gerando trechos… ${stats.done + 1} feito(s) · ~${remainingBefore} sem chunks`
+                  : `Processando… ${stats.done + 1} concluído(s) · ~${remainingBefore} restante(s) (fila + erros)`
             )
           }
 
           const result = await processNextIngest(uid, {
             random: options.random,
-            includeFailed: options.processAll && !embedOnly,
+            includeFailed:
+              options.processAll && !embedOnly && !chunkBackfill,
             mode: options.mode ?? "full",
           })
           setQueue(result.queue)
@@ -231,12 +243,16 @@ export default function IngestQueuePanel() {
           if (!options.processAll) break
           const left = embedOnly
             ? embedWorkRemaining(result.queue)
-            : ingestWorkRemaining(result.queue)
+            : chunkBackfill
+              ? chunkWorkRemaining(result.queue)
+              : ingestWorkRemaining(result.queue)
           if (left === 0) {
             setStatusMsg(
               embedOnly
                 ? `Vetorização concluída (${stats.ok} com RAG completo).`
-                : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+                : chunkBackfill
+                  ? `Trechos gerados (${stats.ok} indexados, ${stats.failed} com erro).`
+                  : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
             )
             break
           }
@@ -287,7 +303,8 @@ export default function IngestQueuePanel() {
       queue.pending_count > 0 ||
       queue.total > 0 ||
       queue.failed_count > 0 ||
-      (rag?.need_embed ?? 0) > 0)
+      (rag?.need_embed ?? 0) > 0 ||
+      (rag?.need_chunk ?? 0) > 0)
 
   if (!showPanel || !queue || !rag) return null
 
@@ -312,8 +329,8 @@ export default function IngestQueuePanel() {
             Fila de indexação (global)
           </h3>
           <p className="text-xs text-amber-900/80">
-            VPS · 1 PDF por vez · &quot;Processar todos&quot; segue até acabar (inclui
-            reprocessar erros)
+            VPS · 1 PDF por vez · use &quot;Gerar trechos em fila&quot; para PDFs prontos
+            sem chunks (~{rag.need_chunk})
           </p>
         </div>
         {expanded ? (
@@ -348,6 +365,17 @@ export default function IngestQueuePanel() {
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
         >
           Processar todos
+        </button>
+        <button
+          type="button"
+          disabled={!userId || processing || rag.need_chunk === 0}
+          onClick={() =>
+            userId &&
+            void runLoop(userId, { processAll: true, mode: "chunk_backfill" })
+          }
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+        >
+          Gerar trechos em fila
         </button>
         <button
           type="button"
@@ -420,7 +448,8 @@ export default function IngestQueuePanel() {
           <div className="mb-1 flex items-center justify-between text-xs font-medium text-violet-950">
             <span>
               RAG: {rag.complete}/{rag.total_with_chunks} com vetores
-              {rag.need_embed > 0 ? ` · ${rag.need_embed} faltam` : ""}
+              {rag.need_chunk > 0 ? ` · ${rag.need_chunk} sem trechos` : ""}
+              {rag.need_embed > 0 ? ` · ${rag.need_embed} faltam vetor` : ""}
             </span>
             <span>{ragPct}%</span>
           </div>

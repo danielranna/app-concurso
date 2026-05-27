@@ -21,7 +21,11 @@ export async function POST(req: Request) {
     const random = Boolean(body.random)
     const includeFailed = Boolean(body.include_failed)
     const mode =
-      body.mode === "embed_only" ? ("embed_only" as const) : ("full" as const)
+      body.mode === "embed_only"
+        ? ("embed_only" as const)
+        : body.mode === "chunk_backfill"
+          ? ("chunk_backfill" as const)
+          : ("full" as const)
     const result = await processNextIngestDocument(userId, {
       random,
       includeFailed,

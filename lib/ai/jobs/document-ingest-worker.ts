@@ -38,6 +38,8 @@ export type IngestRagStats = {
   lexical_only: number
   partial: number
   need_embed: number
+  /** ready na DB mas sem linhas em document_chunks */
+  need_chunk: number
   total_with_chunks: number
 }
 
@@ -149,11 +151,13 @@ export async function getRagStatsForUser(userId: string): Promise<IngestRagStats
   let complete = 0
   let lexical_only = 0
   let partial = 0
+  let need_chunk = 0
 
   for (const status of statusMap.values()) {
     if (status === "complete") complete++
     else if (status === "lexical_only") lexical_only++
     else if (status === "partial") partial++
+    else if (status === "no_chunks") need_chunk++
   }
 
   return {
@@ -161,54 +165,85 @@ export async function getRagStatsForUser(userId: string): Promise<IngestRagStats
     lexical_only,
     partial,
     need_embed: lexical_only + partial,
+    need_chunk,
     total_with_chunks: complete + lexical_only + partial,
   }
 }
 
-/** Próximo da fila: uploaded → failed → ready sem vetor (embedOnly). */
+/** Próximo da fila conforme modo (uploaded / chunk_backfill / embed / failed). */
 export function pickNextPendingId(
   all: DocRow[],
   options?: {
     random?: boolean
     includeFailed?: boolean
     embedOnly?: boolean
+    chunkBackfill?: boolean
     embedStatus?: Map<string, RagDocStatus>
   }
 ): string | null {
-  if (!options?.embedOnly) {
-    const waiting = sortByQueue(
-      all.filter((d) => d.ingest_stage === "uploaded")
+  const statusMap = options?.embedStatus ?? new Map()
+
+  if (options?.chunkBackfill) {
+    const needing = sortByQueue(
+      all.filter(
+        (d) =>
+          d.ingest_stage === "ready" && statusMap.get(d.id) === "no_chunks"
+      )
     )
-    if (waiting.length) {
-      if (options?.random) {
-        return waiting[Math.floor(Math.random() * waiting.length)]!.id
-      }
-      return waiting[0]!.id
-    }
-
-    if (!options?.includeFailed) return null
-
-    const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
-    if (!failed.length) return null
+    if (!needing.length) return null
     if (options?.random) {
-      return failed[Math.floor(Math.random() * failed.length)]!.id
+      return needing[Math.floor(Math.random() * needing.length)]!.id
     }
-    return failed[0]!.id
+    return needing[0]!.id
   }
 
-  const statusMap = options.embedStatus ?? new Map()
-  const needing = sortByQueue(
-    all.filter((d) => {
-      if (d.ingest_stage !== "ready") return false
-      const st = statusMap.get(d.id)
-      return st === "lexical_only" || st === "partial"
-    })
-  )
-  if (!needing.length) return null
-  if (options?.random) {
-    return needing[Math.floor(Math.random() * needing.length)]!.id
+  if (options?.embedOnly) {
+    const needing = sortByQueue(
+      all.filter((d) => {
+        if (d.ingest_stage !== "ready") return false
+        const st = statusMap.get(d.id)
+        return st === "lexical_only" || st === "partial"
+      })
+    )
+    if (!needing.length) return null
+    if (options?.random) {
+      return needing[Math.floor(Math.random() * needing.length)]!.id
+    }
+    return needing[0]!.id
   }
-  return needing[0]!.id
+
+  const waiting = sortByQueue(
+    all.filter((d) => d.ingest_stage === "uploaded")
+  )
+  if (waiting.length) {
+    if (options?.random) {
+      return waiting[Math.floor(Math.random() * waiting.length)]!.id
+    }
+    return waiting[0]!.id
+  }
+
+  const readyNoChunks = sortByQueue(
+    all.filter(
+      (d) =>
+        d.ingest_stage === "ready" && statusMap.get(d.id) === "no_chunks"
+    )
+  )
+  if (readyNoChunks.length) {
+    if (options?.random) {
+      return readyNoChunks[Math.floor(Math.random() * readyNoChunks.length)]!
+        .id
+    }
+    return readyNoChunks[0]!.id
+  }
+
+  if (!options?.includeFailed) return null
+
+  const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
+  if (!failed.length) return null
+  if (options?.random) {
+    return failed[Math.floor(Math.random() * failed.length)]!.id
+  }
+  return failed[0]!.id
 }
 
 export async function healStaleRunningJobs(userId: string): Promise<number> {
@@ -372,7 +407,7 @@ export async function requeueDocumentForIngest(
     .eq("id", documentId)
 }
 
-export type IngestProcessMode = "full" | "embed_only"
+export type IngestProcessMode = "full" | "embed_only" | "chunk_backfill"
 
 export type ProcessNextResult = {
   status: "ready" | "failed" | "idle" | "retry"
@@ -399,20 +434,23 @@ export async function processNextIngestDocument(
 ): Promise<ProcessNextResult> {
   const mode = options?.mode ?? "full"
   const embedOnly = mode === "embed_only"
+  const chunkBackfill = mode === "chunk_backfill"
 
   await healStaleRunningJobs(userId)
   await skipPendingIngestJobs(userId)
-  if (!embedOnly) await resetOrphanPipelineDocs(userId)
+  if (!embedOnly && !chunkBackfill) await resetOrphanPipelineDocs(userId)
 
   const all = await fetchAllStudyDocs(userId)
-  const embedStatus = embedOnly
-    ? await getEmbedStatusByDocument(userId)
-    : undefined
+  const embedStatus =
+    embedOnly || chunkBackfill || mode === "full"
+      ? await getEmbedStatusByDocument(userId)
+      : undefined
 
   const targetId = pickNextPendingId(all, {
     random: options?.random,
-    includeFailed: options?.includeFailed,
+    includeFailed: options?.includeFailed && !chunkBackfill,
     embedOnly,
+    chunkBackfill,
     embedStatus,
   })
 
@@ -425,7 +463,7 @@ export async function processNextIngestDocument(
   }
 
   const doc = all.find((d) => d.id === targetId)!
-  if (!embedOnly && doc.ingest_stage === "failed") {
+  if (!embedOnly && !chunkBackfill && doc.ingest_stage === "failed") {
     await requeueDocumentForIngest(userId, targetId)
   }
 
@@ -586,7 +624,8 @@ export async function readIngestQueueDetails(
     running ||
     failedAll.length > 0 ||
     completed < total ||
-    rag.need_embed > 0
+    rag.need_embed > 0 ||
+    rag.need_chunk > 0
 
   if (!active) {
     return {

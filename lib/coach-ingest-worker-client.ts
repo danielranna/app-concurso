@@ -38,6 +38,8 @@ export type IngestRagStats = {
   lexical_only: number
   partial: number
   need_embed: number
+  /** ready na DB mas sem trechos em document_chunks */
+  need_chunk: number
   total_with_chunks: number
 }
 
@@ -61,6 +63,7 @@ const EMPTY_RAG: IngestRagStats = {
   lexical_only: 0,
   partial: 0,
   need_embed: 0,
+  need_chunk: 0,
   total_with_chunks: 0,
 }
 
@@ -68,9 +71,14 @@ export function queueRag(queue: IngestQueueDetails): IngestRagStats {
   return queue.rag ?? EMPTY_RAG
 }
 
-/** Aguardando + erros + falta vetorizar (modo full). */
+/** uploaded + erros + ready sem trechos (indexação completa). */
 export function ingestWorkRemaining(queue: IngestQueueDetails): number {
-  return queue.pending_count + queue.failed_count
+  const rag = queueRag(queue)
+  return queue.pending_count + queue.failed_count + rag.need_chunk
+}
+
+export function chunkWorkRemaining(queue: IngestQueueDetails): number {
+  return queueRag(queue).need_chunk
 }
 
 export function embedWorkRemaining(queue: IngestQueueDetails): number {
@@ -103,7 +111,7 @@ export async function fetchIngestQueueDetails(
   return data as IngestQueueDetails
 }
 
-export type IngestProcessMode = "full" | "embed_only"
+export type IngestProcessMode = "full" | "embed_only" | "chunk_backfill"
 
 export type ProcessNextResult = {
   status: "ready" | "failed" | "idle" | "retry"
