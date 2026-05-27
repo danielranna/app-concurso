@@ -19,7 +19,8 @@ export async function POST(req: Request) {
     }
 
     const random = Boolean(body.random)
-    const result = await processNextIngestDocument(userId, { random })
+    const includeFailed = Boolean(body.include_failed)
+    const result = await processNextIngestDocument(userId, { random, includeFailed })
     return NextResponse.json(result)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

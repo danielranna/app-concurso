@@ -50,11 +50,43 @@ function sortByQueue(docs) {
 
 export function pickNextPendingId(all, options) {
   const waiting = sortByQueue(all.filter((d) => d.ingest_stage === "uploaded"))
-  if (!waiting.length) return null
-  if (options?.random) {
-    return waiting[Math.floor(Math.random() * waiting.length)].id
+  if (waiting.length) {
+    if (options?.random) {
+      return waiting[Math.floor(Math.random() * waiting.length)].id
+    }
+    return waiting[0].id
   }
-  return waiting[0].id
+
+  if (!options?.includeFailed) return null
+
+  const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
+  if (!failed.length) return null
+  if (options?.random) {
+    return failed[Math.floor(Math.random() * failed.length)].id
+  }
+  return failed[0].id
+}
+
+async function requeueDocumentForIngest(supabase, userId, documentId) {
+  const { data: doc, error } = await supabase
+    .from("subject_documents")
+    .select("parsed_tables")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (error || !doc) throw new Error(error?.message ?? "Documento não encontrado")
+
+  const pt = doc.parsed_tables ?? {}
+  await supabase
+    .from("subject_documents")
+    .update({
+      ingest_stage: "uploaded",
+      status: "pending",
+      ingest_error: null,
+      parsed_tables: { ...pt, ingest_retries: 0 },
+    })
+    .eq("id", documentId)
 }
 
 async function healStaleRunningJobs(supabase, userId) {
@@ -210,9 +242,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
         (d.ingest_stage === "ready" && isRecentWaveDoc(d)))
   )
 
-  const failedRecent = sortByQueue(
-    all.filter((d) => d.ingest_stage === "failed" && isRecentWaveDoc(d))
-  )
+  const failedAll = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
 
   const completed = wave.filter((d) => d.ingest_stage === "ready").length
   const total = wave.length
@@ -222,7 +252,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
   const pending_count = waiting.length
 
   const active =
-    pending_count > 0 || running || failedRecent.length > 0 || completed < total
+    pending_count > 0 || running || failedAll.length > 0 || completed < total
 
   if (!active) {
     return {
@@ -250,7 +280,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
     toView(d, { is_current: false, is_next: false })
   )
 
-  const failed_items = failedRecent.slice(0, 10).map((d) =>
+  const failed_items = failedAll.slice(0, 10).map((d) =>
     toView(d, { is_current: false, is_next: false })
   )
 
@@ -265,7 +295,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
     items,
     has_more: waiting.length > itemLimit + 1,
     failed_items,
-    failed_count: failedRecent.length,
+    failed_count: failedAll.length,
   }
 }
 
@@ -298,6 +328,9 @@ export async function processNextIngestDocument(supabase, config, userId, option
     }
 
     const doc = all.find((d) => d.id === targetId)
+    if (doc?.ingest_stage === "failed") {
+      await requeueDocumentForIngest(supabase, userId, targetId)
+    }
 
     await markProcessingStarted(supabase, userId, targetId)
 

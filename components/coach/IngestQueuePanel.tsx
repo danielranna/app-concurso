@@ -15,12 +15,18 @@ import {
   deferDocumentInQueue,
   fetchIngestQueueDetails,
   ingestStageLabel,
+  ingestWorkRemaining,
   processNextIngest,
   reindexDocumentInQueue,
   type IngestQueueDetails,
 } from "@/lib/coach-ingest-worker-client"
 
 const LIST_LIMIT = 5
+const RETRY_BUSY_MS = 4000
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 function QueueRow({
   item,
@@ -91,6 +97,11 @@ export default function IngestQueuePanel() {
   const [processing, setProcessing] = useState(false)
   const [processingTitle, setProcessingTitle] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
+  const [loopStats, setLoopStats] = useState<{
+    done: number
+    ok: number
+    failed: number
+  } | null>(null)
   const stopLoopRef = useRef(false)
 
   const loadQueue = useCallback(async (uid: string, limit: number) => {
@@ -120,6 +131,8 @@ export default function IngestQueuePanel() {
       stopLoopRef.current = false
       setProcessing(true)
       setStatusMsg(null)
+      const stats = { done: 0, ok: 0, failed: 0 }
+      setLoopStats(options.processAll ? stats : null)
 
       try {
         do {
@@ -127,34 +140,78 @@ export default function IngestQueuePanel() {
 
           const limit = showAll ? 50 : LIST_LIMIT
           const before = await loadQueue(uid, limit)
-          if (before.pending_count === 0 && before.failed_count === 0) {
-            setStatusMsg("Nada pendente na fila.")
+          const remainingBefore = ingestWorkRemaining(before)
+          if (remainingBefore === 0) {
+            setStatusMsg(
+              options.processAll
+                ? `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+                : "Nada pendente na fila."
+            )
             break
           }
 
           const nextTitle =
-            before.next?.title ?? before.current?.title ?? "PDF"
+            before.next?.title ??
+            before.failed_items[0]?.title ??
+            before.current?.title ??
+            "PDF"
           setProcessingTitle(nextTitle)
+
+          if (options.processAll) {
+            setStatusMsg(
+              `Processando… ${stats.done + 1} concluído(s) · ~${remainingBefore} restante(s) (fila + erros)`
+            )
+          }
 
           const result = await processNextIngest(uid, {
             random: options.random,
+            includeFailed: options.processAll,
           })
           setQueue(result.queue)
 
           if (result.status === "ready") {
-            setStatusMsg(`Pronto: ${result.title ?? "arquivo"}`)
+            stats.ok++
+            stats.done++
+            setStatusMsg(
+              options.processAll
+                ? `Pronto: ${result.title ?? "arquivo"} (${stats.ok}/${stats.done})`
+                : `Pronto: ${result.title ?? "arquivo"}`
+            )
           } else if (result.status === "failed") {
-            setStatusMsg(`Erro em ${result.title ?? "arquivo"} — seguindo fila…`)
+            stats.failed++
+            stats.done++
+            setStatusMsg(
+              options.processAll
+                ? `Erro: ${result.title ?? "arquivo"} — seguindo… (${stats.failed} erro(s))`
+                : `Erro em ${result.title ?? "arquivo"}`
+            )
           } else if (result.status === "idle") {
-            setStatusMsg("Fila concluída.")
+            setStatusMsg(
+              options.processAll
+                ? `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+                : "Fila concluída."
+            )
             break
           } else if (result.status === "retry") {
-            setStatusMsg(result.error ?? "Aguarde o PDF atual terminar.")
+            setStatusMsg(result.error ?? "Aguarde… tentando de novo.")
+            if (options.processAll) {
+              await sleep(RETRY_BUSY_MS)
+              continue
+            }
             break
           }
 
+          if (options.processAll) {
+            setLoopStats({ ...stats })
+          }
+
           if (!options.processAll) break
-          if (result.queue.pending_count === 0) break
+          if (ingestWorkRemaining(result.queue) === 0) {
+            setStatusMsg(
+              `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+            )
+            break
+          }
         } while (options.processAll)
       } catch (e) {
         const err = e instanceof Error ? e.message : "Erro ao processar"
@@ -165,6 +222,7 @@ export default function IngestQueuePanel() {
       } finally {
         setProcessing(false)
         setProcessingTitle(null)
+        setLoopStats(null)
         await loadQueue(uid, showAll ? 50 : LIST_LIMIT)
       }
     },
@@ -216,8 +274,8 @@ export default function IngestQueuePanel() {
             Fila de indexação (global)
           </h3>
           <p className="text-xs text-amber-900/80">
-            Você inicia · 1 PDF por vez (ler → indexar → vetorizar) · próximo só após
-            &quot;pronto&quot;
+            VPS · 1 PDF por vez · &quot;Processar todos&quot; segue até acabar (inclui
+            reprocessar erros)
           </p>
         </div>
         {expanded ? (
@@ -243,7 +301,11 @@ export default function IngestQueuePanel() {
         </button>
         <button
           type="button"
-          disabled={!userId || processing || queue.pending_count === 0}
+          disabled={
+            !userId ||
+            processing ||
+            ingestWorkRemaining(queue) === 0
+          }
           onClick={() => userId && void runLoop(userId, { processAll: true })}
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
         >
@@ -277,6 +339,12 @@ export default function IngestQueuePanel() {
       {processing && processingTitle && (
         <p className="mt-2 text-xs text-amber-900">
           Processando: <span className="font-medium">{processingTitle}</span>…
+          {loopStats && (
+            <span className="text-amber-800/90">
+              {" "}
+              · {loopStats.ok} prontos, {loopStats.failed} erro(s)
+            </span>
+          )}
         </p>
       )}
       {statusMsg && !processing && (

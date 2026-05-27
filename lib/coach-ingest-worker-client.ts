@@ -47,6 +47,11 @@ export type IngestQueueDetails = {
   failed_count: number
 }
 
+/** Aguardando + erros (para o loop “processar todos”). */
+export function ingestWorkRemaining(queue: IngestQueueDetails): number {
+  return queue.pending_count + queue.failed_count
+}
+
 const STAGE_LABELS: Record<string, string> = {
   uploaded: "Aguardando",
   parsing: "Extraindo texto",
@@ -84,7 +89,7 @@ export type ProcessNextResult = {
 
 export async function processNextIngest(
   userId: string,
-  options?: { random?: boolean }
+  options?: { random?: boolean; includeFailed?: boolean }
 ): Promise<ProcessNextResult> {
   const external = getCoachUploadBaseUrl()
   const headers = external ? await getCoachUploadAuthHeaders() : null
@@ -107,6 +112,7 @@ export async function processNextIngest(
     uploadBaseUrl: external ?? "(NEXT_PUBLIC_COACH_UPLOAD_URL não definida no build)",
     timeoutMs,
     random: options?.random ?? false,
+    includeFailed: options?.includeFailed ?? false,
   })
 
   try {
@@ -116,6 +122,7 @@ export async function processNextIngest(
       body: JSON.stringify({
         user_id: userId,
         random: options?.random ?? false,
+        include_failed: options?.includeFailed ?? false,
       }),
       cache: "no-store",
       signal: controller.signal,

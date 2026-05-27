@@ -49,9 +49,11 @@ app.post("/coach/jobs/process-next", express.json(), async (req, res) => {
     }
 
     const random = Boolean(req.body?.random)
+    const includeFailed = Boolean(req.body?.include_failed)
     const supabase = getServiceClient(config)
     const result = await processNextIngestDocument(supabase, config, bodyUserId, {
       random,
+      includeFailed,
     })
     return res.json(result)
   } catch (e) {

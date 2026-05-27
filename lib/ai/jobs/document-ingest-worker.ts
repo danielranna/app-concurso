@@ -81,19 +81,29 @@ function sortByQueue(docs: DocRow[]) {
   return [...docs].sort((a, b) => queueSortTime(a) - queueSortTime(b))
 }
 
-/** Próximo da fila: enviados mas não prontos, ordenados por queue_sort_at. */
+/** Próximo da fila: uploaded; depois failed se includeFailed. */
 export function pickNextPendingId(
   all: DocRow[],
-  options?: { random?: boolean }
+  options?: { random?: boolean; includeFailed?: boolean }
 ): string | null {
   const waiting = sortByQueue(
     all.filter((d) => d.ingest_stage === "uploaded")
   )
-  if (!waiting.length) return null
-  if (options?.random) {
-    return waiting[Math.floor(Math.random() * waiting.length)]!.id
+  if (waiting.length) {
+    if (options?.random) {
+      return waiting[Math.floor(Math.random() * waiting.length)]!.id
+    }
+    return waiting[0]!.id
   }
-  return waiting[0]!.id
+
+  if (!options?.includeFailed) return null
+
+  const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
+  if (!failed.length) return null
+  if (options?.random) {
+    return failed[Math.floor(Math.random() * failed.length)]!.id
+  }
+  return failed[0]!.id
 }
 
 export async function healStaleRunningJobs(userId: string): Promise<number> {
@@ -272,13 +282,13 @@ export type ProcessNextResult = {
  */
 export async function processNextIngestDocument(
   userId: string,
-  options?: { random?: boolean }
+  options?: { random?: boolean; includeFailed?: boolean }
 ): Promise<ProcessNextResult> {
   await healStaleRunningJobs(userId)
   await skipPendingIngestJobs(userId)
   await resetOrphanPipelineDocs(userId)
 
-  let all = await fetchAllStudyDocs(userId)
+  const all = await fetchAllStudyDocs(userId)
   const targetId = pickNextPendingId(all, options)
 
   if (!targetId) {
@@ -289,6 +299,9 @@ export async function processNextIngestDocument(
   }
 
   const doc = all.find((d) => d.id === targetId)!
+  if (doc.ingest_stage === "failed") {
+    await requeueDocumentForIngest(userId, targetId)
+  }
 
   await markProcessingStarted(userId, targetId)
 
@@ -398,9 +411,7 @@ export async function readIngestQueueDetails(
         (d.ingest_stage === "ready" && isRecentWaveDoc(d)))
   )
 
-  const failedRecent = sortByQueue(
-    all.filter((d) => d.ingest_stage === "failed" && isRecentWaveDoc(d))
-  )
+  const failedAll = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
 
   const completed = wave.filter((d) => d.ingest_stage === "ready").length
   const total = wave.length
@@ -410,7 +421,7 @@ export async function readIngestQueueDetails(
   const pending_count = waiting.length
 
   const active =
-    pending_count > 0 || running || failedRecent.length > 0 || completed < total
+    pending_count > 0 || running || failedAll.length > 0 || completed < total
 
   if (!active) {
     return {
@@ -439,7 +450,7 @@ export async function readIngestQueueDetails(
     toView(d, { is_current: false, is_next: false })
   )
 
-  const failed_items = failedRecent.slice(0, 10).map((d) =>
+  const failed_items = failedAll.slice(0, 10).map((d) =>
     toView(d, { is_current: false, is_next: false })
   )
 
@@ -454,7 +465,7 @@ export async function readIngestQueueDetails(
     items,
     has_more: waiting.length > itemLimit + 1,
     failed_items,
-    failed_count: failedRecent.length,
+    failed_count: failedAll.length,
   }
 }
 
