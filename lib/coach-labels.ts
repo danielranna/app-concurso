@@ -18,6 +18,40 @@ export const BRAIN_STATUS_LABELS: Record<string, string> = {
   critico: "Crítico",
   ilusao_dominio: "Ilusão de domínio",
   em_evolucao: "Em evolução",
+  sem_dados: "Sem dados",
+}
+
+/** Critérios alinhados a `statusFromMetrics` em lib/ai/subject-brain.ts */
+export const BRAIN_STATUS_DESCRIPTIONS: Record<string, string> = {
+  dominado:
+    "Domínio ≥ 85% de acertos no assunto e estabilidade ≥ 70% (pouca oscilação entre tentativas).",
+  forte:
+    "Domínio ≥ 70% e estabilidade ≥ 50% — você acerta com consistência razoável.",
+  instavel:
+    "Domínio entre 55% e 70%, mas estabilidade baixa (< 45%) — acerta e erra de forma alternada.",
+  fraco:
+    "Domínio abaixo de 55% no assunto — ainda há lacuna clara no conteúdo.",
+  critico:
+    "Domínio abaixo de 45% e pelo menos 3 erros registrados no assunto — prioridade alta.",
+  ilusao_dominio:
+    "Domínio aparentemente ok (≥ 60%), mas estabilidade muito baixa (< 35%) ou padrão de chute/falso positivo — cuidado para não superestimar.",
+  em_evolucao:
+    "Situação intermediária que não se encaixa nas regras acima; ainda em construção.",
+  sem_dados: "Nenhuma tentativa mapeada neste assunto ainda.",
+}
+
+export const OUTCOME_CATEGORY_DESCRIPTIONS: Record<string, string> = {
+  conhecimento_solido:
+    "Você marcou seguro e acertou — o sistema interpreta como domínio real naquela tentativa.",
+  conhecimento_fragil:
+    "Você marcou inseguro mas acertou — acerto frágil, pode não sustentar na prova.",
+  lacuna_critica:
+    "Seguro e errou — lacuna que você ainda não percebia.",
+  lacuna_consciente:
+    "Inseguro e errou — você já sentia a dificuldade.",
+  falso_positivo:
+    "Chutou e acertou — não conta como domínio sólido.",
+  conteudo_desconhecido: "Chutou e errou — conteúdo não dominado.",
 }
 
 export const TREND_LABELS: Record<string, string> = {

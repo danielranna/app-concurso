@@ -58,9 +58,12 @@ type NavOpts = { nav?: NavMode }
 
 type Props = {
   userId: string
-  mode: "notebook" | "study"
+  mode: "notebook" | "study" | "solo"
   notebookId?: string
   studySessionId?: string
+  /** Obrigatório quando mode === "solo" */
+  soloQuestionId?: string
+  returnHref?: string
   fetchQueue: (opts?: NavOpts) => Promise<{
     current: { question_id: string; tec_id: number; notebook_id: string } | null
     question: Question | null
@@ -121,8 +124,15 @@ export default function QuestionSolver({
   refreshKey,
   onNotebookComplete,
   timerPaused = false,
+  soloQuestionId,
+  returnHref,
 }: Props) {
-  const scopeId = mode === "notebook" ? notebookId! : studySessionId!
+  const scopeId =
+    mode === "notebook"
+      ? notebookId!
+      : mode === "study"
+        ? studySessionId!
+        : soloQuestionId!
   const scopeKey = draftScopeKey(mode, scopeId)
 
   const [question, setQuestion] = useState<Question | null>(null)
@@ -542,7 +552,9 @@ export default function QuestionSolver({
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-slate-700">
-            Questão {displayIdx} de {stats.total}
+            {mode === "solo"
+              ? "Prática avulsa"
+              : `Questão ${displayIdx} de ${stats.total}`}
           </p>
           {timerTick >= 0 && (
             <QuestionTimerDisplay
@@ -704,7 +716,17 @@ export default function QuestionSolver({
         </div>
       </div>
 
-      <StudyNavBar onNavigate={navigate} />
+      {mode !== "solo" && <StudyNavBar onNavigate={navigate} />}
+
+      {mode === "solo" && returnHref && (
+        <p className="text-center text-xs text-slate-500">
+          Modo prática avulsa — a tentativa entra nas estatísticas e no cérebro da matéria
+          (se mapeada).{" "}
+          <Link href={returnHref} className="font-medium text-blue-600 hover:underline">
+            Voltar
+          </Link>
+        </p>
+      )}
 
       {showPerf && (
         <PerformanceModal

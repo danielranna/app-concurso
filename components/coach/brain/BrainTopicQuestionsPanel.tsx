@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { ExternalLink, Loader2 } from "lucide-react"
+import { ExternalLink, Loader2, Play } from "lucide-react"
 import {
+  OUTCOME_CATEGORY_DESCRIPTIONS,
   OUTCOME_CATEGORY_LABELS,
   SIGNAL_LABELS,
 } from "@/lib/coach-labels"
@@ -26,6 +27,8 @@ export default function BrainTopicQuestionsPanel({
   const [questions, setQuestions] = useState<BrainTopicQuestionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [perfQuestionId, setPerfQuestionId] = useState<string | null>(null)
+
+  const returnPath = `/coach/materias/${subjectId}/cerebro`
 
   useEffect(() => {
     setLoading(true)
@@ -67,6 +70,14 @@ export default function BrainTopicQuestionsPanel({
           const bankParams = new URLSearchParams()
           if (q.tec_subject) bankParams.set("tec_subject", q.tec_subject)
           if (q.tec_topic) bankParams.set("tec_topic", q.tec_topic)
+          const solveParams = new URLSearchParams({
+            return: returnPath,
+          })
+          const outcomeKey = q.last_outcome_category ?? ""
+          const outcomeDesc = outcomeKey
+            ? OUTCOME_CATEGORY_DESCRIPTIONS[outcomeKey]
+            : null
+
           return (
             <li
               key={q.question_id}
@@ -86,7 +97,10 @@ export default function BrainTopicQuestionsPanel({
                   {q.wrong_count === 1 ? "" : "s"})
                 </span>
                 {q.last_outcome_category && (
-                  <span className="text-slate-500">
+                  <span
+                    className="text-slate-500"
+                    title={outcomeDesc ?? undefined}
+                  >
                     {OUTCOME_CATEGORY_LABELS[q.last_outcome_category] ??
                       q.last_outcome_category}
                   </span>
@@ -100,7 +114,14 @@ export default function BrainTopicQuestionsPanel({
                   </span>
                 ))}
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-3">
+                <Link
+                  href={`/questoes/questao/${q.question_id}?${solveParams.toString()}`}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Resolver questão
+                </Link>
                 <button
                   type="button"
                   onClick={() => setPerfQuestionId(q.question_id)}
@@ -108,10 +129,21 @@ export default function BrainTopicQuestionsPanel({
                 >
                   Ver desempenho
                 </button>
+                {q.tec_url && (
+                  <a
+                    href={q.tec_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-xs font-medium text-slate-600 hover:underline"
+                  >
+                    TEC #{q.tec_id}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
                 {q.tec_subject && (
                   <Link
                     href={`/questoes/banco?${bankParams.toString()}`}
-                    className="inline-flex items-center gap-0.5 text-xs font-medium text-slate-600 hover:underline"
+                    className="inline-flex items-center gap-0.5 text-xs font-medium text-slate-500 hover:underline"
                   >
                     Banco
                     <ExternalLink className="h-3 w-3" />

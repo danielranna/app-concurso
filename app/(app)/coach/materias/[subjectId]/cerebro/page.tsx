@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase"
 import type { BrainDetailPayload } from "@/lib/ai/brain-detail"
 import BrainDetailHeader from "@/components/coach/brain/BrainDetailHeader"
 import BrainHowItWorks from "@/components/coach/brain/BrainHowItWorks"
+import BrainStatusGuide from "@/components/coach/brain/BrainStatusGuide"
 import BrainOverviewCards from "@/components/coach/brain/BrainOverviewCards"
 import BrainTopicMap from "@/components/coach/brain/BrainTopicMap"
 import BrainSignalsList from "@/components/coach/brain/BrainSignalsList"
@@ -126,6 +127,8 @@ export default function CoachCerebroPage() {
       )}
 
       <BrainHowItWorks />
+
+      <BrainStatusGuide />
 
       {data && <BrainOverviewCards overview={data.overview} />}
 

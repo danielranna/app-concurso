@@ -81,8 +81,13 @@ export function listResolvableDrafts(
     .map(([questionId, draft]) => ({ questionId, draft }))
 }
 
-export function draftScopeKey(mode: "notebook" | "study", id: string): string {
-  return mode === "notebook" ? `draft:notebook:${id}` : `draft:session:${id}`
+export function draftScopeKey(
+  mode: "notebook" | "study" | "solo",
+  id: string
+): string {
+  if (mode === "notebook") return `draft:notebook:${id}`
+  if (mode === "study") return `draft:session:${id}`
+  return `draft:solo:${id}`
 }
 
 export function clearDraftScope(scopeKey: string): void {

@@ -17,6 +17,7 @@ import { computePriorityBreakdown, type PriorityBreakdownRow } from "./priority-
 type QuestionMeta = {
   id?: string
   tec_id: number
+  tec_url?: string
   tec_subject: string
   tec_topic: string
   statement?: string
@@ -65,7 +66,7 @@ async function fetchSubjectAttemptsFull(
 
   const { data: questions } = await supabaseServer
     .from("questions")
-    .select("id, tec_id, tec_subject, tec_topic, statement")
+    .select("id, tec_id, tec_url, tec_subject, tec_topic, statement")
     .in("tec_subject", tecSubjects)
 
   const questionIds = (questions ?? []).map((q) => q.id)
@@ -79,7 +80,7 @@ async function fetchSubjectAttemptsFull(
       `
       question_id, is_correct, duration_ms, confidence_level,
       outcome_category, error_taxonomy, created_at,
-      questions ( id, tec_id, tec_subject, tec_topic, statement )
+      questions ( id, tec_id, tec_url, tec_subject, tec_topic, statement )
     `
     )
     .eq("user_id", userId)
@@ -367,6 +368,7 @@ export async function buildBrainDetailPayload(
 export type BrainTopicQuestionRow = {
   question_id: string
   tec_id: number
+  tec_url: string
   statement_excerpt: string
   attempt_count: number
   wrong_count: number
@@ -422,9 +424,13 @@ export async function fetchBrainTopicQuestions(
       .reverse()
       .find((x) => !x.is_correct && x.error_taxonomy)
 
+    const tecId = meta?.tec_id ?? 0
     rows.push({
       question_id: questionId,
-      tec_id: meta?.tec_id ?? 0,
+      tec_id: tecId,
+      tec_url:
+        (meta as { tec_url?: string })?.tec_url ??
+        (tecId ? `https://www.tecconcursos.com.br/questoes/${tecId}` : ""),
       statement_excerpt: (meta?.statement ?? "").slice(0, 200),
       attempt_count: qAttempts.length,
       wrong_count: wrongCount,

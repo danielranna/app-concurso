@@ -83,9 +83,15 @@ export default function BrainTopicMap({
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
-        Mapa por assunto
-      </h2>
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+          Mapa por assunto
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Status = visão do assunto (domínio + estabilidade). Expanda para resolver cada
+          questão de novo.
+        </p>
+      </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-[200px_1fr]">
         {chartData.length > 0 && (
           <div className="h-44">
