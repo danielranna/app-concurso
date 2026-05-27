@@ -121,6 +121,24 @@ export async function POST(req: Request) {
         ...result,
       })
     }
+
+    const notebookIdempotencyKeys = notebooks.map((n) => `notebook_report:${n.id}`)
+    if (notebookIdempotencyKeys.length) {
+      const staleRunningThreshold = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+      await supabaseServer
+        .from("ai_jobs")
+        .update({
+          status: "pending",
+          started_at: null,
+          error_message: "auto_requeued_stale_running_by_process_pending",
+        })
+        .eq("user_id", user_id)
+        .eq("job_type", "notebook_report_aggregate")
+        .eq("status", "running")
+        .is("completed_at", null)
+        .lt("started_at", staleRunningThreshold)
+        .in("idempotency_key", notebookIdempotencyKeys)
+    }
     // #region agent log
     fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
       method: "POST",
