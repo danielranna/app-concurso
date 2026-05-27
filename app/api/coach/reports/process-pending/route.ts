@@ -209,6 +209,18 @@ export async function POST(req: Request) {
       .select("id", { count: "exact", head: true })
       .eq("user_id", user_id)
       .eq("report_pending", true)
+    let latestReportId = recentReports?.[0]?.id ?? null
+    if (notebook_id) {
+      const { data: chosenReport } = await supabaseServer
+        .from("subject_notebook_reports")
+        .select("id, created_at")
+        .eq("user_id", user_id)
+        .eq("notebook_id", notebook_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      latestReportId = chosenReport?.id ?? latestReportId
+    }
     // #region agent log
     fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
       method: "POST",
@@ -229,19 +241,6 @@ export async function POST(req: Request) {
       }),
     }).catch(() => {})
     // #endregion
-
-    let latestReportId = recentReports?.[0]?.id ?? null
-    if (notebook_id) {
-      const { data: chosenReport } = await supabaseServer
-        .from("subject_notebook_reports")
-        .select("id, created_at")
-        .eq("user_id", user_id)
-        .eq("notebook_id", notebook_id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      latestReportId = chosenReport?.id ?? latestReportId
-    }
 
     return NextResponse.json({
       ok: true,
