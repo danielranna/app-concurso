@@ -192,12 +192,27 @@ export default function IngestQueuePanel() {
             )
           }
 
-          const result = await processNextIngest(uid, {
-            random: options.random,
-            includeFailed:
-              options.processAll && !embedOnly && !chunkBackfill,
-            mode: options.mode ?? "full",
-          })
+          let result
+          try {
+            result = await processNextIngest(uid, {
+              random: options.random,
+              includeFailed:
+                options.processAll && !embedOnly && !chunkBackfill,
+              mode: options.mode ?? "full",
+            })
+          } catch (e) {
+            const err = e instanceof Error ? e.message : "Erro ao processar"
+            if (!options.processAll) throw e
+            stats.failed++
+            stats.done++
+            setLoopStats({ ...stats })
+            setStatusMsg(
+              `${err} — tentando o próximo em alguns segundos… (${stats.failed} erro(s))`
+            )
+            await sleep(RETRY_BUSY_MS)
+            continue
+          }
+
           setQueue(result.queue)
 
           if (result.status === "ready") {
@@ -217,7 +232,7 @@ export default function IngestQueuePanel() {
             stats.done++
             setStatusMsg(
               options.processAll
-                ? `Erro: ${result.title ?? "arquivo"} — seguindo… (${stats.failed} erro(s))`
+                ? `Erro: ${result.title ?? "arquivo"} — seguindo para o próximo (como um novo clique). (${stats.failed} erro(s))`
                 : `Erro em ${result.title ?? "arquivo"}`
             )
           } else if (result.status === "idle") {
@@ -329,8 +344,8 @@ export default function IngestQueuePanel() {
             Fila de indexação (global)
           </h3>
           <p className="text-xs text-amber-900/80">
-            VPS · 1 PDF por vez · use &quot;Gerar trechos em fila&quot; para PDFs prontos
-            sem chunks (~{rag.need_chunk})
+            VPS · &quot;Gerar trechos em fila&quot; = loop automático (~{rag.need_chunk}{" "}
+            PDFs) · deixe a aba aberta · erros seguem para o próximo
           </p>
         </div>
         {expanded ? (
@@ -375,7 +390,9 @@ export default function IngestQueuePanel() {
           }
           className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
         >
-          Gerar trechos em fila
+          {processing && loopStats
+            ? `Gerando… ${loopStats.ok} ok · ${loopStats.failed} erros`
+            : "Gerar trechos em fila (loop)"}
         </button>
         <button
           type="button"

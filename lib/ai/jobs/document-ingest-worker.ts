@@ -105,7 +105,7 @@ export async function getEmbedStatusByDocument(
     .select("id")
     .eq("user_id", userId)
     .eq("doc_type", "study_material")
-    .eq("ingest_stage", "ready")
+    .in("ingest_stage", ["ready", "failed"])
 
   if (error) throw new Error(error.message)
 
@@ -185,10 +185,11 @@ export function pickNextPendingId(
 
   if (options?.chunkBackfill) {
     const needing = sortByQueue(
-      all.filter(
-        (d) =>
-          d.ingest_stage === "ready" && statusMap.get(d.id) === "no_chunks"
-      )
+      all.filter((d) => {
+        const st = statusMap.get(d.id)
+        if (st !== "no_chunks") return false
+        return d.ingest_stage === "ready" || d.ingest_stage === "failed"
+      })
     )
     if (!needing.length) return null
     if (options?.random) {
