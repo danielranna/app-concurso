@@ -96,6 +96,7 @@ export async function claimPendingJobs(
   limit = 5,
   options?: { userId?: string; jobTypes?: JobType[] }
 ) {
+  const runId = `claim-pending:${Date.now()}`
   let query = supabaseServer
     .from("ai_jobs")
     .select("*")
@@ -113,6 +114,28 @@ export async function claimPendingJobs(
     .order("priority", { ascending: false })
     .order("scheduled_at", { ascending: true })
     .limit(limit)
+  // #region agent log
+  fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f29fd5" },
+    body: JSON.stringify({
+      sessionId: "f29fd5",
+      runId,
+      hypothesisId: "H5",
+      location: "jobs/queue.ts:claimPendingJobs:query-result",
+      message: "pending jobs query result",
+      data: {
+        limit,
+        hasUserFilter: Boolean(options?.userId),
+        userFilter: options?.userId ?? null,
+        jobTypes: options?.jobTypes ?? [],
+        pendingCount: pending?.length ?? 0,
+        pendingJobTypes: (pending ?? []).map((j) => j.job_type).slice(0, 20),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
 
   const claimed = []
   for (const job of pending ?? []) {

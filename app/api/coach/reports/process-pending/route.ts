@@ -8,12 +8,29 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
   const user_id = body.user_id as string | undefined
   const notebook_id = body.notebook_id as string | undefined
+  const runId = `process-pending:${Date.now()}`
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
   try {
+    // #region agent log
+    fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f29fd5" },
+      body: JSON.stringify({
+        sessionId: "f29fd5",
+        runId,
+        hypothesisId: "H1",
+        location: "process-pending/route.ts:entry",
+        message: "process-pending request received",
+        data: { hasUserId: Boolean(user_id), hasNotebookId: Boolean(notebook_id) },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
+
     let notebooks: {
       id: string
       name: string
@@ -104,6 +121,29 @@ export async function POST(req: Request) {
         ...result,
       })
     }
+    // #region agent log
+    fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f29fd5" },
+      body: JSON.stringify({
+        sessionId: "f29fd5",
+        runId,
+        hypothesisId: "H2",
+        location: "process-pending/route.ts:after-enqueue",
+        message: "enqueue summary",
+        data: {
+          notebooksCount: notebooks.length,
+          queuedCount: enqueueResults.filter((r) => r.queued).length,
+          skippedCount: enqueueResults.filter((r) => r.skipped).length,
+          skippedReasons: enqueueResults
+            .filter((r) => r.skipped)
+            .map((r) => r.reason ?? "unknown")
+            .slice(0, 10),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
 
     const jobResults: { id: string; status: string; error?: string }[] = []
     for (let round = 0; round < 8; round++) {
@@ -112,6 +152,26 @@ export async function POST(req: Request) {
         jobTypes: reportPipelineTypes,
       })
       jobResults.push(...batch)
+      // #region agent log
+      fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f29fd5" },
+        body: JSON.stringify({
+          sessionId: "f29fd5",
+          runId,
+          hypothesisId: "H3",
+          location: "process-pending/route.ts:worker-round",
+          message: "worker round executed",
+          data: {
+            round,
+            batchSize: batch.length,
+            statuses: batch.map((j) => j.status).slice(0, 20),
+            errors: batch.map((j) => j.error).filter(Boolean).slice(0, 5),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {})
+      // #endregion
       if (batch.length === 0) break
       const onlySkips = batch.every(
         (j) => j.status === "done" || j.status === "failed"
@@ -149,6 +209,26 @@ export async function POST(req: Request) {
       .select("id", { count: "exact", head: true })
       .eq("user_id", user_id)
       .eq("report_pending", true)
+    // #region agent log
+    fetch("http://127.0.0.1:7663/ingest/6e20de48-eef2-41d7-982f-427766678040", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f29fd5" },
+      body: JSON.stringify({
+        sessionId: "f29fd5",
+        runId,
+        hypothesisId: "H4",
+        location: "process-pending/route.ts:before-response",
+        message: "process-pending response summary",
+        data: {
+          jobsProcessed: jobResults.length,
+          stillPending: stillPending ?? 0,
+          notebookId: notebook_id ?? null,
+          latestReportId,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
 
     let latestReportId = recentReports?.[0]?.id ?? null
     if (notebook_id) {
