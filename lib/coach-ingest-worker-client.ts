@@ -5,6 +5,21 @@ import {
   getCoachUploadBaseUrl,
 } from "@/lib/coach-upload-client"
 
+const INGEST_DEBUG =
+  process.env.NEXT_PUBLIC_COACH_INGEST_DEBUG !== "0"
+
+function logIngest(
+  message: string,
+  detail?: Record<string, unknown>
+) {
+  if (!INGEST_DEBUG || typeof window === "undefined") return
+  if (detail) {
+    console.info(`[coach-ingest] ${message}`, detail)
+  } else {
+    console.info(`[coach-ingest] ${message}`)
+  }
+}
+
 export type IngestQueueItemView = {
   id: string
   title: string
@@ -47,10 +62,10 @@ export async function fetchIngestQueueDetails(
   userId: string,
   limit = 5
 ): Promise<IngestQueueDetails> {
-  const res = await fetch(
-    `/api/coach/documents/ingest-queue?user_id=${encodeURIComponent(userId)}&limit=${limit}`,
-    { cache: "no-store" }
-  )
+  const url = `/api/coach/documents/ingest-queue?user_id=${encodeURIComponent(userId)}&limit=${limit}`
+  logIngest("Fila: sempre Vercel (leitura)", { url })
+
+  const res = await fetch(url, { cache: "no-store" })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new Error((data as { error?: string }).error ?? "Falha ao consultar fila")
@@ -86,18 +101,50 @@ export async function processNextIngest(
     ? `${external}/coach/jobs/process-next`
     : "/api/coach/jobs/process-next"
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: headers ?? { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, random: options?.random ?? false }),
-    cache: "no-store",
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer))
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    throw new Error((data as { error?: string }).error ?? "Falha ao processar")
+  const runtime = external ? "VPS" : "Vercel"
+  logIngest(`Processar próximo: ${runtime}`, {
+    url,
+    uploadBaseUrl: external ?? "(NEXT_PUBLIC_COACH_UPLOAD_URL não definida no build)",
+    timeoutMs,
+    random: options?.random ?? false,
+  })
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: headers ?? { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        random: options?.random ?? false,
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      logIngest(`Processar próximo falhou (${runtime})`, {
+        status: res.status,
+        error: (data as { error?: string }).error,
+      })
+      throw new Error((data as { error?: string }).error ?? "Falha ao processar")
+    }
+
+    logIngest(`Processar próximo OK (${runtime})`, {
+      status: res.status,
+      result: data,
+    })
+    return data as ProcessNextResult
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    logIngest(`Processar próximo erro de rede (${runtime})`, {
+      url,
+      message: msg,
+      aborted: e instanceof Error && e.name === "AbortError",
+    })
+    throw e
+  } finally {
+    clearTimeout(timer)
   }
-  return data as ProcessNextResult
 }
 
 export async function deferDocumentInQueue(userId: string, documentId: string) {
