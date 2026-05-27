@@ -20,7 +20,13 @@ export async function POST(req: Request) {
 
     const random = Boolean(body.random)
     const includeFailed = Boolean(body.include_failed)
-    const result = await processNextIngestDocument(userId, { random, includeFailed })
+    const mode =
+      body.mode === "embed_only" ? ("embed_only" as const) : ("full" as const)
+    const result = await processNextIngestDocument(userId, {
+      random,
+      includeFailed,
+      mode,
+    })
     return NextResponse.json(result)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

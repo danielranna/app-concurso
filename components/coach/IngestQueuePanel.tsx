@@ -13,10 +13,12 @@ import {
 import { supabase } from "@/lib/supabase"
 import {
   deferDocumentInQueue,
+  embedWorkRemaining,
   fetchIngestQueueDetails,
   ingestStageLabel,
   ingestWorkRemaining,
   processNextIngest,
+  queueRag,
   reindexDocumentInQueue,
   type IngestQueueDetails,
 } from "@/lib/coach-ingest-worker-client"
@@ -127,7 +129,15 @@ export default function IngestQueuePanel() {
   }, [userId, loadQueue])
 
   const runLoop = useCallback(
-    async (uid: string, options: { processAll: boolean; random?: boolean }) => {
+    async (
+      uid: string,
+      options: {
+        processAll: boolean
+        random?: boolean
+        mode?: "full" | "embed_only"
+      }
+    ) => {
+      const embedOnly = options.mode === "embed_only"
       stopLoopRef.current = false
       setProcessing(true)
       setStatusMsg(null)
@@ -140,12 +150,18 @@ export default function IngestQueuePanel() {
 
           const limit = showAll ? 50 : LIST_LIMIT
           const before = await loadQueue(uid, limit)
-          const remainingBefore = ingestWorkRemaining(before)
+          const remainingBefore = embedOnly
+            ? embedWorkRemaining(before)
+            : ingestWorkRemaining(before)
           if (remainingBefore === 0) {
             setStatusMsg(
               options.processAll
-                ? `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
-                : "Nada pendente na fila."
+                ? embedOnly
+                  ? `Vetorização concluída (${stats.ok} com RAG completo).`
+                  : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+                : embedOnly
+                  ? "Nenhum PDF pendente de vetorização."
+                  : "Nada pendente na fila."
             )
             break
           }
@@ -159,23 +175,30 @@ export default function IngestQueuePanel() {
 
           if (options.processAll) {
             setStatusMsg(
-              `Processando… ${stats.done + 1} concluído(s) · ~${remainingBefore} restante(s) (fila + erros)`
+              embedOnly
+                ? `Vetorizando… ${stats.done + 1} feito(s) · ~${remainingBefore} sem vetor completo`
+                : `Processando… ${stats.done + 1} concluído(s) · ~${remainingBefore} restante(s) (fila + erros)`
             )
           }
 
           const result = await processNextIngest(uid, {
             random: options.random,
-            includeFailed: options.processAll,
+            includeFailed: options.processAll && !embedOnly,
+            mode: options.mode ?? "full",
           })
           setQueue(result.queue)
 
           if (result.status === "ready") {
             stats.ok++
             stats.done++
+            const emb =
+              result.embedded != null && result.chunks != null
+                ? ` · ${result.embedded}/${result.chunks} vetores`
+                : ""
             setStatusMsg(
               options.processAll
-                ? `Pronto: ${result.title ?? "arquivo"} (${stats.ok}/${stats.done})`
-                : `Pronto: ${result.title ?? "arquivo"}`
+                ? `Pronto: ${result.title ?? "arquivo"}${emb} (${stats.ok}/${stats.done})`
+                : `Pronto: ${result.title ?? "arquivo"}${emb}`
             )
           } else if (result.status === "failed") {
             stats.failed++
@@ -206,9 +229,14 @@ export default function IngestQueuePanel() {
           }
 
           if (!options.processAll) break
-          if (ingestWorkRemaining(result.queue) === 0) {
+          const left = embedOnly
+            ? embedWorkRemaining(result.queue)
+            : ingestWorkRemaining(result.queue)
+          if (left === 0) {
             setStatusMsg(
-              `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
+              embedOnly
+                ? `Vetorização concluída (${stats.ok} com RAG completo).`
+                : `Fila concluída (${stats.ok} prontos, ${stats.failed} com erro).`
             )
             break
           }
@@ -251,14 +279,24 @@ export default function IngestQueuePanel() {
     }
   }
 
+  const rag = queue ? queueRag(queue) : null
+
   const showPanel =
     queue &&
-    (queue.active || queue.pending_count > 0 || queue.total > 0 || queue.failed_count > 0)
+    (queue.active ||
+      queue.pending_count > 0 ||
+      queue.total > 0 ||
+      queue.failed_count > 0 ||
+      (rag?.need_embed ?? 0) > 0)
 
-  if (!showPanel) return null
+  if (!showPanel || !queue || !rag) return null
 
   const progressPct =
     queue.total > 0 ? Math.round((queue.completed / queue.total) * 100) : 0
+  const ragPct =
+    rag.total_with_chunks > 0
+      ? Math.round((rag.complete / rag.total_with_chunks) * 100)
+      : 0
 
   const waitingItems = queue.items.filter((i) => !i.is_current && !i.is_next)
 
@@ -313,6 +351,17 @@ export default function IngestQueuePanel() {
         </button>
         <button
           type="button"
+          disabled={!userId || processing || rag.need_embed === 0}
+          onClick={() =>
+            userId &&
+            void runLoop(userId, { processAll: true, mode: "embed_only" })
+          }
+          className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100 disabled:opacity-50"
+        >
+          Vetorizar pendentes (RAG)
+        </button>
+        <button
+          type="button"
           disabled={!userId || processing}
           onClick={() => {
             stopLoopRef.current = true
@@ -351,19 +400,36 @@ export default function IngestQueuePanel() {
         <p className="mt-2 text-xs text-slate-600">{statusMsg}</p>
       )}
 
-      <div className="mt-3">
-        <div className="mb-1 flex items-center justify-between text-xs font-medium text-amber-950">
-          <span>
-            {queue.completed}/{queue.total} indexados
-            {queue.pending_count > 0 ? ` · ${queue.pending_count} na fila` : ""}
-          </span>
-          <span>{progressPct}%</span>
+      <div className="mt-3 space-y-2">
+        <div>
+          <div className="mb-1 flex items-center justify-between text-xs font-medium text-amber-950">
+            <span>
+              Texto: {queue.completed}/{queue.total}
+              {queue.pending_count > 0 ? ` · ${queue.pending_count} na fila` : ""}
+            </span>
+            <span>{progressPct}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-amber-200/80">
+            <div
+              className="h-full rounded-full bg-amber-600 transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-amber-200/80">
-          <div
-            className="h-full rounded-full bg-amber-600 transition-all duration-500"
-            style={{ width: `${progressPct}%` }}
-          />
+        <div>
+          <div className="mb-1 flex items-center justify-between text-xs font-medium text-violet-950">
+            <span>
+              RAG: {rag.complete}/{rag.total_with_chunks} com vetores
+              {rag.need_embed > 0 ? ` · ${rag.need_embed} faltam` : ""}
+            </span>
+            <span>{ragPct}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-violet-200/80">
+            <div
+              className="h-full rounded-full bg-violet-600 transition-all duration-500"
+              style={{ width: `${ragPct}%` }}
+            />
+          </div>
         </div>
       </div>
 

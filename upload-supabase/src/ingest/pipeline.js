@@ -273,6 +273,84 @@ export async function chunkDocument(supabase, userId, documentId) {
   return { chunks: parts.length }
 }
 
+export function ragStatusFromCounts(total, embedded) {
+  if (total === 0) return "no_chunks"
+  if (embedded === total) return "complete"
+  if (embedded === 0) return "lexical_only"
+  return "partial"
+}
+
+export async function getChunkEmbedCounts(supabase, documentId) {
+  const { count: total, error: e1 } = await supabase
+    .from("document_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", documentId)
+
+  if (e1) throw new Error(e1.message)
+
+  const { count: embedded, error: e2 } = await supabase
+    .from("document_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", documentId)
+    .not("embedding", "is", null)
+
+  if (e2) throw new Error(e2.message)
+
+  return { total: total ?? 0, embedded: embedded ?? 0 }
+}
+
+async function persistRagMetadata(supabase, documentId, doc, counts) {
+  const pt = doc.parsed_tables ?? {}
+  const rag_status = ragStatusFromCounts(counts.total, counts.embedded)
+  await updateDocumentIngest(supabase, documentId, {
+    parsed_tables: {
+      ...pt,
+      rag_status,
+      embedded_count: counts.embedded,
+      chunks_at_embed: counts.total,
+      embedded_at: new Date().toISOString(),
+    },
+  })
+}
+
+/** Só vetoriza chunks existentes (sem re-parse). */
+export async function embedOnlyDocument(supabase, config, userId, documentId) {
+  const doc = await getDocumentById(supabase, userId, documentId)
+  if (!doc) throw new Error("Documento não encontrado")
+  if (doc.ingest_stage !== "ready") {
+    throw new Error("Só é possível vetorizar documentos já indexados (ready)")
+  }
+
+  const before = await getChunkEmbedCounts(supabase, documentId)
+  if (before.total === 0) {
+    throw new Error("Sem trechos para vetorizar — reindexe o PDF")
+  }
+  if (before.embedded === before.total) {
+    await persistRagMetadata(supabase, documentId, doc, before)
+    return { chunks: before.total, embedded: before.embedded }
+  }
+
+  const emb = await embedDocumentChunks(supabase, config, userId, documentId)
+  if (emb.skipped) {
+    const msg =
+      "Configure chave OpenAI nas configurações do app para vetorizar (RAG)."
+    await failDocumentIngest(supabase, documentId, msg)
+    throw new Error(msg)
+  }
+
+  const after = await getChunkEmbedCounts(supabase, documentId)
+  await persistRagMetadata(supabase, documentId, doc, after)
+
+  await updateDocumentIngest(supabase, documentId, {
+    ingest_stage: "ready",
+    status: "ready",
+    ingest_error: null,
+    chunk_count: after.total,
+  })
+
+  return { chunks: after.total, embedded: after.embedded }
+}
+
 /** Vetoriza todos os chunks sem limite de lotes por execução (VPS). */
 export async function embedDocumentChunks(supabase, config, userId, documentId) {
   const credentials = await getUserAiCredentials(supabase, config, userId)
@@ -348,6 +426,10 @@ export async function ingestDocumentPipeline(
         /* busca lexical funciona sem embeddings */
       }
     }
+
+    const docAfter = await getDocumentById(supabase, userId, documentId)
+    const counts = await getChunkEmbedCounts(supabase, documentId)
+    if (docAfter) await persistRagMetadata(supabase, documentId, docAfter, counts)
 
     await updateDocumentIngest(supabase, documentId, {
       ingest_stage: "ready",

@@ -324,6 +324,98 @@ export async function chunkDocument(
   return { chunks: parts.length }
 }
 
+export type RagDocStatus = "no_chunks" | "complete" | "lexical_only" | "partial"
+
+export async function getChunkEmbedCounts(
+  documentId: string
+): Promise<{ total: number; embedded: number }> {
+  const { count: total, error: e1 } = await supabaseServer
+    .from("document_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", documentId)
+
+  if (e1) throw new Error(e1.message)
+
+  const { count: embedded, error: e2 } = await supabaseServer
+    .from("document_chunks")
+    .select("id", { count: "exact", head: true })
+    .eq("document_id", documentId)
+    .not("embedding", "is", null)
+
+  if (e2) throw new Error(e2.message)
+
+  return { total: total ?? 0, embedded: embedded ?? 0 }
+}
+
+export function ragStatusFromCounts(
+  total: number,
+  embedded: number
+): RagDocStatus {
+  if (total === 0) return "no_chunks"
+  if (embedded === total) return "complete"
+  if (embedded === 0) return "lexical_only"
+  return "partial"
+}
+
+async function persistRagMetadata(
+  documentId: string,
+  doc: { parsed_tables?: Record<string, unknown> | null },
+  counts: { total: number; embedded: number }
+) {
+  const pt = (doc.parsed_tables ?? {}) as Record<string, unknown>
+  const rag_status = ragStatusFromCounts(counts.total, counts.embedded)
+  await updateDocumentIngest(documentId, {
+    parsed_tables: {
+      ...pt,
+      rag_status,
+      embedded_count: counts.embedded,
+      chunks_at_embed: counts.total,
+      embedded_at: new Date().toISOString(),
+    },
+  })
+}
+
+/** Só vetoriza chunks existentes (sem re-parse). Falha se não houver OpenAI. */
+export async function embedOnlyDocument(
+  userId: string,
+  documentId: string
+): Promise<{ chunks: number; embedded: number }> {
+  const doc = await getDocumentById(userId, documentId)
+  if (!doc) throw new Error("Documento não encontrado")
+  if (doc.ingest_stage !== "ready") {
+    throw new Error("Só é possível vetorizar documentos já indexados (ready)")
+  }
+
+  const before = await getChunkEmbedCounts(documentId)
+  if (before.total === 0) {
+    throw new Error("Sem trechos para vetorizar — reindexe o PDF")
+  }
+  if (before.embedded === before.total) {
+    await persistRagMetadata(documentId, doc, before)
+    return { chunks: before.total, embedded: before.embedded }
+  }
+
+  const emb = await embedDocumentChunks(userId, documentId)
+  if (emb.skipped) {
+    const msg =
+      "Configure chave OpenAI nas configurações do app para vetorizar (RAG)."
+    await failDocumentIngest(documentId, msg)
+    throw new Error(msg)
+  }
+
+  const after = await getChunkEmbedCounts(documentId)
+  await persistRagMetadata(documentId, doc, after)
+
+  await updateDocumentIngest(documentId, {
+    ingest_stage: "ready",
+    status: "ready",
+    ingest_error: null,
+    chunk_count: after.total,
+  })
+
+  return { chunks: after.total, embedded: after.embedded }
+}
+
 export async function embedDocumentChunks(
   userId: string,
   documentId: string
@@ -395,6 +487,10 @@ export async function ingestDocumentPipeline(
         /* lexical search still works without embeddings */
       }
     }
+
+    const docAfter = await getDocumentById(userId, documentId)
+    const counts = await getChunkEmbedCounts(documentId)
+    if (docAfter) await persistRagMetadata(documentId, docAfter, counts)
 
     await updateDocumentIngest(documentId, {
       ingest_stage: "ready",

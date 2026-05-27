@@ -33,6 +33,14 @@ export type IngestQueueItemView = {
   is_next: boolean
 }
 
+export type IngestRagStats = {
+  complete: number
+  lexical_only: number
+  partial: number
+  need_embed: number
+  total_with_chunks: number
+}
+
 export type IngestQueueDetails = {
   active: boolean
   running: boolean
@@ -45,11 +53,28 @@ export type IngestQueueDetails = {
   has_more: boolean
   failed_items: IngestQueueItemView[]
   failed_count: number
+  rag?: IngestRagStats
 }
 
-/** Aguardando + erros (para o loop “processar todos”). */
+const EMPTY_RAG: IngestRagStats = {
+  complete: 0,
+  lexical_only: 0,
+  partial: 0,
+  need_embed: 0,
+  total_with_chunks: 0,
+}
+
+export function queueRag(queue: IngestQueueDetails): IngestRagStats {
+  return queue.rag ?? EMPTY_RAG
+}
+
+/** Aguardando + erros + falta vetorizar (modo full). */
 export function ingestWorkRemaining(queue: IngestQueueDetails): number {
   return queue.pending_count + queue.failed_count
+}
+
+export function embedWorkRemaining(queue: IngestQueueDetails): number {
+  return queueRag(queue).need_embed
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -78,18 +103,26 @@ export async function fetchIngestQueueDetails(
   return data as IngestQueueDetails
 }
 
+export type IngestProcessMode = "full" | "embed_only"
+
 export type ProcessNextResult = {
   status: "ready" | "failed" | "idle" | "retry"
   document_id?: string
   title?: string
   error?: string
   chunks?: number
+  embedded?: number
+  mode?: IngestProcessMode
   queue: IngestQueueDetails
 }
 
 export async function processNextIngest(
   userId: string,
-  options?: { random?: boolean; includeFailed?: boolean }
+  options?: {
+    random?: boolean
+    includeFailed?: boolean
+    mode?: IngestProcessMode
+  }
 ): Promise<ProcessNextResult> {
   const external = getCoachUploadBaseUrl()
   const headers = external ? await getCoachUploadAuthHeaders() : null
@@ -107,10 +140,12 @@ export async function processNextIngest(
     : "/api/coach/jobs/process-next"
 
   const runtime = external ? "VPS" : "Vercel"
+  const mode = options?.mode ?? "full"
   logIngest(`Processar próximo: ${runtime}`, {
     url,
     uploadBaseUrl: external ?? "(NEXT_PUBLIC_COACH_UPLOAD_URL não definida no build)",
     timeoutMs,
+    mode,
     random: options?.random ?? false,
     includeFailed: options?.includeFailed ?? false,
   })
@@ -123,6 +158,7 @@ export async function processNextIngest(
         user_id: userId,
         random: options?.random ?? false,
         include_failed: options?.includeFailed ?? false,
+        mode,
       }),
       cache: "no-store",
       signal: controller.signal,

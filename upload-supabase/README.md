@@ -313,8 +313,12 @@ Variáveis no `.env` da VPS:
 
 | Variável | Descrição |
 |----------|-----------|
-| `AI_CREDENTIALS_SECRET` | Mesmo valor da Vercel (para embeddings OpenAI por usuário) |
+| `AI_CREDENTIALS_SECRET` | **Obrigatório para RAG** — mesmo valor da Vercel (descriptografa chave OpenAI do usuário) |
 | `INGEST_PDF_TIMEOUT_MS` | `0` = sem limite na extração; ou ex. `1800000` (30 min) |
+
+Sem `AI_CREDENTIALS_SECRET`, os PDFs ficam **prontos** com texto/chunks mas **sem vetores** (barra RAG baixa no app). Use **Vetorizar pendentes (RAG)** após corrigir o secret.
+
+Diagnóstico no Supabase: rode `sql-rag-ingest-audit.sql` na raiz do projeto Next.
 
 Backfill sem browser (cron):
 

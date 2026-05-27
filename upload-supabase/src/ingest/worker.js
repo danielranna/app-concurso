@@ -1,9 +1,12 @@
 /** Sync com lib/ai/jobs/document-ingest-worker.ts — pipeline sem timeout Vercel. */
 import {
+  embedOnlyDocument,
   failDocumentIngest,
+  getChunkEmbedCounts,
   ingestDocumentPipeline,
   isIngestTimeoutError,
   markProcessingStarted,
+  ragStatusFromCounts,
   tryFinalizeReadyIfChunked,
 } from "./pipeline.js"
 
@@ -48,23 +51,106 @@ function sortByQueue(docs) {
   return [...docs].sort((a, b) => queueSortTime(a) - queueSortTime(b))
 }
 
-export function pickNextPendingId(all, options) {
-  const waiting = sortByQueue(all.filter((d) => d.ingest_stage === "uploaded"))
-  if (waiting.length) {
-    if (options?.random) {
-      return waiting[Math.floor(Math.random() * waiting.length)].id
+export async function getEmbedStatusByDocument(supabase, userId) {
+  const { data: readyDocs, error } = await supabase
+    .from("subject_documents")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("doc_type", "study_material")
+    .eq("ingest_stage", "ready")
+
+  if (error) throw new Error(error.message)
+
+  const ids = (readyDocs ?? []).map((d) => d.id)
+  const perDoc = new Map()
+  for (const id of ids) perDoc.set(id, { total: 0, embedded: 0 })
+
+  if (!ids.length) return new Map()
+
+  let from = 0
+  const pageSize = 2000
+  while (true) {
+    const { data: rows, error: chunkErr } = await supabase
+      .from("document_chunks")
+      .select("document_id, embedding")
+      .in("document_id", ids)
+      .range(from, from + pageSize - 1)
+
+    if (chunkErr) throw new Error(chunkErr.message)
+    if (!rows?.length) break
+
+    for (const row of rows) {
+      const s = perDoc.get(row.document_id)
+      if (!s) continue
+      s.total++
+      if (row.embedding != null) s.embedded++
     }
-    return waiting[0].id
+
+    if (rows.length < pageSize) break
+    from += pageSize
   }
 
-  if (!options?.includeFailed) return null
+  const statusMap = new Map()
+  for (const [id, counts] of perDoc) {
+    statusMap.set(id, ragStatusFromCounts(counts.total, counts.embedded))
+  }
+  return statusMap
+}
 
-  const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
-  if (!failed.length) return null
+export async function getRagStatsForUser(supabase, userId) {
+  const statusMap = await getEmbedStatusByDocument(supabase, userId)
+  let complete = 0
+  let lexical_only = 0
+  let partial = 0
+
+  for (const status of statusMap.values()) {
+    if (status === "complete") complete++
+    else if (status === "lexical_only") lexical_only++
+    else if (status === "partial") partial++
+  }
+
+  return {
+    complete,
+    lexical_only,
+    partial,
+    need_embed: lexical_only + partial,
+    total_with_chunks: complete + lexical_only + partial,
+  }
+}
+
+export function pickNextPendingId(all, options) {
+  if (!options?.embedOnly) {
+    const waiting = sortByQueue(all.filter((d) => d.ingest_stage === "uploaded"))
+    if (waiting.length) {
+      if (options?.random) {
+        return waiting[Math.floor(Math.random() * waiting.length)].id
+      }
+      return waiting[0].id
+    }
+
+    if (!options?.includeFailed) return null
+
+    const failed = sortByQueue(all.filter((d) => d.ingest_stage === "failed"))
+    if (!failed.length) return null
+    if (options?.random) {
+      return failed[Math.floor(Math.random() * failed.length)].id
+    }
+    return failed[0].id
+  }
+
+  const statusMap = options.embedStatus ?? new Map()
+  const needing = sortByQueue(
+    all.filter((d) => {
+      if (d.ingest_stage !== "ready") return false
+      const st = statusMap.get(d.id)
+      return st === "lexical_only" || st === "partial"
+    })
+  )
+  if (!needing.length) return null
   if (options?.random) {
-    return failed[Math.floor(Math.random() * failed.length)].id
+    return needing[Math.floor(Math.random() * needing.length)].id
   }
-  return failed[0].id
+  return needing[0].id
 }
 
 async function requeueDocumentForIngest(supabase, userId, documentId) {
@@ -251,8 +337,14 @@ export async function readIngestQueueDetails(supabase, userId, options) {
   const waiting = sortByQueue(all.filter((d) => d.ingest_stage === "uploaded"))
   const pending_count = waiting.length
 
+  const rag = await getRagStatsForUser(supabase, userId)
+
   const active =
-    pending_count > 0 || running || failedAll.length > 0 || completed < total
+    pending_count > 0 ||
+    running ||
+    failedAll.length > 0 ||
+    completed < total ||
+    rag.need_embed > 0
 
   if (!active) {
     return {
@@ -267,6 +359,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
       has_more: false,
       failed_items: [],
       failed_count: 0,
+      rag,
     }
   }
 
@@ -296,6 +389,7 @@ export async function readIngestQueueDetails(supabase, userId, options) {
     has_more: waiting.length > itemLimit + 1,
     failed_items,
     failed_count: failedAll.length,
+    rag,
   }
 }
 
@@ -303,10 +397,14 @@ export async function readIngestQueueDetails(supabase, userId, options) {
  * Processa o próximo PDF da fila (pipeline completa na VPS).
  */
 export async function processNextIngestDocument(supabase, config, userId, options) {
+  const mode = options?.mode === "embed_only" ? "embed_only" : "full"
+  const embedOnly = mode === "embed_only"
+
   if (usersProcessing.has(userId)) {
     return {
       status: "retry",
       error: "Já há um PDF sendo indexado. Aguarde.",
+      mode,
       queue: await readIngestQueueDetails(supabase, userId),
     }
   }
@@ -315,26 +413,65 @@ export async function processNextIngestDocument(supabase, config, userId, option
   try {
     await healStaleRunningJobs(supabase, userId)
     await skipPendingIngestJobs(supabase, userId)
-    await resetOrphanPipelineDocs(supabase, userId)
+    if (!embedOnly) await resetOrphanPipelineDocs(supabase, userId)
 
     const all = await fetchAllStudyDocs(supabase, userId)
-    const targetId = pickNextPendingId(all, options)
+    const embedStatus = embedOnly
+      ? await getEmbedStatusByDocument(supabase, userId)
+      : undefined
+
+    const targetId = pickNextPendingId(all, {
+      random: options?.random,
+      includeFailed: options?.includeFailed,
+      embedOnly,
+      embedStatus,
+    })
 
     if (!targetId) {
       return {
         status: "idle",
+        mode,
         queue: await readIngestQueueDetails(supabase, userId),
       }
     }
 
     const doc = all.find((d) => d.id === targetId)
-    if (doc?.ingest_stage === "failed") {
+    if (!embedOnly && doc?.ingest_stage === "failed") {
       await requeueDocumentForIngest(supabase, userId, targetId)
     }
 
-    await markProcessingStarted(supabase, userId, targetId)
+    if (embedOnly) {
+      await supabase
+        .from("subject_documents")
+        .update({
+          ingest_stage: "embedding",
+          status: "processing",
+          ingest_error: null,
+        })
+        .eq("id", targetId)
+    } else {
+      await markProcessingStarted(supabase, userId, targetId)
+    }
 
     try {
+      if (embedOnly) {
+        const result = await embedOnlyDocument(
+          supabase,
+          config,
+          userId,
+          targetId
+        )
+        return {
+          status: "ready",
+          mode,
+          document_id: targetId,
+          title: doc.title,
+          chunks: result.chunks,
+          embedded: result.embedded,
+          queue: await readIngestQueueDetails(supabase, userId),
+        }
+      }
+
       const result = await ingestDocumentPipeline(
         supabase,
         config,
@@ -343,20 +480,26 @@ export async function processNextIngestDocument(supabase, config, userId, option
       )
       return {
         status: "ready",
+        mode,
         document_id: targetId,
         title: doc.title,
         chunks: result.chunks,
+        embedded: result.embedded,
         queue: await readIngestQueueDetails(supabase, userId),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro na indexação"
       const timedOut = isIngestTimeoutError(e)
 
-      if (await tryFinalizeReadyIfChunked(supabase, targetId)) {
+      if (!embedOnly && (await tryFinalizeReadyIfChunked(supabase, targetId))) {
+        const counts = await getChunkEmbedCounts(supabase, targetId)
         return {
           status: "ready",
+          mode,
           document_id: targetId,
           title: doc.title,
+          chunks: counts.total,
+          embedded: counts.embedded,
           error: "Concluído com busca lexical (vetorização parcial).",
           queue: await readIngestQueueDetails(supabase, userId),
         }
@@ -366,9 +509,12 @@ export async function processNextIngestDocument(supabase, config, userId, option
         ? "PDF muito grande para extrair no tempo limite. Aumente INGEST_PDF_TIMEOUT_MS na VPS ou divida o arquivo."
         : msg
 
-      await failDocumentIngest(supabase, targetId, failMsg)
+      if (!embedOnly || !msg.includes("Configure chave OpenAI")) {
+        await failDocumentIngest(supabase, targetId, failMsg)
+      }
       return {
         status: "failed",
+        mode,
         document_id: targetId,
         title: doc.title,
         error: failMsg,
