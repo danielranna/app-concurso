@@ -1,5 +1,10 @@
 import { supabaseServer } from "../supabase-server"
-import type { DailyStudyBlock, DailyStudyPlan, PlanGenerationMeta } from "../coach-types"
+import type {
+  DailyStudyBlock,
+  DailyStudyPlan,
+  PlanGenerationMeta,
+  SubjectPickDiagnostic,
+} from "../coach-types"
 import { buildExecutionContext } from "./context-builder"
 import { createNotebookFromQuestionIds } from "../notebook-from-performance"
 import { runExecutionNarrativeAgent } from "./agents/execution"
@@ -27,6 +32,32 @@ export type GenerateDailyStudyPlanOptions = {
   refreshQueue?: boolean
   subjectId?: string
   recentWrongTopics?: string[]
+}
+
+function aggregatePickDiagnostics(
+  rows: SubjectPickDiagnostic[]
+): SubjectPickDiagnostic[] {
+  const bySubject = new Map<string, SubjectPickDiagnostic>()
+  for (const row of rows) {
+    const prev = bySubject.get(row.subject_id)
+    if (!prev) {
+      bySubject.set(row.subject_id, { ...row })
+      continue
+    }
+    bySubject.set(row.subject_id, {
+      ...prev,
+      picked: prev.picked + row.picked,
+      requested: Math.max(prev.requested, row.requested),
+      source:
+        row.picked > 0 && row.source === "subject_fallback"
+          ? "subject_fallback"
+          : prev.picked > 0
+            ? prev.source
+            : row.source,
+      skip_reason: row.picked > 0 ? undefined : prev.skip_reason ?? row.skip_reason,
+    })
+  }
+  return [...bySubject.values()]
 }
 
 export async function generateDailyStudyPlan(
@@ -142,6 +173,9 @@ export async function generateDailyStudyPlan(
         ),
         subjectNames,
         budget: questionsBudget,
+        allowlist: orderedForCycle.filter((id) =>
+          pool.allowlist.includes(id)
+        ),
       })
 
   const allQuestionIds = questionResult.questionIds
@@ -244,6 +278,9 @@ export async function generateDailyStudyPlan(
       flashcards: flashDrafts,
       summaries: summaryDrafts,
     },
+    subject_pick_diagnostics: aggregatePickDiagnostics(
+      questionResult.subject_pick_diagnostics
+    ),
   }
 
   const rotation_note = rotate

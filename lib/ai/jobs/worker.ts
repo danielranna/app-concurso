@@ -16,6 +16,10 @@ import {
 } from "../document-ingest"
 import { DOCUMENT_PIPELINE_JOB_TYPES } from "./document-enqueue"
 import { generateRemediationDrafts } from "../remediation-drafts"
+import {
+  filterReportStructuredForSubject,
+  resolveNotebookQuestionIdsBySubject,
+} from "../notebook-subject-split"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -87,7 +91,34 @@ export async function processJob(job: {
           .eq("id", notebookId)
 
         let draftsCreated = 0
-        if (nb?.subject_id) {
+        const bySubject = await resolveNotebookQuestionIdsBySubject(
+          userId,
+          notebookId
+        )
+        const subjectIdsInNotebook = [...bySubject.keys()]
+
+        if (subjectIdsInNotebook.length > 0) {
+          for (const subjectId of subjectIdsInNotebook) {
+            const qids = bySubject.get(subjectId) ?? []
+            const filtered = filterReportStructuredForSubject(
+              report.structured,
+              new Set(qids)
+            )
+            await generateRemediationDrafts({
+              userId,
+              subjectId,
+              notebookId,
+              structured: filtered,
+              snapshot: report.snapshot,
+            })
+            draftsCreated += await persistReportExecutableActions({
+              userId,
+              subjectId,
+              structured: filtered,
+              reportModelUsed: report.modelUsed,
+            })
+          }
+        } else if (nb?.subject_id) {
           await generateRemediationDrafts({
             userId,
             subjectId: nb.subject_id,
@@ -95,7 +126,6 @@ export async function processJob(job: {
             structured: report.structured,
             snapshot: report.snapshot,
           })
-
           draftsCreated = await persistReportExecutableActions({
             userId,
             subjectId: nb.subject_id,
@@ -111,16 +141,31 @@ export async function processJob(job: {
           actions_count: report.structured.executable_actions?.length ?? 0,
           drafts_created: draftsCreated,
           topics_weak: report.structured.weaknesses?.length ?? 0,
+          subjects_in_notebook: subjectIdsInNotebook.length,
         })
 
-        if (nb?.subject_id && row?.id) {
-          await enqueueJob({
-            userId,
-            jobType: "brain_ingest_report",
-            idempotencyKey: `brain:${row.id}`,
-            payload: { subject_id: nb.subject_id, report_id: row.id },
-            priority: 8,
-          })
+        if (row?.id) {
+          const brainTargets =
+            subjectIdsInNotebook.length > 0
+              ? subjectIdsInNotebook
+              : nb?.subject_id
+                ? [nb.subject_id]
+                : []
+
+          for (const subjectId of brainTargets) {
+            const qids = bySubject.get(subjectId)
+            await enqueueJob({
+              userId,
+              jobType: "brain_ingest_report",
+              idempotencyKey: `brain:${row.id}:${subjectId}`,
+              payload: {
+                subject_id: subjectId,
+                report_id: row.id,
+                filter_question_ids: qids ?? [],
+              },
+              priority: 8,
+            })
+          }
         }
         break
       }
@@ -168,10 +213,32 @@ export async function processJob(job: {
       case "brain_ingest_report": {
         const subjectId = payload.subject_id as string
         const reportId = payload.report_id as string
+        const filterQuestionIds = Array.isArray(payload.filter_question_ids)
+          ? (payload.filter_question_ids as string[])
+          : undefined
+
+        let reportStructured: NotebookReportStructured | null = null
+        if (filterQuestionIds?.length) {
+          const { data: reportRow } = await supabaseServer
+            .from("subject_notebook_reports")
+            .select("structured")
+            .eq("id", reportId)
+            .maybeSingle()
+          const full = (reportRow?.structured ??
+            null) as NotebookReportStructured | null
+          if (full) {
+            reportStructured = filterReportStructuredForSubject(
+              full,
+              new Set(filterQuestionIds)
+            )
+          }
+        }
+
         const brainResult = await persistSubjectBrain({
           userId,
           subjectId,
           reportId,
+          reportStructured,
         })
         const state = brainResult.state
         await completeJob(job.id, {
@@ -181,17 +248,27 @@ export async function processJob(job: {
           report_merged: brainResult.reportMerged,
         })
 
-        const { data: reportRow } = await supabaseServer
-          .from("subject_notebook_reports")
-          .select("structured")
-          .eq("id", reportId)
-          .maybeSingle()
-        const structured = reportRow?.structured as
-          | { per_question_errors?: { tec_topic: string }[] }
-          | undefined
-        const recentWrongTopics = (structured?.per_question_errors ?? []).map(
-          (e) => e.tec_topic
+        const recentWrongTopics = (
+          reportStructured?.per_question_errors ?? []
         )
+          .map((e) => e.tec_topic)
+          .filter(Boolean) as string[]
+
+        if (!recentWrongTopics.length) {
+          const { data: reportRow } = await supabaseServer
+            .from("subject_notebook_reports")
+            .select("structured")
+            .eq("id", reportId)
+            .maybeSingle()
+          const structured = reportRow?.structured as
+            | { per_question_errors?: { tec_topic: string }[] }
+            | undefined
+          recentWrongTopics.push(
+            ...(structured?.per_question_errors ?? [])
+              .map((e) => e.tec_topic)
+              .filter(Boolean) as string[]
+          )
+        }
 
         await enqueueJob({
           userId,

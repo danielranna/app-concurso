@@ -150,6 +150,23 @@ export type NotebookReportStructured = {
   per_question_errors?: PerQuestionError[]
   behavioral_audit?: BehavioralAudit
   confidence_in_analysis: string
+  /** Caderno misto (simulado) com questões de várias matérias */
+  is_multi_subject?: boolean
+  subjects_present?: {
+    subject_id: string
+    name: string
+    question_count: number
+  }[]
+}
+
+export type SubjectPickDiagnostic = {
+  subject_id: string
+  subject_name: string
+  requested: number
+  picked: number
+  source: "queue_topic" | "subject_fallback" | "none"
+  skip_reason?: "no_wrongs" | "all_consolidated" | "no_queue" | "no_mapping"
+  round?: number
 }
 
 export type TopicBrainEntry = {
@@ -209,9 +226,11 @@ export type PlanGenerationMeta = {
     count: number
     topic?: string
     reason?: string
+    source?: "queue_topic" | "subject_fallback" | "none"
   }[]
   total_questions: number
   inbox_drafts: { flashcards: number; summaries: number }
+  subject_pick_diagnostics?: SubjectPickDiagnostic[]
 }
 
 export type DailyStudyBlock = {

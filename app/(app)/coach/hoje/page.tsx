@@ -28,6 +28,19 @@ const MODE_LABELS: Record<string, string> = {
   reta_final: "Reta final",
 }
 
+const PICK_SOURCE_LABELS: Record<string, string> = {
+  queue_topic: "Fila + tópico",
+  subject_fallback: "Histórico da matéria",
+  none: "Nenhuma",
+}
+
+const SKIP_REASON_LABELS: Record<string, string> = {
+  no_wrongs: "Sem erros elegíveis",
+  all_consolidated: "Tópicos consolidados no cérebro",
+  no_queue: "Sem tópico na fila cruzada",
+  no_mapping: "Mapeamento TEC ausente",
+}
+
 function blockKey(block: DailyStudyBlock): string {
   return (
     (block.params?.block_key as string) ??
@@ -315,18 +328,90 @@ export default function CoachHojePage() {
             )}
           </div>
 
-          {(plan.combined_notebook_id || combinedBlock) && (
+          {(plan.generation_meta?.total_questions ?? plan.combined_question_count ?? 0) ===
+            0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-5">
+              <p className="font-semibold text-amber-900">
+                Nenhuma questão errada elegível hoje
+              </p>
+              <p className="mt-1 text-sm text-amber-800">
+                O rodízio listou as matérias, mas não encontrou erradas para
+                montar o caderno (fila vazia, tópicos consolidados ou sem
+                histórico). Ajuste o Executor ou regenere após novas tentativas.
+              </p>
+              {plan.generation_meta?.subject_pick_diagnostics &&
+                plan.generation_meta.subject_pick_diagnostics.length > 0 && (
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-amber-200 bg-white">
+                    <table className="w-full text-xs">
+                      <thead className="bg-amber-100 text-left">
+                        <tr>
+                          <th className="px-2 py-1">Matéria</th>
+                          <th className="px-2 py-1">Pedido</th>
+                          <th className="px-2 py-1">Pegou</th>
+                          <th className="px-2 py-1">Origem</th>
+                          <th className="px-2 py-1">Motivo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {plan.generation_meta.subject_pick_diagnostics.map(
+                          (d, idx) => (
+                            <tr key={idx} className="border-t border-amber-50">
+                              <td className="px-2 py-1">{d.subject_name}</td>
+                              <td className="px-2 py-1">{d.requested}</td>
+                              <td className="px-2 py-1">{d.picked}</td>
+                              <td className="px-2 py-1">
+                                {PICK_SOURCE_LABELS[d.source] ?? d.source}
+                              </td>
+                              <td className="px-2 py-1">
+                                {d.skip_reason
+                                  ? SKIP_REASON_LABELS[d.skip_reason] ??
+                                    d.skip_reason
+                                  : "—"}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href="/coach/executor"
+                  className="rounded-lg border border-amber-400 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Abrir Executor
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => generate()}
+                  disabled={generating}
+                  className="rounded-lg bg-amber-700 px-3 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                >
+                  Regenerar plano
+                </button>
+              </div>
+            </div>
+          )}
+
+          {plan.combined_notebook_id && (
             <div className="rounded-xl border-2 border-violet-300 bg-violet-50 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-semibold text-violet-900">
-                    Caderno único do dia
+                    Caderno único do dia (simulado misto)
                   </p>
                   <p className="text-sm text-violet-800">
                     {plan.combined_question_count ??
                       combinedBlock?.count ??
                       0}{" "}
-                    questões erradas (não consolidadas) — ver detalhes abaixo
+                    questões erradas — ao concluir, o relatório é gerado
+                    automaticamente e o cérebro de cada matéria presente é
+                    atualizado.
+                  </p>
+                  <p className="mt-1 text-xs text-violet-700">
+                    Use &quot;Salvar na biblioteca&quot; para manter o caderno
+                    além do dia. O plano não muda sozinho até você regenerar.
                   </p>
                   {typeof combinedBlock?.params?.queue_reason === "string" && (
                     <p className="mt-1 text-xs text-violet-700">
@@ -369,6 +454,17 @@ export default function CoachHojePage() {
               </button>
               {metaExpanded && (
                 <div className="mt-3 space-y-3 text-sm text-slate-700">
+                  <ul className="list-inside list-disc space-y-1 text-xs text-slate-600">
+                    <li>
+                      Caderno = simulado misto; relatório único ao terminar.
+                    </li>
+                    <li>
+                      Cérebro atualizado por matéria de origem de cada questão.
+                    </li>
+                    <li>
+                      Plano fixado não muda intradia — regenere para atualizar.
+                    </li>
+                  </ul>
                   <p>
                     Modo:{" "}
                     <strong>
@@ -397,6 +493,43 @@ export default function CoachHojePage() {
                       {plan.generation_meta.inbox_drafts.summaries} resumos
                     </p>
                   )}
+                  {plan.generation_meta.subject_pick_diagnostics &&
+                    plan.generation_meta.subject_pick_diagnostics.length > 0 && (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                        <p className="border-b border-slate-100 bg-slate-50 px-2 py-1 text-xs font-medium">
+                          Diagnóstico por matéria
+                        </p>
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-100 text-left">
+                            <tr>
+                              <th className="px-2 py-1">Matéria</th>
+                              <th className="px-2 py-1">Pedido</th>
+                              <th className="px-2 py-1">Pegou</th>
+                              <th className="px-2 py-1">Origem</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {plan.generation_meta.subject_pick_diagnostics.map(
+                              (d, idx) => (
+                                <tr
+                                  key={idx}
+                                  className="border-t border-slate-100"
+                                >
+                                  <td className="px-2 py-1">
+                                    {d.subject_name}
+                                  </td>
+                                  <td className="px-2 py-1">{d.requested}</td>
+                                  <td className="px-2 py-1">{d.picked}</td>
+                                  <td className="px-2 py-1">
+                                    {PICK_SOURCE_LABELS[d.source] ?? d.source}
+                                  </td>
+                                </tr>
+                              )
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   {plan.generation_meta.rounds.length > 0 && (
                     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
                       <table className="w-full text-xs">
@@ -406,6 +539,7 @@ export default function CoachHojePage() {
                             <th className="px-2 py-1">Matéria</th>
                             <th className="px-2 py-1">Qtd</th>
                             <th className="px-2 py-1">Tópico</th>
+                            <th className="px-2 py-1">Origem</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -415,6 +549,11 @@ export default function CoachHojePage() {
                               <td className="px-2 py-1">{r.subject_name}</td>
                               <td className="px-2 py-1">{r.count}</td>
                               <td className="px-2 py-1">{r.topic ?? "—"}</td>
+                              <td className="px-2 py-1">
+                                {r.source
+                                  ? PICK_SOURCE_LABELS[r.source] ?? r.source
+                                  : "—"}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

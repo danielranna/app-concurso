@@ -419,10 +419,19 @@ export async function generateNotebookReport(
     materialHints,
   })
 
+  const {
+    resolveNotebookQuestionIdsBySubject,
+    buildSubjectsPresentMeta,
+  } = await import("./notebook-subject-split")
+  const bySubject = await resolveNotebookQuestionIdsBySubject(userId, notebookId)
+  const subjects_present = await buildSubjectsPresentMeta(userId, bySubject)
+
   const structured = {
     ...result.structured,
     behavioral_audit: auditResult.audit,
     per_question_errors: perQuestionErrors,
+    is_multi_subject: bySubject.size > 1,
+    subjects_present,
   }
 
   return {
