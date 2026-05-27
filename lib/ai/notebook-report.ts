@@ -512,6 +512,12 @@ export async function enqueueNotebookReport(
     .maybeSingle()
 
   if (existing && !options?.force) {
+    // Auto-heal legacy/stale pending flag when report already exists.
+    await supabaseServer
+      .from("notebooks")
+      .update({ report_pending: false })
+      .eq("id", notebookId)
+      .eq("user_id", userId)
     return { skipped: true, reason: "already_exists", report_id: existing.id }
   }
 

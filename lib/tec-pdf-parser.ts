@@ -28,6 +28,23 @@ function stripLeadingGabaritoNumbers(s: string): string {
   return s.replace(/^(?:\d+\)\s*)+/g, "").trim()
 }
 
+/** Após "julgue … .", quebra parágrafo antes do corpo do item (CEBRASPE). */
+function formatJulgueStatementBreaks(statement: string): string {
+  if (!/\bjulgue\b/i.test(statement)) return statement
+  return statement.replace(
+    /\b(julgue\b[^.]*\.)\s*(?=[A-Za-zÀ-ÿ])/gi,
+    (_, intro: string) => `${intro}\n\n`
+  )
+}
+
+/** Remove numeração de gabarito vazada nas alternativas (ex.: "Certo 6) 7)"). */
+function cleanAlternativeText(text: string): string {
+  return text
+    .replace(/^(?:\d+\)\s*)+/g, "")
+    .replace(/\s+\d+\)(?:\s+\d+\))*\s*$/g, "")
+    .trim()
+}
+
 /** Nome do caderno e metadados do cabeçalho TEC (antes das questões). */
 export function extractNotebookHeader(normalized: string): {
   name: string
@@ -382,6 +399,12 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
     }
     if (options.length === 0) throw new Error("nenhuma alternativa parseada")
   }
+
+  statement = formatJulgueStatementBreaks(statement)
+  options = options.map((o) => ({
+    ...o,
+    text: cleanAlternativeText(o.text),
+  }))
 
   return {
     index,

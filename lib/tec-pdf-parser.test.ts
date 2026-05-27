@@ -209,6 +209,28 @@ Certo Errado
 Gabarito 1) Certo
 `
 
+const NBC_TA_JULGUE_SNIPPET = `
+www.tecconcursos.com.br/questoes/9990002
+CEBRASPE (CESPE) - Ana (CNMP)/CNMP/2023
+Auditoria - Normas de Auditoria
+Acerca das Normas Brasileiras de Contabilidade de Auditoria Independente de Informação Contábil (NBC TA) 450, 500, 505, 520 e 530, julgue o item subsequente. A obtenção de evidência apropriada e suficiente para reduzir o risco de auditoria a um nível aceitável é questão de julgamento profissional do auditor.
+Certo Errado
+Gabarito 1) Certo
+`
+
+const MCQ_GABARITO_NUM_SNIPPET = `
+www.tecconcursos.com.br/questoes/9990003
+FCC - FTE (SEFAZ MT)/SEFAZ MT/2026
+AFO - Temas
+Enunciado da questão com alternativas.
+a) primeira 6) 7)
+b) segunda
+c) terceira
+d) quarta
+e) quinta 12)
+Gabarito 1) A
+`
+
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg)
 }
@@ -360,6 +382,20 @@ function runTests() {
     `ci topic: ${ciq.tec_topic}`
   )
   assert(ciq.statement.startsWith("A respeito de"), `ci stmt: ${ciq.statement.slice(0, 30)}`)
+  assert(
+    ciq.statement.includes("julgue o item a seguir.\n\nNa fase"),
+    `ci julgue break: ${JSON.stringify(ciq.statement.slice(40, 90))}`
+  )
+
+  const nbc = parseTecPdfText(NBC_TA_JULGUE_SNIPPET).questions[0]
+  assert(
+    nbc.statement.includes("julgue o item subsequente.\n\nA obtenção"),
+    `nbc julgue break: ${JSON.stringify(nbc.statement.slice(80, 150))}`
+  )
+
+  const mcqNum = parseTecPdfText(MCQ_GABARITO_NUM_SNIPPET).questions[0]
+  assert(mcqNum.options[0].text === "primeira", `mcq opt0: ${mcqNum.options[0].text}`)
+  assert(mcqNum.options[4].text === "quinta", `mcq opt4: ${mcqNum.options[4].text}`)
 
   console.log("tec-pdf-parser tests OK")
 }

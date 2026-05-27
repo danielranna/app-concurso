@@ -13,6 +13,7 @@ export async function GET(req: Request) {
   const [
     { count: pendingDrafts },
     { count: pendingReports },
+    { data: pendingReportNotebooks },
     { data: activeExam },
     { data: recentReports },
   ] = await Promise.all([
@@ -26,6 +27,13 @@ export async function GET(req: Request) {
       .select("id", { count: "exact", head: true })
       .eq("user_id", user_id)
       .eq("report_pending", true),
+    supabaseServer
+      .from("notebooks")
+      .select("id, name, completed_at")
+      .eq("user_id", user_id)
+      .eq("report_pending", true)
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .limit(8),
     supabaseServer
       .from("exam_targets")
       .select("*")
@@ -45,6 +53,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     pending_drafts: pendingDrafts ?? 0,
     pending_reports: pendingReports ?? 0,
+    pending_report_notebooks: pendingReportNotebooks ?? [],
     active_exam: activeExam,
     recent_reports: recentReports ?? [],
     report_mode: aiConfigured ? "llm" : "rules",

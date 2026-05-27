@@ -16,6 +16,11 @@ import {
 type HubData = {
   pending_drafts: number
   pending_reports: number
+  pending_report_notebooks?: {
+    id: string
+    name: string | null
+    completed_at: string | null
+  }[]
   report_mode?: "rules" | "llm"
   active_exam: { id: string; name: string } | null
   recent_reports: {
@@ -138,6 +143,25 @@ export default function CoachHubPage() {
             {hub?.pending_reports ?? 0}
           </p>
           <p className="text-sm text-slate-500">Relatórios na fila</p>
+          {!!hub?.pending_report_notebooks?.length && (
+            <div className="mt-2 rounded-md bg-slate-50 p-2">
+              <p className="text-[11px] font-medium text-slate-500">
+                Pendentes agora:
+              </p>
+              <ul className="mt-1 space-y-1">
+                {hub.pending_report_notebooks.slice(0, 3).map((nb) => (
+                  <li key={nb.id} className="truncate text-xs text-slate-700">
+                    {nb.name?.trim() || "Caderno sem nome"}
+                  </li>
+                ))}
+                {hub.pending_report_notebooks.length > 3 && (
+                  <li className="text-[11px] text-slate-500">
+                    +{hub.pending_report_notebooks.length - 3} outros
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
           {userId && (
             <button
               type="button"
