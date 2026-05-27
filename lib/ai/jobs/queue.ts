@@ -96,6 +96,26 @@ export async function claimPendingJobs(
   limit = 5,
   options?: { userId?: string; jobTypes?: JobType[] }
 ) {
+  const staleThresholdIso = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+  let staleQuery = supabaseServer
+    .from("ai_jobs")
+    .update({
+      status: "pending",
+      started_at: null,
+      error_message: "auto_requeued_stale_running",
+    })
+    .eq("status", "running")
+    .is("completed_at", null)
+    .lt("started_at", staleThresholdIso)
+
+  if (options?.userId) {
+    staleQuery = staleQuery.eq("user_id", options.userId)
+  }
+  if (options?.jobTypes?.length) {
+    staleQuery = staleQuery.in("job_type", options.jobTypes)
+  }
+  await staleQuery
+
   const runId = `claim-pending:${Date.now()}`
   let query = supabaseServer
     .from("ai_jobs")
