@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import { enqueueNotebookReport } from "@/lib/ai/notebook-report"
 import { runJobWorker } from "@/lib/ai/jobs/worker"
+import type { JobType } from "@/lib/ai/jobs/queue"
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
@@ -77,6 +78,14 @@ export async function POST(req: Request) {
       reason?: string
       report_id?: string
     }[] = []
+    const reportPipelineTypes: JobType[] = [
+      "notebook_report_aggregate",
+      "classify_wrong_attempts",
+      "brain_ingest_report",
+      "strategy_recompute",
+      "strategy_recompute_all",
+      "execution_plan_today",
+    ]
 
     for (const nb of notebooks) {
       if (!nb.completed_at) {
@@ -98,13 +107,34 @@ export async function POST(req: Request) {
 
     const jobResults: { id: string; status: string; error?: string }[] = []
     for (let round = 0; round < 8; round++) {
-      const batch = await runJobWorker(10)
+      const batch = await runJobWorker(10, {
+        userId: user_id,
+        jobTypes: reportPipelineTypes,
+      })
       jobResults.push(...batch)
       if (batch.length === 0) break
       const onlySkips = batch.every(
         (j) => j.status === "done" || j.status === "failed"
       )
       if (!onlySkips && batch.length < 10) break
+    }
+
+    // Auto-heal: if report already exists, clear stale report_pending.
+    const notebookIds = notebooks.map((n) => n.id)
+    if (notebookIds.length) {
+      const { data: existingReports } = await supabaseServer
+        .from("subject_notebook_reports")
+        .select("notebook_id")
+        .eq("user_id", user_id)
+        .in("notebook_id", notebookIds)
+      const reportedIds = [...new Set((existingReports ?? []).map((r) => r.notebook_id))]
+      if (reportedIds.length) {
+        await supabaseServer
+          .from("notebooks")
+          .update({ report_pending: false })
+          .eq("user_id", user_id)
+          .in("id", reportedIds)
+      }
     }
 
     const { data: recentReports } = await supabaseServer
