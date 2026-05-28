@@ -24,6 +24,19 @@ function SingleBlock({ block }: { block: QuestionContentBlock }) {
   return <div className="whitespace-pre-wrap text-slate-700">{content}</div>
 }
 
+function renderStatement(statement: string, statementClassName: string) {
+  if (statement.includes("<")) {
+    return (
+      <div
+        className={`${statementClassName} prose prose-sm max-w-none [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-w-full`}
+        dangerouslySetInnerHTML={{ __html: statement }}
+      />
+    )
+  }
+
+  return <div className={statementClassName}>{statement}</div>
+}
+
 export function QuestionContentBlockList({
   blocks,
   className = "",
@@ -53,7 +66,7 @@ export default function QuestionContentDisplay({
   return (
     <>
       <QuestionContentBlockList blocks={blocks.before} />
-      <div className={statementClassName}>{statement}</div>
+      {renderStatement(statement, statementClassName)}
       <QuestionContentBlockList blocks={blocks.after} className="mt-3" />
     </>
   )

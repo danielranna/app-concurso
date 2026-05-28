@@ -22,6 +22,13 @@ type Props = {
 
 const MCQ_LABELS = ["A", "B", "C", "D", "E"]
 
+function normalizeRichTextText(value: string) {
+  return value
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .trim()
+}
+
 export default function EditQuestionModal({
   isOpen,
   onClose,
@@ -94,7 +101,7 @@ export default function EditQuestionModal({
   }
 
   async function handleSave() {
-    if (!statement.trim()) {
+    if (!normalizeRichTextText(statement)) {
       setError("Enunciado obrigatório")
       return
     }

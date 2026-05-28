@@ -264,13 +264,14 @@ export default function QuestionContentBlocksEditor({
 
       <label className="block border-y border-violet-200 bg-violet-50/40 py-3 text-sm">
         <span className="mb-1 block px-1 font-semibold text-violet-900">Enunciado</span>
-        <textarea
+        <div className="mx-1 w-[calc(100%-0.5rem)]">
+          <RichTextEditor
           value={statement}
-          onChange={(e) => onStatementChange(e.target.value)}
+          onChange={onStatementChange}
           rows={5}
-          className="mx-1 w-[calc(100%-0.5rem)] rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm"
           placeholder="Pergunta principal (fica no centro da sequência)"
-        />
+          />
+        </div>
       </label>
 
       <BlockSection
