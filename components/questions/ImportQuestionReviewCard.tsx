@@ -34,7 +34,9 @@ export default function ImportQuestionReviewCard({
   onChange,
 }: Props) {
   const q = item.merged
-  const [expanded, setExpanded] = useState(item.confidence !== "high")
+  const [expanded, setExpanded] = useState(
+    item.needs_review || item.confidence !== "high"
+  )
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmSuggestion, setLlmSuggestion] = useState<{
     question: ParsedTecQuestion
@@ -91,6 +93,11 @@ export default function ImportQuestionReviewCard({
           >
             {confidenceLabels[item.confidence]}
           </span>
+          {item.needs_review && (
+            <span className="ml-2 rounded border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-900">
+              Revisar conteúdo
+            </span>
+          )}
         </div>
         <div className="flex gap-2">
           {llmEnabled && (
@@ -128,10 +135,33 @@ export default function ImportQuestionReviewCard({
         {q.ano ? ` (${q.ano})` : ""}
       </p>
 
+      {item.quality_flags.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs">
+          {item.quality_flags.map((f) => (
+            <li
+              key={f.code}
+              className={
+                f.severity === "error" ? "text-red-700" : "text-orange-800"
+              }
+            >
+              {f.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
       {item.warnings.length > 0 && (
         <ul className="mt-2 text-xs text-amber-700">
           {item.warnings.map((w, i) => (
             <li key={i}>{w}</li>
+          ))}
+        </ul>
+      )}
+
+      {item.parser_notes.length > 0 && (
+        <ul className="mt-1 text-xs text-slate-500">
+          {item.parser_notes.map((n, i) => (
+            <li key={i}>{n}</li>
           ))}
         </ul>
       )}

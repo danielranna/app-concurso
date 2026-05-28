@@ -30,6 +30,8 @@ export async function POST(req: Request) {
         correct_answer: q.merged.correct_answer,
         options_count: q.merged.options.length,
         confidence: q.confidence,
+        needs_review: q.needs_review,
+        quality_flags: q.quality_flags.map((f) => f.code),
       })),
     })
   } catch (e) {

@@ -416,6 +416,24 @@ export function splitTaxonomyAndStatement(
   return splitTaxonomySingleLine(trimmed, parserOpts.flattenBody, parserOpts.strictOptions)
 }
 
+function parseMcqOptionsInline(rest: string): {
+  statement: string
+  options: { label: string; text: string }[]
+} {
+  const firstOpt = rest.search(MCQ_OPTION_RE)
+  if (firstOpt < 0) throw new Error("alternativas não encontradas")
+  const statement = rest.slice(0, firstOpt).trim()
+  const optsPart = rest.slice(firstOpt).trim()
+  const options: { label: string; text: string }[] = []
+  const optRe = /([a-e])\)\s+([\s\S]*?)(?=\s[a-e]\)\s+|$)/gi
+  let om: RegExpExecArray | null
+  while ((om = optRe.exec(optsPart)) !== null) {
+    options.push({ label: om[1].toUpperCase(), text: om[2].trim() })
+  }
+  if (options.length === 0) throw new Error("nenhuma alternativa parseada")
+  return { statement, options }
+}
+
 function parseMcqOptionsFromLines(rest: string): {
   statement: string
   options: { label: string; text: string }[]
@@ -492,23 +510,19 @@ export function parseQuestionBlock(
       { label: "Errado", text: "Errado" },
     ]
   } else if (parserOpts.strictOptions) {
-    const parsed = parseMcqOptionsFromLines(rest)
+    try {
+      const parsed = parseMcqOptionsFromLines(rest)
+      statement = parsed.statement
+      options = parsed.options
+    } catch {
+      const parsed = parseMcqOptionsInline(rest)
+      statement = parsed.statement
+      options = parsed.options
+    }
+  } else {
+    const parsed = parseMcqOptionsInline(rest)
     statement = parsed.statement
     options = parsed.options
-  } else {
-    const firstOpt = rest.search(MCQ_OPTION_RE)
-    if (firstOpt < 0) throw new Error("alternativas não encontradas")
-    statement = rest.slice(0, firstOpt).trim()
-    const optsPart = rest.slice(firstOpt).trim()
-    const optRe = /([a-e])\)\s+([\s\S]*?)(?=\s[a-e]\)\s+|$)/gi
-    let om: RegExpExecArray | null
-    while ((om = optRe.exec(optsPart)) !== null) {
-      options.push({
-        label: om[1].toUpperCase(),
-        text: om[2].trim(),
-      })
-    }
-    if (options.length === 0) throw new Error("nenhuma alternativa parseada")
   }
 
   statement = formatJulgueStatementBreaks(statement)
@@ -590,6 +604,18 @@ function parseTaxonomyLine(line: string): {
     tec_subject: line.slice(0, idx).trim(),
     tec_topic: topic,
   }
+}
+
+/** Insere quebras antes de a)–e) colados (melhora strict/lines em MCQ). */
+export function normalizeMcqOptionLineBreaks(block: string): string {
+  const hasMcqLabels =
+    /[a-e]\)\s+/i.test(block) && /[b-e]\)\s+/i.test(block)
+  const certoErradoOnly =
+    /\bCerto\b/.test(block) &&
+    /\bErrado\b/.test(block) &&
+    !/[a-e]\)\s+[a-z]/i.test(block)
+  if (!hasMcqLabels || certoErradoOnly) return block
+  return block.replace(/(\s)([a-e])\)\s+/gi, "\n$2) ")
 }
 
 export async function parseTecPdf(buffer: Buffer): Promise<ParsedTecNotebook> {

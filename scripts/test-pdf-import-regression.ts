@@ -25,8 +25,10 @@ async function main() {
       basename(p),
       "| q:",
       result.stats.total,
-      "| low:",
-      result.stats.low,
+      "| high:",
+      result.stats.high,
+      "| review:",
+      result.stats.needs_review,
       "| no answer:",
       noAnswer
     )

@@ -34,6 +34,7 @@ function ImportarContent() {
   const [error, setError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<Record<string, unknown> | null>(null)
 
+  const [filterNeedsReview, setFilterNeedsReview] = useState(false)
   const [filterLow, setFilterLow] = useState(false)
   const [filterWarnings, setFilterWarnings] = useState(false)
   const [searchTecId, setSearchTecId] = useState("")
@@ -56,14 +57,19 @@ function ImportarContent() {
 
   const filteredQuestions = useMemo(() => {
     let list = questions
+    if (filterNeedsReview) list = list.filter((q) => q.needs_review)
     if (filterLow) list = list.filter((q) => q.confidence === "low")
-    if (filterWarnings) list = list.filter((q) => q.warnings.length > 0)
+    if (filterWarnings) {
+      list = list.filter(
+        (q) => q.warnings.length > 0 || q.quality_flags.length > 0
+      )
+    }
     if (searchTecId.trim()) {
       const id = parseInt(searchTecId, 10)
       if (!Number.isNaN(id)) list = list.filter((q) => q.tec_id === id)
     }
     return list
-  }, [questions, filterLow, filterWarnings, searchTecId])
+  }, [questions, filterNeedsReview, filterLow, filterWarnings, searchTecId])
 
   const pageCount = Math.max(1, Math.ceil(filteredQuestions.length / PAGE_SIZE))
   const pageItems = filteredQuestions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
@@ -241,6 +247,9 @@ function ImportarContent() {
                 Confiança — alta: {parseResult.stats.high}, média:{" "}
                 {parseResult.stats.medium}, baixa: {parseResult.stats.low}
               </p>
+              <p className="text-slate-600">
+                Precisam revisão de conteúdo: {parseResult.stats.needs_review}
+              </p>
               {parseResult.warnings.length > 0 && (
                 <ul className="mt-2 text-xs text-amber-700">
                   {parseResult.warnings.slice(0, 5).map((w, i) => (
@@ -270,6 +279,17 @@ function ImportarContent() {
       {step === 2 && parseResult && userId && (
         <div className="mt-6 space-y-4">
           <div className="flex flex-wrap gap-3 text-sm">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={filterNeedsReview}
+                onChange={(e) => {
+                  setFilterNeedsReview(e.target.checked)
+                  setPage(0)
+                }}
+              />
+              Só precisa revisão
+            </label>
             <label className="flex items-center gap-1">
               <input
                 type="checkbox"

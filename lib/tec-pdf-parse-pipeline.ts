@@ -14,6 +14,7 @@ export type NotebookParseResult = {
     high: number
     medium: number
     low: number
+    needs_review: number
   }
 }
 
@@ -39,6 +40,7 @@ export function parseTecPdfTextPipeline(rawText: string): NotebookParseResult {
     high: questions.filter((q) => q.confidence === "high").length,
     medium: questions.filter((q) => q.confidence === "medium").length,
     low: questions.filter((q) => q.confidence === "low").length,
+    needs_review: questions.filter((q) => q.needs_review).length,
   }
 
   return { name, share_url, ordering, questions, warnings, stats }

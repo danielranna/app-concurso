@@ -4,8 +4,14 @@ import {
   TEC_PARSER_LINES,
   TEC_PARSER_PRIMARY,
   TEC_PARSER_STRICT,
+  normalizeMcqOptionLineBreaks,
   parseQuestionBlock,
 } from "./tec-pdf-parser"
+import {
+  applyQualityToConfidence,
+  assessQuestionQuality,
+  type QualityFlag,
+} from "./tec-pdf-parse-quality"
 
 export type ParseSource = "primary" | "lines" | "strict"
 
@@ -23,6 +29,9 @@ export type QuestionParseResult = {
   confidence: "high" | "medium" | "low"
   conflicts: ParseConflict[]
   warnings: string[]
+  parser_notes: string[]
+  quality_flags: QualityFlag[]
+  needs_review: boolean
 }
 
 const PARSER_OPTS: Record<ParseSource, TecParserOptions> = {
@@ -35,13 +44,29 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase()
 }
 
-function fieldsMatch(a: ParsedTecQuestion, b: ParsedTecQuestion): boolean {
+function criticalFieldsMatch(a: ParsedTecQuestion, b: ParsedTecQuestion): boolean {
   return (
     a.type === b.type &&
     norm(a.correct_answer) === norm(b.correct_answer) &&
     norm(a.statement) === norm(b.statement) &&
     a.options.length === b.options.length
   )
+}
+
+function hasStrongDisagreement(
+  candidates: Record<ParseSource, ParsedTecQuestion | null>
+): boolean {
+  const list = (["primary", "lines", "strict"] as ParseSource[])
+    .map((s) => candidates[s])
+    .filter((q): q is ParsedTecQuestion => q != null)
+
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (list[i].type !== list[j].type) return true
+      if (norm(list[i].correct_answer) !== norm(list[j].correct_answer)) return true
+    }
+  }
+  return false
 }
 
 function collectConflicts(
@@ -53,7 +78,11 @@ function collectConflicts(
   if (sources.length < 2) return []
 
   const conflicts: ParseConflict[] = []
-  const fields: { key: keyof ParsedTecQuestion; label: string; fmt?: (q: ParsedTecQuestion) => string }[] = [
+  const fields: {
+    key: keyof ParsedTecQuestion
+    label: string
+    fmt?: (q: ParsedTecQuestion) => string
+  }[] = [
     { key: "statement", label: "statement" },
     { key: "correct_answer", label: "correct_answer" },
     { key: "type", label: "type" },
@@ -80,28 +109,28 @@ function collectConflicts(
   return conflicts
 }
 
+/** Só parsers que parsearam com sucesso; falha do strict não penaliza. */
 function computeConfidence(
   candidates: Record<ParseSource, ParsedTecQuestion | null>
 ): "high" | "medium" | "low" {
-  const list = (["primary", "lines", "strict"] as ParseSource[])
-    .map((s) => candidates[s])
-    .filter((q): q is ParsedTecQuestion => q != null)
+  const primary = candidates.primary
+  const lines = candidates.lines
 
-  if (list.length === 0) return "low"
-  if (list.length === 1) return "medium"
+  if (!primary && !lines && !candidates.strict) return "low"
 
-  let agreePairs = 0
-  let totalPairs = 0
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      totalPairs++
-      if (fieldsMatch(list[i], list[j])) agreePairs++
-    }
+  if (primary && lines && criticalFieldsMatch(primary, lines)) {
+    return "high"
   }
 
-  if (list.length === 3 && agreePairs === 3) return "high"
-  if (agreePairs >= 1) return "medium"
-  return "low"
+  const successful = (["primary", "lines", "strict"] as ParseSource[]).filter(
+    (s) => candidates[s] != null
+  )
+
+  if (successful.length === 1) return "medium"
+
+  if (hasStrongDisagreement(candidates)) return "low"
+
+  return "medium"
 }
 
 function pickMerged(
@@ -142,29 +171,37 @@ export function parseBlockWithAllVariants(
   answers: Map<number, string>
 ): QuestionParseResult {
   const warnings: string[] = []
+  const parser_notes: string[] = []
   const candidates: Record<ParseSource, ParsedTecQuestion | null> = {
     primary: null,
     lines: null,
     strict: null,
   }
 
+  const normalizedBlock = normalizeMcqOptionLineBreaks(block)
+
   for (const src of ["primary", "lines", "strict"] as ParseSource[]) {
     try {
-      const q = parseQuestionBlock(block, index, PARSER_OPTS[src])
+      const q = parseQuestionBlock(normalizedBlock, index, PARSER_OPTS[src])
       const ans = answers.get(q.index)
       if (ans) q.correct_answer = ans
       else warnings.push(`Questão ${q.index} (${q.tec_id}): gabarito não encontrado`)
       candidates[src] = q
     } catch (e) {
-      warnings.push(
-        `${src}: ${e instanceof Error ? e.message : "erro ao parsear"}`
-      )
+      const msg = e instanceof Error ? e.message : "erro ao parsear"
+      if (src === "strict") {
+        parser_notes.push(`Parser strict não aplicável neste layout (${msg})`)
+      } else {
+        warnings.push(`${src}: ${msg}`)
+      }
     }
   }
 
   const merged = pickMerged(candidates, block, index)
   const conflicts = collectConflicts(candidates)
-  const confidence = computeConfidence(candidates)
+  let confidence = computeConfidence(candidates)
+  const { quality_flags, needs_review } = assessQuestionQuality(merged, candidates)
+  confidence = applyQualityToConfidence(confidence, quality_flags)
 
   return {
     index,
@@ -175,6 +212,9 @@ export function parseBlockWithAllVariants(
     confidence,
     conflicts,
     warnings,
+    parser_notes,
+    quality_flags,
+    needs_review,
   }
 }
 
@@ -182,8 +222,20 @@ export function mergeQuestionEdits(
   base: QuestionParseResult,
   edited: ParsedTecQuestion
 ): QuestionParseResult {
+  const merged = { ...edited, index: base.index, tec_id: base.tec_id }
+  const { quality_flags, needs_review } = assessQuestionQuality(
+    merged,
+    base.candidates
+  )
+  let confidence = applyQualityToConfidence(base.confidence, quality_flags)
+  if (!merged.correct_answer?.trim()) {
+    confidence = "low"
+  }
   return {
     ...base,
-    merged: { ...edited, index: base.index, tec_id: base.tec_id },
+    merged,
+    quality_flags,
+    needs_review,
+    confidence,
   }
 }
