@@ -1,5 +1,7 @@
 import { supabaseServer } from "./supabase-server"
 
+export { formatStudyDuration } from "./format-study-duration"
+
 /** Soma timers de cadernos e sessões combinadas (ms). */
 export async function getTotalStudyMs(userId: string): Promise<number> {
   const [notebooks, sessions] = await Promise.all([
@@ -18,14 +20,4 @@ export async function getTotalStudyMs(userId: string): Promise<number> {
     total += Number(row.study_elapsed_ms ?? 0)
   }
   return total
-}
-
-export function formatStudyDuration(ms: number): string {
-  if (ms <= 0) return "0 min"
-  const totalMin = Math.floor(ms / 60_000)
-  const hours = Math.floor(totalMin / 60)
-  const mins = totalMin % 60
-  if (hours === 0) return `${mins} min`
-  if (mins === 0) return `${hours} h`
-  return `${hours} h ${mins} min`
 }

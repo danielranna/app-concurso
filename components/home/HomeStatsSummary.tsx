@@ -15,7 +15,7 @@ import {
 } from "recharts"
 import { Loader2 } from "lucide-react"
 import type { QuestionStatisticsResult } from "@/lib/question-statistics"
-import { formatStudyDuration } from "@/lib/study-hours"
+import { formatStudyDuration } from "@/lib/format-study-duration"
 
 type Props = {
   userId: string
