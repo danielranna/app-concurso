@@ -41,10 +41,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="rounded-lg p-2 hover:bg-slate-100"
+            className="rounded-md p-1.5 hover:bg-slate-100"
             aria-label="Abrir menu"
           >
-            <FourBarsIcon />
+            <FourBarsIcon size="sm" />
           </button>
           <SidebarBrand />
         </header>

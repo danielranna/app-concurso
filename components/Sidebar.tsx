@@ -106,10 +106,10 @@ export default function Sidebar({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="hidden rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:block"
+              className="hidden rounded-md p-1.5 text-slate-600 hover:bg-slate-100 lg:block"
               aria-label="Expandir menu"
             >
-              <FourBarsIcon />
+              <FourBarsIcon size="sm" />
             </button>
           )}
         </div>
