@@ -148,10 +148,12 @@ export default function ErrosPage() {
   if (!userId) return null
 
   return (
-    <main className="px-6 py-6">
-      <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-800">Painel de Análise de Erros</h1>
-        <div className="flex gap-3">
+    <main className="px-4 py-4 sm:px-6 sm:py-6">
+      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl font-semibold text-slate-800 sm:text-2xl">
+          Painel de Análise de Erros
+        </h1>
+        <div className="flex shrink-0 gap-2 sm:gap-3">
           <button
             onClick={() => setIsAddErrorOpen(true)}
             className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-800"

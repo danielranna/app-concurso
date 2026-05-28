@@ -27,7 +27,7 @@ export default function HomePage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-8 p-6 pb-12">
+    <main className="mx-auto max-w-6xl space-y-8 p-4 pb-12 sm:p-6">
       <header>
         <h1 className="text-2xl font-bold text-slate-900">Início</h1>
         <p className="mt-1 text-sm text-slate-500">

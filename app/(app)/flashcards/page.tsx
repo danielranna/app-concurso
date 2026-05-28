@@ -63,7 +63,7 @@ export default function FlashcardsHomePage() {
   if (!userId) return null
 
   return (
-    <main className="px-6 py-6">
+    <main className="px-4 py-4 sm:px-6 sm:py-6">
       <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">Flashcards</h1>

@@ -1,0 +1,54 @@
+"use client"
+
+import { Menu } from "lucide-react"
+import { useEffect, useState } from "react"
+import Sidebar from "@/components/Sidebar"
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)")
+    const onChange = () => {
+      if (mq.matches) setMobileOpen(false)
+    }
+    mq.addEventListener("change", onChange)
+    return () => mq.removeEventListener("change", onChange)
+  }, [])
+
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <Sidebar
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((c) => !c)}
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+            aria-label="Abrir menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="text-sm font-semibold text-slate-800">Via Aprovação</span>
+        </header>
+        <div className="flex-1 overflow-auto">{children}</div>
+      </div>
+    </div>
+  )
+}

@@ -9,7 +9,7 @@ export default function CoachLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <CoachHeader />
       <CoachSubNav />
       {children}
