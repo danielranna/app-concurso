@@ -5,7 +5,6 @@ import { getUserAiCredentials } from "./user-credentials"
 export type AgentType =
   | "report"
   | "brain"
-  | "teacher"
   | "edital"
   | "strategy"
   | "execution"

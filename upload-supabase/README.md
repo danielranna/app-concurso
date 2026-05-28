@@ -1,6 +1,8 @@
 # upload-supabase — API de upload na VPS (Hostinger)
 
-Serviço **separado do bot WhatsApp**. Recebe PDFs grandes do app Coach, grava no Supabase e **indexa** a fila de materiais (`parse → chunk → embed`) sem o limite de 60s da Vercel.
+> **Deprecado (2026):** o app removeu ingest/RAG de PDFs (`study_material`, `document_chunks`). Este serviço não é mais necessário para o Coach em produção. Mantido só como referência histórica.
+
+Serviço **separado do bot WhatsApp**. Recebia PDFs grandes do app Coach, gravava no Supabase e indexava a fila de materiais (`parse → chunk → embed`) sem o limite de 60s da Vercel.
 
 ---
 

@@ -11,17 +11,10 @@ export async function getReportPreferences(userId: string) {
     .eq("user_id", userId)
     .maybeSingle()
 
-  const teacherDailyCap =
-    data?.max_teacher_queries_per_day ??
-    data?.max_llm_explanations_per_day ??
-    30
-
   return {
     explain_wrong: data?.explain_wrong ?? true,
     classify_all_wrong: data?.classify_all_wrong ?? true,
     max_llm_explanations_per_day: data?.max_llm_explanations_per_day ?? 15,
-    max_teacher_queries_per_day: teacherDailyCap,
-    teacher_daily_cap: teacherDailyCap,
   }
 }
 
@@ -45,11 +38,6 @@ export async function getEffectiveReportPreferences(
       : global.explain_wrong
 
   return { ...global, explain_wrong }
-}
-
-export async function getTeacherDailyCap(userId: string): Promise<number> {
-  const prefs = await getReportPreferences(userId)
-  return prefs.teacher_daily_cap
 }
 
 export async function getStudyPreferences(userId: string) {

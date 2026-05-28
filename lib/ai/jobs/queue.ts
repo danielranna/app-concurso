@@ -3,16 +3,10 @@ import { supabaseServer } from "../../supabase-server"
 export type JobType =
   | "notebook_report_aggregate"
   | "classify_wrong_attempts"
-  | "explain_wrong_attempt"
   | "brain_ingest_report"
   | "strategy_recompute"
   | "strategy_recompute_all"
   | "execution_plan_today"
-  | "document_ingest"
-  | "document_parse"
-  | "document_chunk"
-  | "document_embed"
-  | "document_batch_ingest"
 
 export async function enqueueJob(params: {
   userId: string
@@ -173,43 +167,6 @@ export async function claimPendingJobs(
     if (data) claimed.push(data)
   }
   return claimed
-}
-
-/** Só o documento da vez (cabeça da fila) pode ser claimado. */
-export async function claimHeadIngestJob(
-  userId: string,
-  headDocumentId: string
-) {
-  const { data: pending, error } = await supabaseServer
-    .from("ai_jobs")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("status", "pending")
-    .eq("job_type", "document_ingest")
-    .order("scheduled_at", { ascending: true })
-    .limit(30)
-
-  if (error) throw new Error(error.message)
-
-  const job = (pending ?? []).find(
-    (j) =>
-      (j.payload as { document_id?: string } | null)?.document_id ===
-      headDocumentId
-  )
-  if (!job) return []
-
-  const { data } = await supabaseServer
-    .from("ai_jobs")
-    .update({
-      status: "running",
-      started_at: new Date().toISOString(),
-    })
-    .eq("id", job.id)
-    .eq("status", "pending")
-    .select("*")
-    .maybeSingle()
-
-  return data ? [data] : []
 }
 
 export async function completeJob(

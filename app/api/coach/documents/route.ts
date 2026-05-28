@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   const doc_type = searchParams.get("doc_type") as
     | "edital"
     | "incidence"
-    | "study_material"
+    | "strategic_md"
     | null
 
   if (!user_id) {

@@ -1,4 +1,3 @@
-import { createHash } from "crypto"
 import { COACH_UPLOAD_MAX_BYTES, COACH_UPLOAD_MAX_LABEL } from "./coach-upload-limits"
 import { supabaseServer } from "./supabase-server"
 import { extractPdfText } from "./pdf-extract"
@@ -26,7 +25,7 @@ function truncateText(text: string, maxChars: number) {
 
 export const COACH_DOCS_BUCKET = "coach-documents"
 
-export type CoachDocType = "edital" | "incidence" | "study_material" | "strategic_md"
+export type CoachDocType = "edital" | "incidence" | "strategic_md"
 
 export type IncidenceWorkbookDoc = {
   id: string
@@ -372,39 +371,15 @@ export async function uploadCoachDocument(params: {
     if (ext !== "pdf") {
       throw new Error("Este tipo de documento deve ser PDF")
     }
-    if (params.docType === "study_material") {
-      parsed_tables = {
-        format: "pdf",
-        pending_parse: true,
-      }
-    } else {
-      const text = await extractPdfText(buffer)
-      const excerpt = truncateText(text, 120_000)
-      parsed_tables = {
-        format: "pdf",
-        text_excerpt: excerpt,
-        full_text: text,
-        char_count: text.length,
-      }
+    const text = await extractPdfText(buffer)
+    const excerpt = truncateText(text, 120_000)
+    parsed_tables = {
+      format: "pdf",
+      text_excerpt: excerpt,
+      full_text: text,
+      char_count: text.length,
     }
     contentType = "application/pdf"
-  }
-
-  const fileHash = createHash("sha256").update(buffer).digest("hex")
-
-  if (params.docType === "study_material" && params.subjectId) {
-    const { data: dup } = await supabaseServer
-      .from("subject_documents")
-      .select("id, title, ingest_stage, chunk_count, status")
-      .eq("user_id", params.userId)
-      .eq("subject_id", params.subjectId)
-      .eq("doc_type", "study_material")
-      .eq("file_sha256", fileHash)
-      .maybeSingle()
-
-    if (dup?.id) {
-      return dup
-    }
   }
 
   const path = `${params.userId}/${params.docType}/${Date.now()}.${ext}`
@@ -425,8 +400,6 @@ export async function uploadCoachDocument(params: {
     throw new Error(upErr.message)
   }
 
-  const isAsyncMaterial = params.docType === "study_material"
-
   const insertRow: Record<string, unknown> = {
     user_id: params.userId,
     subject_id: params.subjectId ?? null,
@@ -435,10 +408,7 @@ export async function uploadCoachDocument(params: {
     file_path: path,
     title: params.title.trim() || params.file.name,
     parsed_tables,
-    status: isAsyncMaterial ? "pending" : "ready",
-    file_sha256: fileHash,
-    ingest_stage: isAsyncMaterial ? "uploaded" : "ready",
-    chunk_count: 0,
+    status: "ready",
   }
 
   let saved: Record<string, unknown>
@@ -448,20 +418,9 @@ export async function uploadCoachDocument(params: {
     .select("*")
     .single()
 
-  if (insErr) {
-    const { file_sha256: _h, ingest_stage: _s, chunk_count: _c, ...fallback } =
-      insertRow
-    const retry = await supabaseServer
-      .from("subject_documents")
-      .insert(fallback)
-      .select("*")
-      .single()
-    if (retry.error) throw new Error(retry.error.message)
-    saved = retry.data as Record<string, unknown>
-  } else {
-    if (!inserted) throw new Error("Falha ao salvar documento")
-    saved = inserted as Record<string, unknown>
-  }
+  if (insErr) throw new Error(insErr.message)
+  if (!inserted) throw new Error("Falha ao salvar documento")
+  saved = inserted as Record<string, unknown>
 
   if (
     params.docType === "incidence" &&
@@ -535,12 +494,6 @@ export async function deleteCoachDocument(userId: string, documentId: string) {
 
   if (error || !doc) throw new Error("Documento não encontrado")
 
-  await supabaseServer.from("document_chunks").delete().eq("document_id", documentId)
-  await supabaseServer
-    .from("document_source_text")
-    .delete()
-    .eq("document_id", documentId)
-
   if (doc.file_path) {
     await supabaseServer.storage.from(COACH_DOCS_BUCKET).remove([doc.file_path])
   }
@@ -564,10 +517,7 @@ export async function listCoachDocuments(
   if (filters?.subjectId) q = q.eq("subject_id", filters.subjectId)
   if (filters?.docType) q = q.eq("doc_type", filters.docType)
 
-  q =
-    filters?.docType === "study_material"
-      ? q.order("title", { ascending: true })
-      : q.order("created_at", { ascending: false })
+  q = q.order("created_at", { ascending: false })
 
   const { data, error } = await q
   if (error) throw new Error(error.message)

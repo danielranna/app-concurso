@@ -4,8 +4,6 @@ import { ensureSubjectDecks } from "../flashcard-subjects"
 import { loadMappings } from "../tec-mapping"
 import { supabaseServer } from "../supabase-server"
 import { topicBrainKey } from "./brain-helpers"
-import { searchDocumentChunks } from "./document-rag"
-
 type QueueRow = {
   subject_id: string
   topic_key: string
@@ -200,56 +198,14 @@ export async function pickDueFlashcardStateIds(
 }
 
 export async function buildSummaryBlocks(
-  userId: string,
-  pickedSubjects: string[],
-  queue: QueueRow[],
-  queueBySubject: Map<string, QueueRow[]>,
-  summariesBudget: number,
-  subjectNames: Map<string, string>
+  _userId: string,
+  _pickedSubjects: string[],
+  _queue: QueueRow[],
+  _queueBySubject: Map<string, QueueRow[]>,
+  _summariesBudget: number,
+  _subjectNames: Map<string, string>
 ): Promise<DailyStudyBlock[]> {
-  const blocks: DailyStudyBlock[] = []
-  let budget = summariesBudget
-
-  for (const subjectId of pickedSubjects) {
-    if (budget <= 0) break
-    const candidates = (queueBySubject.get(subjectId) ?? []).slice(0, 3)
-    let selectedTop: QueueRow | undefined
-    let selectedChunk:
-      | Awaited<ReturnType<typeof searchDocumentChunks>>[number]
-      | undefined
-    for (const top of candidates) {
-      const topicKey = top?.topic_key
-      const searchQuery = top?.topic_label ?? topicKey
-      if (!searchQuery) continue
-      const chunks = await searchDocumentChunks(userId, subjectId, searchQuery, 1)
-      if (!chunks.length) continue
-      selectedTop = top
-      selectedChunk = chunks[0]
-      break
-    }
-    if (!selectedTop || !selectedChunk) continue
-
-    const topicKey = selectedTop.topic_key
-    blocks.push({
-      subject_id: subjectId,
-      subject_name: subjectNames.get(subjectId),
-      type: "read_material",
-      count: 1,
-      minutes: 15,
-      label: `Leitura: ${selectedChunk.title}`,
-      params: {
-        block_key: `read_material:${subjectId}:${topicKey}`,
-        topic_key: topicKey,
-        document_id: selectedChunk.document_id,
-        material_title: selectedChunk.title,
-        excerpt: selectedChunk.content.slice(0, 400),
-        queue_reason: selectedTop.reason ?? undefined,
-      },
-    })
-    budget--
-  }
-
-  return blocks
+  return []
 }
 
 export async function enqueueExecutorFlashcardDrafts(params: {
@@ -352,31 +308,6 @@ export async function buildComprehensionSummaryBlocks(params: {
       const searchQuery = top.topic_label ?? topicKey
       if (!searchQuery) continue
 
-      const chunks = await searchDocumentChunks(userId, subjectId, searchQuery, 1)
-      if (chunks.length) {
-        const chunk = chunks[0]!
-        blocks.push({
-          subject_id: subjectId,
-          subject_name: subjectNames.get(subjectId),
-          type: "read_material",
-          count: 1,
-          minutes: 15,
-          label: `Leitura: ${chunk.title}`,
-          params: {
-            block_key: `read_material:${subjectId}:${topicKey}`,
-            topic_key: topicKey,
-            document_id: chunk.document_id,
-            material_title: chunk.title,
-            excerpt: chunk.content.slice(0, 400),
-            queue_reason: top.reason ?? undefined,
-            error_focus: "falta_compreensao",
-          },
-        })
-        budget--
-        done = true
-        continue
-      }
-
       await supabaseServer.from("ai_action_drafts").insert({
         user_id: userId,
         subject_id: subjectId,
@@ -386,7 +317,7 @@ export async function buildComprehensionSummaryBlocks(params: {
           topic: searchQuery,
           topic_key: topicKey,
           reason: top.reason,
-          hint: "Sem material indexado — revise na Inbox ou envie PDF na matéria.",
+          hint: "Revise o tópico com suas anotações ou questões erradas.",
         },
         source_agent: "execution_plan",
         status: "pending",

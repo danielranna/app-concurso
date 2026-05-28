@@ -37,7 +37,7 @@ export default function CoachConfiguracoesPage() {
   const [summaries, setSummaries] = useState(2)
   const [errorReviews, setErrorReviews] = useState(10)
   const [explainWrong, setExplainWrong] = useState(true)
-  const [teacherDailyCap, setTeacherDailyCap] = useState(30)
+  const [llmDailyCap, setLlmDailyCap] = useState(15)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -59,13 +59,7 @@ export default function CoachConfiguracoesPage() {
           setSummaries(Number(lim.summaries ?? 2))
           setErrorReviews(Number(lim.error_reviews ?? 10))
           setExplainWrong(rp.explain_wrong ?? true)
-          setTeacherDailyCap(
-            Number(
-              rp.max_teacher_queries_per_day ??
-                rp.max_llm_explanations_per_day ??
-                30
-            )
-          )
+          setLlmDailyCap(Number(rp.max_llm_explanations_per_day ?? 15))
         })
         .finally(() => setLoading(false))
     })
@@ -92,8 +86,7 @@ export default function CoachConfiguracoesPage() {
         },
         report: {
           explain_wrong: explainWrong,
-          max_teacher_queries_per_day: teacherDailyCap,
-          max_llm_explanations_per_day: teacherDailyCap,
+          max_llm_explanations_per_day: llmDailyCap,
         },
       }),
     })
@@ -238,24 +231,24 @@ export default function CoachConfiguracoesPage() {
             checked={explainWrong}
             onChange={(e) => setExplainWrong(e.target.checked)}
           />
-          Explicar questões erradas (Professor / IA)
+          Explicar questões erradas com IA
         </label>
         <label className="block text-sm">
           <span className="font-medium text-slate-700">
-            Consultas Professor por dia
+            Explicações com IA por dia (relatório)
           </span>
           <input
             type="number"
             min={0}
             max={80}
-            value={teacherDailyCap}
-            onChange={(e) => setTeacherDailyCap(Number(e.target.value))}
+            value={llmDailyCap}
+            onChange={(e) => setLlmDailyCap(Number(e.target.value))}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
           />
         </label>
         <p className="text-xs text-slate-500">
-          Vale para explicações no relatório (por tópico) e para o chat em
-          Materiais.
+          Limite de chamadas LLM para classificação e explicações no relatório de
+          caderno.
         </p>
       </section>
 

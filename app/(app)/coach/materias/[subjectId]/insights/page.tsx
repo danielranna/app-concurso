@@ -309,7 +309,7 @@ export default function CoachInsightsPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Relatório de caderno (Professor / IA)
+          Relatório de caderno (IA)
         </h3>
         <p className="mt-1 text-xs text-slate-500">
           Controla se questões erradas desta matéria recebem explicação no relatório. O padrão

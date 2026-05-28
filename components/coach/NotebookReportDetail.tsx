@@ -58,12 +58,8 @@ function sourceBadgeClass(source?: FeedbackSource) {
 
 function QuestionAuditCard({
   eq,
-  report,
-  materiaisAsk,
 }: {
   eq: PerQuestionError | BehavioralAuditQuestionItem
-  report: Report
-  materiaisAsk: string
 }) {
   const isPerQuestion = "error_taxonomy" in eq && eq.error_taxonomy != null
   const perQ = isPerQuestion ? (eq as PerQuestionError) : null
@@ -91,10 +87,6 @@ function QuestionAuditCard({
   const zone = perQ?.zone
   const statement =
     perQ?.statement_excerpt ?? auditItem?.statement_excerpt
-
-  const materiaisHref = report.subject_id
-    ? `/coach/materias/${report.subject_id}/materiais?ask=${encodeURIComponent(materiaisAsk)}`
-    : null
 
   return (
     <li className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm">
@@ -197,14 +189,6 @@ function QuestionAuditCard({
               ))}
             </ul>
           )}
-          {materiaisHref && (
-            <Link
-              href={materiaisHref}
-              className="mt-2 inline-block text-xs font-medium text-violet-700 underline"
-            >
-              Aprofundar no Professor
-            </Link>
-          )}
         </div>
       )}
     </li>
@@ -271,7 +255,7 @@ export default function NotebookReportDetail({
           >
             {regeneratingAudit
               ? "Regenerando explicações…"
-              : "Regenerar explicações (RAG + IA)"}
+              : "Regenerar explicações (IA)"}
           </button>
         )}
       </header>
@@ -325,20 +309,8 @@ export default function NotebookReportDetail({
           </h2>
           <ul className="space-y-2 text-sm text-slate-700">
             {s.weaknesses.map((w, i) => (
-              <li key={i} className="flex flex-wrap items-center justify-between gap-2">
-                <span>
-                  <strong>{w.topic}</strong> ({w.severity}) — {w.evidence}
-                </span>
-                {report.subject_id && (
-                  <Link
-                    href={`/coach/materias/${report.subject_id}/materiais?ask=${encodeURIComponent(
-                      `Como estudar ${w.topic}? Quais pontos revisar nos meus materiais?`
-                    )}`}
-                    className="shrink-0 text-xs font-medium text-violet-700 underline"
-                  >
-                    Perguntar ao Professor
-                  </Link>
-                )}
+              <li key={i}>
+                <strong>{w.topic}</strong> ({w.severity}) — {w.evidence}
               </li>
             ))}
           </ul>
@@ -385,12 +357,7 @@ export default function NotebookReportDetail({
             {[...redErrors]
               .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0))
               .map((eq, i) => (
-                <QuestionAuditCard
-                  key={eq.question_id ?? i}
-                  eq={eq}
-                  report={report}
-                  materiaisAsk={`Explique com mais detalhe: ${eq.tec_topic ?? "este tópico"}`}
-                />
+                <QuestionAuditCard key={eq.question_id ?? i} eq={eq} />
               ))}
           </ul>
         </section>
@@ -403,20 +370,10 @@ export default function NotebookReportDetail({
           </h2>
           <ul className="space-y-4">
             {yellowFromErrors.map((eq, i) => (
-              <QuestionAuditCard
-                key={eq.question_id ?? `y-${i}`}
-                eq={eq}
-                report={report}
-                materiaisAsk={`Reforçar conceito: ${eq.tec_topic ?? "este tópico"}`}
-              />
+              <QuestionAuditCard key={eq.question_id ?? `y-${i}`} eq={eq} />
             ))}
             {yellowOnlyAudit.map((eq, i) => (
-              <QuestionAuditCard
-                key={eq.question_id ?? `ya-${i}`}
-                eq={eq}
-                report={report}
-                materiaisAsk={`Reforçar conceito da questão ${eq.question_index}`}
-              />
+              <QuestionAuditCard key={eq.question_id ?? `ya-${i}`} eq={eq} />
             ))}
           </ul>
         </section>
@@ -454,12 +411,7 @@ export default function NotebookReportDetail({
               {[...s.per_question_errors]
                 .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0))
                 .map((eq, i) => (
-                  <QuestionAuditCard
-                    key={eq.question_id ?? i}
-                    eq={eq}
-                    report={report}
-                    materiaisAsk={`Explique: ${eq.tec_topic ?? "este tópico"}`}
-                  />
+                  <QuestionAuditCard key={eq.question_id ?? i} eq={eq} />
                 ))}
             </ul>
           </section>

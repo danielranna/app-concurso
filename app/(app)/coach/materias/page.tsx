@@ -39,23 +39,17 @@ export default function CoachMateriasPage() {
               <div className="min-w-0 flex-1">
                 <span className="font-medium text-slate-900">{s.name}</span>
                 <p className="text-xs text-slate-500">
-                  PDFs, professor, fila e insights
+                  Fila estratégica, sinais e insights
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-sm">
                 <Link
-                  href={`/coach/materias/${s.id}/materiais`}
+                  href={`/coach/materias/${s.id}/insights`}
                   className="font-medium text-violet-700 hover:underline"
                 >
-                  Materiais
+                  Insights
                 </Link>
-                <Link
-                  href={`/coach/materias/${s.id}/insights`}
-                  className="text-slate-600 hover:text-slate-900"
-                  aria-label="Insights"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Link>
+                <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden />
               </div>
             </div>
           </li>
