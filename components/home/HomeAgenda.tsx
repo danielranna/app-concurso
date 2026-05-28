@@ -36,50 +36,64 @@ export default function HomeAgenda({ userId }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const dayStr = toDateInputValue(anchor)
-  const weekStart = startOfWeek(anchor)
-  const weekEnd = endOfWeek(anchor)
-  const monthStart = startOfMonth(anchor)
-  const monthEnd = endOfMonth(anchor)
+  const weekStart = useMemo(() => startOfWeek(anchor), [anchor])
+  const weekEnd = useMemo(() => endOfWeek(anchor), [anchor])
+  const monthStart = useMemo(() => startOfMonth(anchor), [anchor])
+  const monthEnd = useMemo(() => endOfMonth(anchor), [anchor])
 
-  const loadDay = useCallback(async () => {
-    setLoading(true)
+  const weekFromStr = useMemo(() => toDateInputValue(weekStart), [weekStart])
+  const weekToStr = useMemo(() => toDateInputValue(weekEnd), [weekEnd])
+  const monthFromStr = useMemo(() => toDateInputValue(monthStart), [monthStart])
+  const monthToStr = useMemo(() => toDateInputValue(monthEnd), [monthEnd])
+
+  /** Chave estável — evita loop por objetos Date novos a cada render. */
+  const fetchKey = useMemo(() => {
+    if (tab === "day") return `day:${dayStr}`
+    if (tab === "week") return `week:${weekFromStr}:${weekToStr}`
+    return `month:${monthFromStr}:${monthToStr}`
+  }, [tab, dayStr, weekFromStr, weekToStr, monthFromStr, monthToStr])
+
+  const reload = useCallback(async () => {
     setError(null)
-    const res = await fetch(
-      `/api/agenda/daily-blocks?user_id=${userId}&date=${dayStr}`
-    )
-    const data = await res.json()
-    setLoading(false)
-    if (!res.ok) {
-      setError(data.error ?? "Erro ao carregar agenda")
-      return
-    }
-    setBlocks(data.blocks ?? [])
-  }, [userId, dayStr])
-
-  const loadEvents = useCallback(
-    async (from: string, to: string) => {
-      setLoading(true)
-      setError(null)
+    if (tab === "day") {
       const res = await fetch(
-        `/api/agenda/events?user_id=${userId}&from=${from}&to=${to}`
+        `/api/agenda/daily-blocks?user_id=${userId}&date=${dayStr}`
       )
       const data = await res.json()
-      setLoading(false)
       if (!res.ok) {
-        setError(data.error ?? "Erro ao carregar eventos")
+        setError(data.error ?? "Erro ao carregar agenda")
         return
       }
-      setEvents(data.events ?? [])
-    },
-    [userId]
-  )
+      setBlocks(data.blocks ?? [])
+      return
+    }
+    const from = tab === "week" ? weekFromStr : monthFromStr
+    const to = tab === "week" ? weekToStr : monthToStr
+    const res = await fetch(
+      `/api/agenda/events?user_id=${userId}&from=${from}&to=${to}`
+    )
+    const data = await res.json()
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao carregar eventos")
+      return
+    }
+    setEvents(data.events ?? [])
+  }, [userId, tab, dayStr, weekFromStr, weekToStr, monthFromStr, monthToStr])
 
   useEffect(() => {
-    if (tab === "day") loadDay()
-    else if (tab === "week")
-      loadEvents(toDateInputValue(weekStart), toDateInputValue(weekEnd))
-    else loadEvents(toDateInputValue(monthStart), toDateInputValue(monthEnd))
-  }, [tab, loadDay, loadEvents, weekStart, weekEnd, monthStart, monthEnd])
+    let cancelled = false
+    async function run() {
+      setLoading(true)
+      await reload()
+      if (!cancelled) setLoading(false)
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+    // fetchKey já codifica tab + intervalo; reload vem do mesmo render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchKey])
 
   const weekDays = useMemo(() => {
     const days: Date[] = []
@@ -133,7 +147,7 @@ export default function HomeAgenda({ userId }: Props) {
     })
     if (res.ok) {
       e.currentTarget.reset()
-      loadDay()
+      reload()
     }
   }
 
@@ -141,7 +155,7 @@ export default function HomeAgenda({ userId }: Props) {
     await fetch(`/api/agenda/daily-blocks?user_id=${userId}&id=${id}`, {
       method: "DELETE",
     })
-    loadDay()
+    reload()
   }
 
   async function addEvent(e: React.FormEvent<HTMLFormElement>) {
@@ -163,17 +177,13 @@ export default function HomeAgenda({ userId }: Props) {
     })
     if (res.ok) {
       e.currentTarget.reset()
-      if (tab === "week")
-        loadEvents(toDateInputValue(weekStart), toDateInputValue(weekEnd))
-      else loadEvents(toDateInputValue(monthStart), toDateInputValue(monthEnd))
+      reload()
     }
   }
 
   async function removeEvent(id: string) {
     await fetch(`/api/agenda/events?user_id=${userId}&id=${id}`, { method: "DELETE" })
-    if (tab === "week")
-      loadEvents(toDateInputValue(weekStart), toDateInputValue(weekEnd))
-    else loadEvents(toDateInputValue(monthStart), toDateInputValue(monthEnd))
+    reload()
   }
 
   function eventsForDay(d: Date) {
