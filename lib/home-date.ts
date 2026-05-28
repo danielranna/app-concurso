@@ -70,3 +70,14 @@ export function isoWeekdayShort(weekday: number): string {
   const short = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
   return short[weekday - 1] ?? "?"
 }
+
+export function formatWeekdaysLabel(weekdays: number[]): string {
+  if (weekdays.length === 7) return "Todos os dias"
+  if (
+    weekdays.length === 5 &&
+    [1, 2, 3, 4, 5].every((d) => weekdays.includes(d))
+  ) {
+    return "Seg–Sex"
+  }
+  return weekdays.map((w) => isoWeekdayShort(w)).join(", ")
+}

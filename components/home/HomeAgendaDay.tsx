@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Plus, Settings2, Trash2 } from "lucide-react"
-import type { AgendaDayBlockView, IsoWeekday } from "@/lib/agenda-types"
+import type { AgendaDayBlockView, AgendaWeeklyBlock, IsoWeekday } from "@/lib/agenda-types"
 import {
   formatTimeShort,
+  formatWeekdaysLabel,
   isoWeekdayFromDate,
   isoWeekdayLabel,
   isoWeekdayShort,
@@ -18,77 +19,90 @@ type Props = {
   onAnchorChange: (d: Date) => void
 }
 
+const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as IsoWeekday[]
+
 export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props) {
   const dayStr = toDateInputValue(anchor)
   const weekday = isoWeekdayFromDate(anchor) as IsoWeekday
 
   const [blocks, setBlocks] = useState<AgendaDayBlockView[]>([])
+  const [allBlocks, setAllBlocks] = useState<AgendaWeeklyBlock[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editingRoutine, setEditingRoutine] = useState(false)
-  const [editWeekday, setEditWeekday] = useState<IsoWeekday>(weekday)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const [defaultWeekdays, setDefaultWeekdays] = useState<Set<IsoWeekday>>(
+    () => new Set([weekday])
+  )
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
-  const fetchKey = dayStr
+  const bumpRefresh = useCallback(() => {
+    setRefreshVersion((v) => v + 1)
+  }, [])
 
   const loadDayPlan = useCallback(async () => {
-    setError(null)
     const res = await fetch(
-      `/api/agenda/day-plan?user_id=${userId}&date=${dayStr}`
+      `/api/agenda/day-plan?user_id=${userId}&date=${dayStr}&_=${Date.now()}`
     )
     const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? "Erro ao carregar")
-      return
-    }
+    if (!res.ok) throw new Error(data.error ?? "Erro ao carregar")
     setBlocks(data.blocks ?? [])
-    if (data.weekday) setEditWeekday(data.weekday as IsoWeekday)
+    setError(null)
   }, [userId, dayStr])
 
-  const loadWeeklyTemplate = useCallback(async () => {
-    setError(null)
+  const loadAllBlocks = useCallback(async () => {
     const res = await fetch(
-      `/api/agenda/weekly-blocks?user_id=${userId}&weekday=${editWeekday}`
+      `/api/agenda/weekly-blocks?user_id=${userId}&_=${Date.now()}`
     )
     const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? "Erro ao carregar rotina")
-      return
-    }
-    setBlocks(
-      (data.blocks ?? []).map((b: AgendaDayBlockView) => ({
-        ...b,
-        plan_id: null,
-        plan_text: null,
-      }))
-    )
-  }, [userId, editWeekday])
+    if (!res.ok) throw new Error(data.error ?? "Erro ao carregar rotina")
+    setAllBlocks(data.blocks ?? [])
+    setError(null)
+  }, [userId])
 
-  const dataKey = editingRoutine ? `routine:${editWeekday}` : `day:${fetchKey}`
+  const dataKey = editingRoutine
+    ? `routine:${refreshVersion}`
+    : `day:${dayStr}:${refreshVersion}`
 
   useEffect(() => {
     let cancelled = false
     async function run() {
       setLoading(true)
-      if (editingRoutine) await loadWeeklyTemplate()
-      else await loadDayPlan()
-      if (!cancelled) setLoading(false)
+      try {
+        if (editingRoutine) await loadAllBlocks()
+        else await loadDayPlan()
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Erro")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     run()
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey])
+  }, [dataKey, editingRoutine])
 
   useEffect(() => {
-    if (!editingRoutine) setEditWeekday(weekday)
-  }, [weekday, editingRoutine])
+    setDefaultWeekdays((prev) => {
+      const next = new Set(prev)
+      next.add(weekday)
+      return next
+    })
+  }, [weekday])
 
   function shiftDay(delta: number) {
     const d = new Date(anchor)
     d.setDate(d.getDate() + delta)
     onAnchorChange(d)
+  }
+
+  function exitRoutineEditor() {
+    setEditingRoutine(false)
+    bumpRefresh()
   }
 
   function updatePlanLocal(blockId: string, text: string) {
@@ -123,28 +137,40 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
     const title = String(fd.get("title")).trim()
     if (!title) return
 
+    const weekdays = ALL_WEEKDAYS.filter((w) => fd.get(`wd_${w}`) === "on")
+    if (!weekdays.length) {
+      setError("Marque pelo menos um dia da semana")
+      return
+    }
+
     const res = await fetch("/api/agenda/weekly-blocks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
-        weekday: editWeekday,
+        weekdays,
         start_time: String(fd.get("start_time")),
         end_time: String(fd.get("end_time")),
         title,
       }),
     })
-    if (res.ok) {
-      e.currentTarget.reset()
-      loadWeeklyTemplate()
+    const data = await res.json()
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao criar bloco")
+      return
     }
+    e.currentTarget.reset()
+    setDefaultWeekdays(new Set([weekday]))
+    await loadAllBlocks()
+    bumpRefresh()
   }
 
   async function removeWeeklyBlock(id: string) {
     await fetch(`/api/agenda/weekly-blocks?user_id=${userId}&id=${id}`, {
       method: "DELETE",
     })
-    loadWeeklyTemplate()
+    await loadAllBlocks()
+    bumpRefresh()
   }
 
   const headerLabel = anchor.toLocaleDateString("pt-BR", {
@@ -154,7 +180,9 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
   })
 
   const sqlHint =
-    error?.includes("agenda_weekly_blocks") || error?.includes("does not exist")
+    error?.includes("agenda_weekly_block_days") ||
+    error?.includes("agenda_weekly_blocks") ||
+    error?.includes("does not exist")
 
   return (
     <div className="space-y-4">
@@ -180,7 +208,7 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
         </div>
         <button
           type="button"
-          onClick={() => setEditingRoutine((v) => !v)}
+          onClick={() => (editingRoutine ? exitRoutineEditor() : setEditingRoutine(true))}
           className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium ${
             editingRoutine
               ? "border-slate-900 bg-slate-900 text-white"
@@ -188,7 +216,7 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
           }`}
         >
           <Settings2 className="h-4 w-4" />
-          {editingRoutine ? "Voltar ao dia" : "Editar rotina"}
+          {editingRoutine ? "Voltar ao dia" : "Gerenciar blocos"}
         </button>
       </div>
 
@@ -203,17 +231,17 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
       {error && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {sqlHint
-            ? "Execute sql-agenda-weekly-routine.sql no Supabase."
+            ? "Execute sql-agenda-block-weekdays.sql no Supabase."
             : error}
         </p>
       )}
 
       {editingRoutine ? (
         <RoutineEditor
-          editWeekday={editWeekday}
-          onWeekdayChange={setEditWeekday}
-          blocks={blocks}
+          blocks={allBlocks}
           loading={loading}
+          defaultWeekdays={defaultWeekdays}
+          onDefaultWeekdaysChange={setDefaultWeekdays}
           onAdd={addWeeklyBlock}
           onRemove={removeWeeklyBlock}
         />
@@ -250,9 +278,9 @@ function DayPlanView({
   if (blocks.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-sm text-slate-600">
-        <p>Nenhum bloco na rotina de {isoWeekdayLabel(weekday)}.</p>
+        <p>Nenhum bloco para {isoWeekdayLabel(weekday)}.</p>
         <p className="mt-1 text-slate-500">
-          Use &quot;Editar rotina&quot; para criar blocos fixos (ex.: Concurso 06:00–12:00).
+          Em &quot;Gerenciar blocos&quot;, crie um bloco e marque os dias em que ele se repete.
         </p>
       </div>
     )
@@ -261,8 +289,8 @@ function DayPlanView({
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">
-        Rotina de <span className="font-medium text-slate-700">{isoWeekdayLabel(weekday)}</span>
-        {" — "}preencha o plano só deste dia:
+        Blocos de <span className="font-medium text-slate-700">{isoWeekdayLabel(weekday)}</span>
+        {" — "}o plano abaixo vale só para este dia:
       </p>
       <ul className="space-y-3">
         {blocks.map((b) => (
@@ -291,70 +319,97 @@ function DayPlanView({
   )
 }
 
+function WeekdayCheckboxes({
+  defaultWeekdays,
+  onDefaultWeekdaysChange,
+}: {
+  defaultWeekdays: Set<IsoWeekday>
+  onDefaultWeekdaysChange: (s: Set<IsoWeekday>) => void
+}) {
+  return (
+    <fieldset className="w-full">
+      <legend className="mb-1.5 text-xs font-medium text-slate-600">
+        Repete em
+      </legend>
+      <div className="flex flex-wrap gap-2">
+        {ALL_WEEKDAYS.map((w) => (
+          <label
+            key={w}
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+          >
+            <input
+              type="checkbox"
+              name={`wd_${w}`}
+              checked={defaultWeekdays.has(w)}
+              onChange={(e) => {
+                const next = new Set(defaultWeekdays)
+                if (e.target.checked) next.add(w)
+                else next.delete(w)
+                onDefaultWeekdaysChange(next)
+              }}
+              className="rounded border-slate-300"
+            />
+            {isoWeekdayShort(w)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
 function RoutineEditor({
-  editWeekday,
-  onWeekdayChange,
   blocks,
   loading,
+  defaultWeekdays,
+  onDefaultWeekdaysChange,
   onAdd,
   onRemove,
 }: {
-  editWeekday: IsoWeekday
-  onWeekdayChange: (w: IsoWeekday) => void
-  blocks: AgendaDayBlockView[]
+  blocks: AgendaWeeklyBlock[]
   loading: boolean
+  defaultWeekdays: Set<IsoWeekday>
+  onDefaultWeekdaysChange: (s: Set<IsoWeekday>) => void
   onAdd: (e: React.FormEvent<HTMLFormElement>) => void
   onRemove: (id: string) => void
 }) {
-  const weekdays = useMemo(() => [1, 2, 3, 4, 5, 6, 7] as IsoWeekday[], [])
+  const sorted = useMemo(
+    () => [...blocks].sort((a, b) => a.start_time.localeCompare(b.start_time)),
+    [blocks]
+  )
 
   return (
     <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/50 p-4">
       <div>
-        <p className="text-sm font-medium text-slate-800">Blocos fixos por dia da semana</p>
+        <p className="text-sm font-medium text-slate-800">Seus blocos fixos</p>
         <p className="mt-0.5 text-xs text-slate-500">
-          O que você definir aqui repete toda {isoWeekdayLabel(editWeekday).toLowerCase()}.
+          Crie uma vez, escolha os dias da semana em que repete.
         </p>
-      </div>
-
-      <div className="flex flex-wrap gap-1">
-        {weekdays.map((w) => (
-          <button
-            key={w}
-            type="button"
-            onClick={() => onWeekdayChange(w)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-              editWeekday === w
-                ? "bg-slate-900 text-white"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
-            }`}
-          >
-            {isoWeekdayShort(w)}
-          </button>
-        ))}
       </div>
 
       {loading ? (
         <p className="py-4 text-center text-sm text-slate-500">Carregando…</p>
-      ) : blocks.length === 0 ? (
-        <p className="text-sm text-slate-500">Nenhum bloco em {isoWeekdayLabel(editWeekday)}.</p>
+      ) : sorted.length === 0 ? (
+        <p className="text-sm text-slate-500">Nenhum bloco cadastrado ainda.</p>
       ) : (
         <ul className="space-y-2">
-          {blocks.map((b) => (
+          {sorted.map((b) => (
             <li
               key={b.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2"
+              className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2"
             >
-              <div>
-                <span className="text-xs text-slate-500">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500">
                   {formatTimeShort(b.start_time)} – {formatTimeShort(b.end_time)}
-                </span>
-                <span className="ml-2 font-medium text-slate-900">{b.title}</span>
+                  <span className="ml-2 font-medium text-slate-900">{b.title}</span>
+                </p>
+                <p className="mt-0.5 text-xs text-blue-700">
+                  {formatWeekdaysLabel(b.weekdays)}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => onRemove(b.id)}
-                className="text-slate-400 hover:text-red-600"
+                className="shrink-0 text-slate-400 hover:text-red-600"
                 aria-label="Remover bloco"
               >
                 <Trash2 className="h-4 w-4" />
@@ -364,41 +419,49 @@ function RoutineEditor({
         </ul>
       )}
 
-      <form onSubmit={onAdd} className="flex flex-wrap items-end gap-2 border-t border-slate-200 pt-4">
-        <label className="flex flex-col gap-1 text-xs text-slate-600">
-          De
-          <input
-            name="start_time"
-            type="time"
-            required
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-slate-600">
-          Até
-          <input
-            name="end_time"
-            type="time"
-            required
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-          />
-        </label>
-        <label className="min-w-[120px] flex-1 flex-col gap-1 text-xs text-slate-600 sm:flex">
-          Nome do bloco
-          <input
-            name="title"
-            type="text"
-            required
-            placeholder="Ex.: Concurso"
-            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
-          />
-        </label>
+      <form onSubmit={onAdd} className="space-y-3 border-t border-slate-200 pt-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            De
+            <input
+              name="start_time"
+              type="time"
+              required
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-600">
+            Até
+            <input
+              name="end_time"
+              type="time"
+              required
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="min-w-[120px] flex-1 flex-col gap-1 text-xs text-slate-600">
+            Nome do bloco
+            <input
+              name="title"
+              type="text"
+              required
+              placeholder="Ex.: Concurso"
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+            />
+          </label>
+        </div>
+
+        <WeekdayCheckboxes
+          defaultWeekdays={defaultWeekdays}
+          onDefaultWeekdaysChange={onDefaultWeekdaysChange}
+        />
+
         <button
           type="submit"
           className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
         >
           <Plus className="h-4 w-4" />
-          Bloco
+          Adicionar bloco
         </button>
       </form>
     </div>

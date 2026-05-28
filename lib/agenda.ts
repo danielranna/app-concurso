@@ -11,55 +11,112 @@ function normalizeTime(t: string): string {
   return t.length === 5 ? `${t}:00` : t
 }
 
-export async function listWeeklyBlocks(
-  userId: string,
-  weekday: IsoWeekday
-): Promise<AgendaWeeklyBlock[]> {
+export function parseWeekdays(raw: unknown): IsoWeekday[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((n) => Number(n))
+    .filter((n) => n >= 1 && n <= 7) as IsoWeekday[]
+}
+
+type BlockRow = {
+  id: string
+  user_id: string
+  start_time: string
+  end_time: string
+  title: string
+  sort_order: number
+  agenda_weekly_block_days?: { weekday: number }[] | null
+}
+
+function mapBlockRow(row: BlockRow): AgendaWeeklyBlock {
+  const days = row.agenda_weekly_block_days ?? []
+  const weekdays = days
+    .map((d) => d.weekday)
+    .filter((n) => n >= 1 && n <= 7)
+    .sort((a, b) => a - b) as IsoWeekday[]
+
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    title: row.title,
+    sort_order: row.sort_order,
+    weekdays,
+  }
+}
+
+const blockSelect = `
+  id, user_id, start_time, end_time, title, sort_order,
+  agenda_weekly_block_days ( weekday )
+`
+
+export async function listAllWeeklyBlocks(userId: string): Promise<AgendaWeeklyBlock[]> {
   const { data, error } = await supabaseServer
     .from("agenda_weekly_blocks")
-    .select("*")
+    .select(blockSelect)
     .eq("user_id", userId)
-    .eq("weekday", weekday)
     .order("start_time", { ascending: true })
     .order("sort_order", { ascending: true })
 
   if (error) throw new Error(error.message)
-  return (data ?? []) as AgendaWeeklyBlock[]
+  return (data ?? []).map((row) => mapBlockRow(row as BlockRow))
+}
+
+export async function listWeeklyBlocks(
+  userId: string,
+  weekday: IsoWeekday
+): Promise<AgendaWeeklyBlock[]> {
+  const all = await listAllWeeklyBlocks(userId)
+  return all.filter((b) => b.weekdays.includes(weekday))
 }
 
 export async function createWeeklyBlock(input: {
   user_id: string
-  weekday: IsoWeekday
+  weekdays: IsoWeekday[]
   start_time: string
   end_time: string
   title: string
 }): Promise<AgendaWeeklyBlock> {
+  const weekdays = [...new Set(input.weekdays)].sort((a, b) => a - b)
+  if (!weekdays.length) {
+    throw new Error("Selecione pelo menos um dia da semana")
+  }
+
   const { data: existing } = await supabaseServer
     .from("agenda_weekly_blocks")
     .select("sort_order")
     .eq("user_id", input.user_id)
-    .eq("weekday", input.weekday)
     .order("sort_order", { ascending: false })
     .limit(1)
 
   const sort_order = (existing?.[0]?.sort_order ?? -1) + 1
 
-  const { data, error } = await supabaseServer
+  const { data: block, error } = await supabaseServer
     .from("agenda_weekly_blocks")
     .insert({
       user_id: input.user_id,
-      weekday: input.weekday,
       start_time: normalizeTime(input.start_time),
       end_time: normalizeTime(input.end_time),
       title: input.title.trim(),
       sort_order,
       updated_at: new Date().toISOString(),
     })
-    .select("*")
+    .select("id, user_id, start_time, end_time, title, sort_order")
     .single()
 
-  if (error) throw new Error(error.message)
-  return data as AgendaWeeklyBlock
+  if (error || !block) throw new Error(error?.message ?? "Falha ao criar bloco")
+
+  const { error: daysErr } = await supabaseServer.from("agenda_weekly_block_days").insert(
+    weekdays.map((weekday) => ({ block_id: block.id, weekday }))
+  )
+
+  if (daysErr) throw new Error(daysErr.message)
+
+  return {
+    ...(block as Omit<AgendaWeeklyBlock, "weekdays">),
+    weekdays,
+  }
 }
 
 export async function deleteWeeklyBlock(id: string, userId: string): Promise<void> {

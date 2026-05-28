@@ -58,7 +58,7 @@ export default function HomeAgenda({ userId }: Props) {
     const from = tab === "week" ? weekFromStr : monthFromStr
     const to = tab === "week" ? weekToStr : monthToStr
     const res = await fetch(
-      `/api/agenda/events?user_id=${userId}&from=${from}&to=${to}`
+      `/api/agenda/events?user_id=${userId}&from=${from}&to=${to}&_=${Date.now()}`
     )
     const data = await res.json()
     if (!res.ok) {
@@ -133,13 +133,13 @@ export default function HomeAgenda({ userId }: Props) {
     })
     if (res.ok) {
       e.currentTarget.reset()
-      reload()
+      await reload()
     }
   }
 
   async function removeEvent(id: string) {
     await fetch(`/api/agenda/events?user_id=${userId}&id=${id}`, { method: "DELETE" })
-    reload()
+    await reload()
   }
 
   function eventsForDay(d: Date) {

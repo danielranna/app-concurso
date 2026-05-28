@@ -4,7 +4,7 @@ export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7
 export type AgendaWeeklyBlock = {
   id: string
   user_id: string
-  weekday: IsoWeekday
+  weekdays: IsoWeekday[]
   start_time: string
   end_time: string
   title: string

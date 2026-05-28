@@ -4,7 +4,6 @@
 CREATE TABLE IF NOT EXISTS agenda_weekly_blocks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  weekday SMALLINT NOT NULL CHECK (weekday >= 1 AND weekday <= 7),
   start_time TIME NOT NULL,
   end_time TIME NOT NULL,
   title TEXT NOT NULL,
@@ -14,8 +13,34 @@ CREATE TABLE IF NOT EXISTS agenda_weekly_blocks (
   CONSTRAINT agenda_weekly_blocks_time_order CHECK (end_time > start_time)
 );
 
-CREATE INDEX IF NOT EXISTS idx_agenda_weekly_blocks_user_weekday
-  ON agenda_weekly_blocks (user_id, weekday);
+CREATE INDEX IF NOT EXISTS idx_agenda_weekly_blocks_user
+  ON agenda_weekly_blocks (user_id);
+
+CREATE TABLE IF NOT EXISTS agenda_weekly_block_days (
+  block_id UUID NOT NULL REFERENCES agenda_weekly_blocks(id) ON DELETE CASCADE,
+  weekday SMALLINT NOT NULL CHECK (weekday >= 1 AND weekday <= 7),
+  PRIMARY KEY (block_id, weekday)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agenda_weekly_block_days_weekday
+  ON agenda_weekly_block_days (weekday);
+
+ALTER TABLE agenda_weekly_block_days ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY agenda_weekly_block_days_own ON agenda_weekly_block_days
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM agenda_weekly_blocks b
+      WHERE b.id = block_id AND b.user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM agenda_weekly_blocks b
+      WHERE b.id = block_id AND b.user_id = auth.uid()
+    )
+  );
 
 CREATE TABLE IF NOT EXISTS agenda_daily_block_plans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
