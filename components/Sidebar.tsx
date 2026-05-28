@@ -13,6 +13,8 @@ import {
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
+import FourBarsIcon from "@/components/sidebar/FourBarsIcon"
+import SidebarBrand from "@/components/sidebar/SidebarBrand"
 
 const links = [
   { href: "/", label: "Início", icon: Home, exact: true },
@@ -77,39 +79,39 @@ export default function Sidebar({
         {/* Cabeçalho */}
         <div
           className={`flex shrink-0 items-center border-b border-slate-100 ${
-            showLabels ? "justify-between px-4 py-4" : "justify-center px-2 py-4"
+            showLabels ? "gap-2 px-4 py-4" : "justify-center px-2 py-4"
           }`}
         >
           {showLabels ? (
-            <span className="truncate text-sm font-bold text-slate-800">
-              Via Aprovação
-            </span>
+            <>
+              <SidebarBrand />
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                className="shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden"
+                aria-label="Fechar menu"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="hidden shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:block"
+                aria-label="Recolher menu"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            </>
           ) : (
-            <span
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-xs font-bold text-white"
-              title="Via Aprovação"
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="hidden rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:block"
+              aria-label="Expandir menu"
             >
-              VA
-            </span>
+              <FourBarsIcon />
+            </button>
           )}
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="hidden rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:block"
-            aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
-          >
-            <ChevronLeft
-              className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`}
-            />
-          </button>
-          <button
-            type="button"
-            onClick={onCloseMobile}
-            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden"
-            aria-label="Fechar menu"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
         </div>
 
         {/* Navegação */}

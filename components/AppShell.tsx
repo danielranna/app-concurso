@@ -1,8 +1,9 @@
 "use client"
 
-import { Menu } from "lucide-react"
 import { useEffect, useState } from "react"
 import Sidebar from "@/components/Sidebar"
+import FourBarsIcon from "@/components/sidebar/FourBarsIcon"
+import SidebarBrand from "@/components/sidebar/SidebarBrand"
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
@@ -40,12 +41,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+            className="rounded-lg p-2 hover:bg-slate-100"
             aria-label="Abrir menu"
           >
-            <Menu className="h-5 w-5" />
+            <FourBarsIcon />
           </button>
-          <span className="text-sm font-semibold text-slate-800">Via Aprovação</span>
+          <SidebarBrand />
         </header>
         <div className="flex-1 overflow-auto">{children}</div>
       </div>
