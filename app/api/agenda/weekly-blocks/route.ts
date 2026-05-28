@@ -1,25 +1,32 @@
 import { NextResponse } from "next/server"
 import {
-  createDailyBlock,
-  deleteDailyBlock,
-  listDailyBlocks,
+  createWeeklyBlock,
+  deleteWeeklyBlock,
+  listWeeklyBlocks,
 } from "@/lib/agenda"
+import type { IsoWeekday } from "@/lib/agenda-types"
+
+function parseWeekday(raw: string | null): IsoWeekday | null {
+  const n = parseInt(raw ?? "", 10)
+  if (n >= 1 && n <= 7) return n as IsoWeekday
+  return null
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
   const user_id = url.searchParams.get("user_id")
-  const agenda_date = url.searchParams.get("date")
+  const weekday = parseWeekday(url.searchParams.get("weekday"))
 
-  if (!user_id || !agenda_date) {
+  if (!user_id || weekday == null) {
     return NextResponse.json(
-      { error: "user_id e date obrigatórios" },
+      { error: "user_id e weekday (1–7) obrigatórios" },
       { status: 400 }
     )
   }
 
   try {
-    const blocks = await listDailyBlocks(user_id, agenda_date)
-    return NextResponse.json({ blocks })
+    const blocks = await listWeeklyBlocks(user_id, weekday)
+    return NextResponse.json({ blocks, weekday })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })
@@ -28,23 +35,23 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, agenda_date, start_time, end_time, title, notes } = body
+  const { user_id, weekday: wd, start_time, end_time, title } = body
+  const weekday = parseWeekday(String(wd ?? ""))
 
-  if (!user_id || !agenda_date || !start_time || !end_time || !title) {
+  if (!user_id || weekday == null || !start_time || !end_time || !title) {
     return NextResponse.json(
-      { error: "user_id, agenda_date, start_time, end_time e title obrigatórios" },
+      { error: "user_id, weekday, start_time, end_time e title obrigatórios" },
       { status: 400 }
     )
   }
 
   try {
-    const block = await createDailyBlock({
+    const block = await createWeeklyBlock({
       user_id,
-      agenda_date,
+      weekday,
       start_time,
       end_time,
       title,
-      notes,
     })
     return NextResponse.json({ block })
   } catch (e) {
@@ -63,7 +70,7 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    await deleteDailyBlock(id, user_id)
+    await deleteWeeklyBlock(id, user_id)
     return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

@@ -45,3 +45,28 @@ export function formatWeekdayShort(d: Date): string {
 export function formatDayMonth(d: Date): string {
   return d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" })
 }
+
+/** 1 = segunda … 7 = domingo (ISO) */
+export function isoWeekdayFromDate(d: Date): number {
+  const day = d.getDay()
+  return day === 0 ? 7 : day
+}
+
+const WEEKDAY_NAMES = [
+  "Segunda-feira",
+  "Terça-feira",
+  "Quarta-feira",
+  "Quinta-feira",
+  "Sexta-feira",
+  "Sábado",
+  "Domingo",
+] as const
+
+export function isoWeekdayLabel(weekday: number): string {
+  return WEEKDAY_NAMES[weekday - 1] ?? "Dia"
+}
+
+export function isoWeekdayShort(weekday: number): string {
+  const short = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+  return short[weekday - 1] ?? "?"
+}

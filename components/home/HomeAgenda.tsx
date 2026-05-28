@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react"
-import type { AgendaDailyBlock, AgendaEvent } from "@/lib/agenda-types"
+import type { AgendaEvent } from "@/lib/agenda-types"
+import HomeAgendaDay from "@/components/home/HomeAgendaDay"
 import {
   endOfMonth,
   endOfWeek,
   formatDayMonth,
-  formatTimeShort,
   formatWeekdayShort,
   parseDateInput,
   startOfMonth,
@@ -30,7 +30,6 @@ const TABS: { id: AgendaTab; label: string }[] = [
 export default function HomeAgenda({ userId }: Props) {
   const [tab, setTab] = useState<AgendaTab>("day")
   const [anchor, setAnchor] = useState(() => new Date())
-  const [blocks, setBlocks] = useState<AgendaDailyBlock[]>([])
   const [events, setEvents] = useState<AgendaEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,25 +47,14 @@ export default function HomeAgenda({ userId }: Props) {
 
   /** Chave estável — evita loop por objetos Date novos a cada render. */
   const fetchKey = useMemo(() => {
-    if (tab === "day") return `day:${dayStr}`
+    if (tab === "day") return null
     if (tab === "week") return `week:${weekFromStr}:${weekToStr}`
     return `month:${monthFromStr}:${monthToStr}`
-  }, [tab, dayStr, weekFromStr, weekToStr, monthFromStr, monthToStr])
+  }, [tab, weekFromStr, weekToStr, monthFromStr, monthToStr])
 
   const reload = useCallback(async () => {
     setError(null)
-    if (tab === "day") {
-      const res = await fetch(
-        `/api/agenda/daily-blocks?user_id=${userId}&date=${dayStr}`
-      )
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? "Erro ao carregar agenda")
-        return
-      }
-      setBlocks(data.blocks ?? [])
-      return
-    }
+    if (tab === "day") return
     const from = tab === "week" ? weekFromStr : monthFromStr
     const to = tab === "week" ? weekToStr : monthToStr
     const res = await fetch(
@@ -78,9 +66,10 @@ export default function HomeAgenda({ userId }: Props) {
       return
     }
     setEvents(data.events ?? [])
-  }, [userId, tab, dayStr, weekFromStr, weekToStr, monthFromStr, monthToStr])
+  }, [userId, tab, weekFromStr, weekToStr, monthFromStr, monthToStr])
 
   useEffect(() => {
+    if (!fetchKey) return
     let cancelled = false
     async function run() {
       setLoading(true)
@@ -91,7 +80,6 @@ export default function HomeAgenda({ userId }: Props) {
     return () => {
       cancelled = true
     }
-    // fetchKey já codifica tab + intervalo; reload vem do mesmo render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchKey])
 
@@ -124,38 +112,6 @@ export default function HomeAgenda({ userId }: Props) {
     else if (tab === "week") d.setDate(d.getDate() + delta * 7)
     else d.setMonth(d.getMonth() + delta)
     setAnchor(d)
-  }
-
-  async function addBlock(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const fd = new FormData(e.currentTarget)
-    const start_time = String(fd.get("start_time"))
-    const end_time = String(fd.get("end_time"))
-    const title = String(fd.get("title")).trim()
-    if (!title) return
-
-    const res = await fetch("/api/agenda/daily-blocks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        agenda_date: dayStr,
-        start_time: start_time.length === 5 ? `${start_time}:00` : start_time,
-        end_time: end_time.length === 5 ? `${end_time}:00` : end_time,
-        title,
-      }),
-    })
-    if (res.ok) {
-      e.currentTarget.reset()
-      reload()
-    }
-  }
-
-  async function removeBlock(id: string) {
-    await fetch(`/api/agenda/daily-blocks?user_id=${userId}&id=${id}`, {
-      method: "DELETE",
-    })
-    reload()
   }
 
   async function addEvent(e: React.FormEvent<HTMLFormElement>) {
@@ -250,93 +206,16 @@ export default function HomeAgenda({ userId }: Props) {
         </button>
       </div>
 
-      {tab === "day" && (
-        <input
-          type="date"
-          value={dayStr}
-          onChange={(e) => setAnchor(parseDateInput(e.target.value))}
-          className="mb-4 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-        />
-      )}
-
-      {error && (
+      {error && tab !== "day" && (
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {error.includes("agenda_daily_blocks") || error.includes("does not exist")
-            ? "Execute o script sql-agenda.sql no Supabase para ativar a agenda."
-            : error}
+          {error}
         </p>
       )}
 
-      {loading ? (
+      {tab === "day" ? (
+        <HomeAgendaDay userId={userId} anchor={anchor} onAnchorChange={setAnchor} />
+      ) : loading ? (
         <p className="py-6 text-center text-sm text-slate-500">Carregando…</p>
-      ) : tab === "day" ? (
-        <div className="space-y-4">
-          {blocks.length === 0 ? (
-            <p className="text-sm text-slate-500">Nenhum bloco neste dia.</p>
-          ) : (
-            <ul className="space-y-2">
-              {blocks.map((b) => (
-                <li
-                  key={b.id}
-                  className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
-                >
-                  <div>
-                    <p className="text-xs font-medium text-slate-500">
-                      {formatTimeShort(b.start_time)} – {formatTimeShort(b.end_time)}
-                    </p>
-                    <p className="font-medium text-slate-900">{b.title}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeBlock(b.id)}
-                    className="text-slate-400 hover:text-red-600"
-                    aria-label="Remover"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <form onSubmit={addBlock} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4">
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              De
-              <input
-                name="start_time"
-                type="time"
-                required
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Até
-              <input
-                name="end_time"
-                type="time"
-                required
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="min-w-[140px] flex-1 flex-col gap-1 text-xs text-slate-600 sm:flex">
-              Atividade
-              <input
-                name="title"
-                type="text"
-                required
-                placeholder="Ex.: Concurso — direito constitucional"
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-            >
-              <Plus className="h-4 w-4" />
-              Adicionar
-            </button>
-          </form>
-        </div>
       ) : tab === "week" ? (
         <div className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-7">
