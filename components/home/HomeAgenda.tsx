@@ -186,25 +186,27 @@ export default function HomeAgenda({ userId }: Props) {
         </div>
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => shiftAnchor(-1)}
-          className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50"
-          aria-label="Anterior"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <p className="text-sm font-medium capitalize text-slate-800">{headerLabel}</p>
-        <button
-          type="button"
-          onClick={() => shiftAnchor(1)}
-          className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50"
-          aria-label="Próximo"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
+      {tab !== "day" && (
+        <div className="mb-4 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => shiftAnchor(-1)}
+            className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50"
+            aria-label="Anterior"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <p className="text-sm font-medium capitalize text-slate-800">{headerLabel}</p>
+          <button
+            type="button"
+            onClick={() => shiftAnchor(1)}
+            className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50"
+            aria-label="Próximo"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {error && tab !== "day" && (
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">

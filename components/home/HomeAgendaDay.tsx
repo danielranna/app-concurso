@@ -222,13 +222,24 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
         </button>
       </div>
 
-      <input
-        type="date"
-        value={dayStr}
-        onChange={(e) => onAnchorChange(parseDateInput(e.target.value))}
-        disabled={editingRoutine}
-        className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-50"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="date"
+          value={dayStr}
+          onChange={(e) => onAnchorChange(parseDateInput(e.target.value))}
+          disabled={editingRoutine}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-50"
+        />
+        {!editingRoutine && !isTodayDate(dayStr) && (
+          <button
+            type="button"
+            onClick={() => onAnchorChange(new Date())}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+          >
+            Hoje
+          </button>
+        )}
+      </div>
 
       {error && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -249,11 +260,13 @@ export default function HomeAgendaDay({ userId, anchor, onAnchorChange }: Props)
         />
       ) : (
         <DayPlanView
+          key={dayStr}
           weekday={weekday}
           dayStr={dayStr}
           anchor={anchor}
           blocks={blocks}
           loading={loading}
+          onGoToToday={() => onAnchorChange(new Date())}
           onPlanChange={(blockId, text) => {
             updatePlanLocal(blockId, text)
             savePlanDebounced(blockId, text)
@@ -446,12 +459,72 @@ function NowAgendaView({
   )
 }
 
+function PlanningDayView({
+  planningLabel,
+  blocks,
+  showAll,
+  onToggleShowAll,
+  onGoToToday,
+  onPlanChange,
+}: {
+  planningLabel: string
+  blocks: AgendaDayBlockView[]
+  showAll: boolean
+  onToggleShowAll: () => void
+  onGoToToday: () => void
+  onPlanChange: (blockId: string, text: string) => void
+}) {
+  if (showAll) {
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">
+            Planejamento · <span className="capitalize text-slate-700">{planningLabel}</span>
+          </p>
+          <button
+            type="button"
+            onClick={onToggleShowAll}
+            className="text-xs font-medium text-blue-600 hover:underline"
+          >
+            Ocultar
+          </button>
+        </div>
+        <CompactBlockList blocks={blocks} onPlanChange={onPlanChange} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">
+        Você está vendo outro dia. O bloco &quot;Agora&quot; só aparece em{" "}
+        <span className="font-medium text-slate-700">hoje</span>.
+      </p>
+      <button
+        type="button"
+        onClick={onGoToToday}
+        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+      >
+        Ir para hoje
+      </button>
+      <button
+        type="button"
+        onClick={onToggleShowAll}
+        className="block text-sm font-medium text-blue-600 hover:underline"
+      >
+        Planejar este dia · ver todos os blocos ({blocks.length})
+      </button>
+    </div>
+  )
+}
+
 function DayPlanView({
   weekday,
   dayStr,
   anchor,
   blocks,
   loading,
+  onGoToToday,
   onPlanChange,
 }: {
   weekday: IsoWeekday
@@ -459,6 +532,7 @@ function DayPlanView({
   anchor: Date
   blocks: AgendaDayBlockView[]
   loading: boolean
+  onGoToToday: () => void
   onPlanChange: (blockId: string, text: string) => void
 }) {
   const isToday = isTodayDate(dayStr)
@@ -492,12 +566,14 @@ function DayPlanView({
 
   if (!isToday) {
     return (
-      <div className="space-y-2">
-        <p className="text-xs text-slate-500">
-          Planejamento · <span className="capitalize text-slate-700">{planningLabel}</span>
-        </p>
-        <CompactBlockList blocks={blocks} onPlanChange={onPlanChange} />
-      </div>
+      <PlanningDayView
+        planningLabel={planningLabel}
+        blocks={blocks}
+        showAll={showAll}
+        onToggleShowAll={() => setShowAll((v) => !v)}
+        onGoToToday={onGoToToday}
+        onPlanChange={onPlanChange}
+      />
     )
   }
 
