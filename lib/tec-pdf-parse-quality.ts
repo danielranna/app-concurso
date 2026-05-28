@@ -1,4 +1,8 @@
 import type { ParsedTecQuestion } from "./question-types"
+import {
+  hasResidualPdfSpacingArtifacts,
+  repairPdfSpuriousSpacesWithMeta,
+} from "./pdf-text-repair"
 
 type ParseCandidates = Partial<
   Record<"primary" | "lines" | "strict", ParsedTecQuestion | null>
@@ -101,6 +105,20 @@ export function assessQuestionQuality(
       code: "gabarito_in_option",
       severity: "warn",
       message: "Numeração de gabarito vazou em alternativa",
+    })
+  }
+
+  const textBlob = [merged.statement, ...merged.options.map((o) => o.text)]
+    .filter(Boolean)
+    .join("\n")
+  const { wasRepaired } = repairPdfSpuriousSpacesWithMeta(textBlob)
+  if (wasRepaired || hasResidualPdfSpacingArtifacts(textBlob)) {
+    flags.push({
+      code: "pdf_spacing_repaired",
+      severity: "warn",
+      message: wasRepaired
+        ? "Texto ajustado (espaços espúrios do PDF)"
+        : "Possível espaço espúrio residual no texto — confira alternativas",
     })
   }
 

@@ -1,5 +1,6 @@
 import type { ParsedTecNotebook, ParsedTecQuestion, QuestionType } from "./question-types"
 import { extractPdfText } from "./pdf-extract"
+import { repairPdfSpuriousSpaces } from "./pdf-text-repair"
 
 const TEC_URL_RE =
   /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/gi
@@ -39,10 +40,12 @@ function formatJulgueStatementBreaks(statement: string): string {
 
 /** Remove numeração de gabarito vazada nas alternativas (ex.: "Certo 6) 7)"). */
 function cleanAlternativeText(text: string): string {
-  return text
-    .replace(/^(?:\d+\)\s*)+/g, "")
-    .replace(/\s+\d+\)(?:\s+\d+\))*\s*$/g, "")
-    .trim()
+  return repairPdfSpuriousSpaces(
+    text
+      .replace(/^(?:\d+\)\s*)+/g, "")
+      .replace(/\s+\d+\)(?:\s+\d+\))*\s*$/g, "")
+      .trim()
+  )
 }
 
 /** Nome do caderno e metadados do cabeçalho TEC (antes das questões). */
@@ -94,11 +97,13 @@ export function extractNotebookHeader(normalized: string): {
 
 /** Preserva quebras de linha; compacta só espaços horizontais dentro de cada linha. */
 export function compactPdfText(rawText: string): string {
-  return rawText
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
-    .join("\n")
+  return repairPdfSpuriousSpaces(
+    rawText
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+      .join("\n")
+  )
 }
 
 function flattenText(text: string): string {
@@ -525,7 +530,7 @@ export function parseQuestionBlock(
     options = parsed.options
   }
 
-  statement = formatJulgueStatementBreaks(statement)
+  statement = repairPdfSpuriousSpaces(formatJulgueStatementBreaks(statement))
   options = options.map((o) => ({
     ...o,
     text: cleanAlternativeText(o.text),
