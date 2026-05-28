@@ -22,7 +22,9 @@ export default function NewCardPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [occludedUrl, setOccludedUrl] = useState<string | null>(null)
   const [masks, setMasks] = useState<ImageMask[]>([])
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [saving, setSaving] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -45,15 +47,43 @@ export default function NewCardPage() {
 
   async function uploadImage(file: File) {
     if (!userId) return
-    const fd = new FormData()
-    fd.append("user_id", userId)
-    fd.append("file", file)
-    if (masks.length) fd.append("masks", JSON.stringify(masks))
-    const res = await fetch("/api/flashcards/cards/upload", { method: "POST", body: fd })
-    const data = await res.json()
-    setImageUrl(data.image_url)
-    setOccludedUrl(data.image_occluded_url)
-    setMasks(data.image_masks ?? [])
+    setUploadingImage(true)
+    try {
+      const fd = new FormData()
+      fd.append("user_id", userId)
+      fd.append("file", file)
+      if (masks.length) fd.append("masks", JSON.stringify(masks))
+      const res = await fetch("/api/flashcards/cards/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      setImageUrl(data.image_url)
+      setOccludedUrl(data.image_occluded_url)
+      setMasks(data.image_masks ?? [])
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  async function pasteImageFromClipboard() {
+    if (!("clipboard" in navigator) || typeof navigator.clipboard.read !== "function") {
+      window.alert("Seu navegador nao suporta colar imagem da area de transferencia.")
+      return
+    }
+
+    try {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"))
+        if (!imageType) continue
+        const blob = await item.getType(imageType)
+        const ext = imageType.split("/")[1] || "png"
+        const file = new File([blob], `clipboard.${ext}`, { type: imageType })
+        await uploadImage(file)
+        return
+      }
+      window.alert("Nenhuma imagem encontrada na area de transferencia.")
+    } catch {
+      window.alert("Nao foi possivel ler a area de transferencia. Tente copiar a imagem novamente.")
+    }
   }
 
   async function save() {
@@ -155,10 +185,33 @@ export default function NewCardPage() {
         {type === "cloze_image" && (
           <div className="space-y-4">
             <input
+              ref={imageInputRef}
               type="file"
               accept="image/*"
-              onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) void uploadImage(e.target.files[0])
+                e.currentTarget.value = ""
+              }}
             />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={uploadingImage}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+              >
+                {uploadingImage ? "Importando..." : "Importar imagem"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void pasteImageFromClipboard()}
+                disabled={uploadingImage}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+              >
+                Colar da area de transferencia
+              </button>
+            </div>
             {imageUrl && (
               <ImageMaskEditor
                 imageUrl={imageUrl}
