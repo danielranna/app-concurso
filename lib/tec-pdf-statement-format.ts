@@ -3,47 +3,150 @@ import { repairPdfSpuriousSpaces } from "./pdf-text-repair"
 
 const ROMAN_NUMERAL = "I{1,3}|II|III|IV|V|VI{0,3}|VII|VIII|IX|X"
 
-const ROMAN_ITEM_RE = new RegExp(`\\b(${ROMAN_NUMERAL})\\b`, "gi")
+const ROMAN_ORDER = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"] as const
 
-function countRomanTokens(text: string): number {
-  return (text.match(ROMAN_ITEM_RE) ?? []).length
+type RomanHit = { index: number; length: number; roman: (typeof ROMAN_ORDER)[number] }
+
+const ROMAN_CANDIDATE_RE = new RegExp(`\\b(${ROMAN_NUMERAL})\\b`, "gi")
+
+const ARTICLE_AFTER_ROMAN = /^\s+(?:a|o|as|os|um|uma|e)\b/i
+
+const CLOSING_PHRASE_RE =
+  /\s+((?:Quantas(?:\s+(?:das|as))?\s+afirmativas|Estão certos apenas os itens|Assinale)\b[^.]*?)(\s*$)/i
+
+function normalizeRomanToken(raw: string): RomanHit["roman"] | null {
+  const u = raw.toUpperCase()
+  return (ROMAN_ORDER.find((r) => r === u) as RomanHit["roman"] | undefined) ?? null
+}
+
+/** Marcador válido de item de lista (não confunde V com Vier). */
+function hasValidListMarker(rest: string, roman: string): boolean {
+  if (/^\s*[-–.]\s*/.test(rest)) return true
+  if (ARTICLE_AFTER_ROMAN.test(rest)) return true
+  if (/^\s+[A-ZÁÉÍÓÚÃÕÇ]/.test(rest)) return true
+
+  const cont = rest.match(/^\s+([a-záéíóúãõç]{2,})/i)
+  if (cont) {
+    const w = cont[1].toLowerCase()
+    if (["as", "os", "um", "uma", "a", "o", "e"].includes(w)) return true
+    return false
+  }
+
+  if (roman === "V") {
+    return /^\s+(?:as|os|um|uma)\b/i.test(rest)
+  }
+
+  return false
+}
+
+function scanRomanCandidates(text: string): RomanHit[] {
+  const hits: RomanHit[] = []
+  const re = new RegExp(ROMAN_CANDIDATE_RE.source, "gi")
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const roman = normalizeRomanToken(m[1])
+    if (!roman) continue
+    const rest = text.slice(m.index + m[0].length)
+    if (!hasValidListMarker(rest, roman)) continue
+    hits.push({ index: m.index, length: m[0].length, roman })
+  }
+  return hits
+}
+
+/** Sequência I→II→III no enunciado (alternativas A–E podem citar romanos fora de ordem). */
+export function findRomanListSequence(text: string): RomanHit[] | null {
+  const hits = scanRomanCandidates(text)
+  let best: RomanHit[] = []
+
+  for (let start = 0; start < hits.length; start++) {
+    if (hits[start].roman !== "I") continue
+    const seq: RomanHit[] = [hits[start]]
+    let expected = 1
+    for (let j = start + 1; j < hits.length && expected < ROMAN_ORDER.length; j++) {
+      if (hits[j].roman === ROMAN_ORDER[expected]) {
+        seq.push(hits[j])
+        expected++
+      }
+    }
+    if (seq.length >= 3 && seq.length > best.length) best = seq
+  }
+
+  return best.length >= 3 ? best : null
 }
 
 export function looksLikeRomanNumeralList(text: string): boolean {
-  return countRomanTokens(text) >= 3
+  return findRomanListSequence(text) !== null
 }
 
-/** Corrige "Vas normas" colado pelo reparo de espaços antes de formatar lista. */
 function fixRomanVasArtifact(text: string): string {
   return text.replace(/\bVas\s+(normas|leis|fontes|dispositivos)/gi, "V as $1")
 }
 
-export function formatRomanNumeralListBreaks(statement: string): string {
-  if (!looksLikeRomanNumeralList(statement)) return statement
+function fixAcronymSpacing(text: string): string {
+  return text.replace(/\b([A-Z]{2,})(serão|será|são|foi|foram)\b/g, "$1 $2")
+}
 
+function applyFirstItemIntroBreaks(text: string, firstHit: RomanHit): string {
+  const before = text.slice(0, firstHit.index)
+  const after = text.slice(firstHit.index)
+
+  if (/(?:afirmativas?\s+)?a\s+seguir|seguir|abaixo\s*$/i.test(before.trimEnd())) {
+    return before.replace(/\s*:\s*$/, ":\n\n") + after
+  }
+  if (/:\s*$/.test(before)) {
+    return before.replace(/\s*$/, "\n\n") + after
+  }
+  return text
+}
+
+function normalizeRomanItemPrefix(sliceFromRoman: string, hit: RomanHit): string {
+  const re = new RegExp(`^${hit.roman}\\s*[-–.]?\\s*`, "i")
+  const body = sliceFromRoman.replace(re, "")
+  return `${hit.roman}- ${body}`
+}
+
+function formatRomanSequenceBreaks(text: string, seq: RomanHit[]): string {
+  let out = applyFirstItemIntroBreaks(text, seq[0])
+
+  for (let i = seq.length - 1; i >= 0; i--) {
+    const hit = seq[i]
+    const at = out.indexOf(hit.roman, i === 0 ? 0 : hit.index)
+    const pos = at >= 0 ? at : hit.index
+    const prefix = out.slice(0, pos).replace(/\s+$/, "")
+    const suffix = normalizeRomanItemPrefix(out.slice(pos), hit)
+    const br = i === 0 ? "\n\n" : "\n"
+    const needsBreak = i > 0 || !/\n\s*$/.test(prefix)
+    out = needsBreak ? `${prefix}${br}${suffix}` : `${prefix}${suffix}`
+  }
+
+  return out
+}
+
+function formatRomanClosingBreaks(text: string): string {
+  return text.replace(CLOSING_PHRASE_RE, "\n\n$1$2")
+}
+
+export function formatRomanNumeralListBreaks(statement: string): string {
   let out = fixRomanVasArtifact(statement)
 
-  out = out.replace(
-    new RegExp(
-      `\\b(incluem|compreendem|são|apenas|contemplam|abrangem|referem-se)\\s+(${ROMAN_NUMERAL})\\s*[-–.]?\\s*`,
-      "gi"
-    ),
-    "$1\n$2- "
-  )
+  const seq = findRomanListSequence(out)
+  if (!seq) {
+    out = out.replace(
+      new RegExp(
+        `\\b(incluem|compreendem|são|apenas|contemplam|abrangem|referem-se)\\s+(${ROMAN_NUMERAL})\\s*[-–.]?\\s*`,
+        "gi"
+      ),
+      "$1\n$2- "
+    )
+    return fixAcronymSpacing(formatRomanClosingBreaks(out))
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  }
 
-  out = out.replace(
-    new RegExp(
-      `\\.\\s+(${ROMAN_NUMERAL})\\s*[-–.]?\\s*(?=[a-záéíóúãõç])`,
-      "gi"
-    ),
-    ".\n$1- "
-  )
+  out = formatRomanSequenceBreaks(out, seq)
+  out = formatRomanClosingBreaks(out)
 
-  out = out.replace(/\.\s+(V)\s+(?=(?:as|os|um|uma)\s)/gi, ".\n$1- ")
-
-  out = out.replace(/\s+(Estão certos apenas os itens)/i, "\n\n$1")
-
-  return out.replace(/\n{3,}/g, "\n\n").trim()
+  return fixAcronymSpacing(out).replace(/\n{3,}/g, "\n\n").trim()
 }
 
 function optionsLookLikeVfSequence(options: { text: string }[]): boolean {
@@ -72,7 +175,6 @@ export function formatVfAffirmationBreaks(
   return out.replace(/\n{3,}/g, "\n\n").trim()
 }
 
-/** Após "julgue … .", quebra parágrafo antes do corpo do item (CEBRASPE). */
 export function formatJulgueStatementBreaks(statement: string): string {
   if (!/\bjulgue\b/i.test(statement)) return statement
   return statement.replace(
@@ -101,6 +203,7 @@ export function formatStatementStructure(
       : s
   s = formatJulgueStatementBreaks(s)
   s = repairPdfSpuriousSpaces(s)
+  s = fixAcronymSpacing(s)
   return s
 }
 
@@ -111,7 +214,7 @@ export function getStatementFormatMeta(
 ): StatementFormatMeta {
   return {
     roman_list_formatted:
-      looksLikeRomanNumeralList(original) && formatted.includes("\nI"),
+      looksLikeRomanNumeralList(original) && /\n\s*I-\s/i.test(formatted),
     vf_sequence_formatted:
       ((original.match(/\(\s*\)/g) ?? []).length >= 2 ||
         optionsLookLikeVfSequence(options)) &&
@@ -133,8 +236,16 @@ export function assessStatementFormatQuality(
     })
   }
 
-  const lineBreakItems = (statement.match(/\n\s*(I{1,3}|IV|VI{0,3}|IX|X)\s*-/gi) ?? [])
-    .length
+  if (/\nV-\s+[a-z]{2,}/i.test(statement) && !/\nV-\s+(?:as|os|um|uma)\b/i.test(statement)) {
+    flags.push({
+      code: "roman_list_incomplete",
+      severity: "warn",
+      message:
+        'Possível falso item romano (ex.: "V" de "Vier") — confira enunciado',
+    })
+  }
+
+  const lineBreakItems = (statement.match(/\n\s*(I{1,3}|II|III|IV|V)\s*-/gi) ?? []).length
   if (looksLikeRomanNumeralList(statement) && lineBreakItems < 3) {
     flags.push({
       code: "roman_list_incomplete",
