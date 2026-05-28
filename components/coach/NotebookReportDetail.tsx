@@ -85,7 +85,9 @@ function QuestionAuditCard({
   const citations =
     perQ?.explanation_citations ?? auditItem?.citations
   const topic = perQ?.tec_topic
-  const taxonomy = perQ?.error_taxonomy
+  const taxonomy = perQ?.error_taxonomy ?? auditItem?.error_taxonomy
+  const classificationSource = perQ?.classification_source
+  const classificationEvidence = perQ?.evidence
   const zone = perQ?.zone
   const statement =
     perQ?.statement_excerpt ?? auditItem?.statement_excerpt
@@ -107,6 +109,19 @@ function QuestionAuditCard({
         {taxonomy && (
           <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
             {ERROR_TAXONOMY_LABELS[taxonomy] ?? taxonomy}
+          </span>
+        )}
+        {classificationSource && (
+          <span
+            className={`rounded px-2 py-0.5 text-xs font-medium ${
+              classificationSource === "llm_classify"
+                ? "bg-indigo-100 text-indigo-800"
+                : "bg-slate-200 text-slate-700"
+            }`}
+          >
+            {classificationSource === "llm_classify"
+              ? "Classificado por IA"
+              : "Regra"}
           </span>
         )}
         {header && (
@@ -136,6 +151,17 @@ function QuestionAuditCard({
         <div className="mt-2 rounded border border-blue-100 bg-blue-50 p-2">
           <p className="text-xs font-medium text-blue-800">Sua nota</p>
           <p className="mt-1 text-sm text-blue-900">{note}</p>
+        </div>
+      )}
+
+      {classificationEvidence && classificationEvidence.length > 0 && (
+        <div className="mt-2 rounded border border-violet-100 bg-violet-50/80 p-2">
+          <p className="text-xs font-medium text-violet-900">Por que esta classificação</p>
+          <ul className="mt-1 list-inside list-disc text-xs text-violet-950">
+            {classificationEvidence.slice(0, 3).map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
         </div>
       )}
 

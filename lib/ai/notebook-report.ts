@@ -1,6 +1,9 @@
 import { supabaseServer } from "../supabase-server"
 import type { NotebookReportStructured, PerQuestionError } from "../coach-types"
-import { classifyWrongAttempts } from "./error-classifier"
+import {
+  classifyNotebookQuestions,
+} from "./error-classifier"
+import { buildNotebookAuditPayload } from "./notebook-audit-payload"
 import {
   mergeUnifiedExplainIntoErrors,
   runBehavioralAuditForNotebook,
@@ -343,20 +346,36 @@ export async function generateNotebookReport(
   const subjectId = nb?.subject_id ?? null
   const prefs = await getEffectiveReportPreferences(userId, subjectId)
 
-  let perQuestionErrors = await classifyWrongAttempts(
+  const payload = await buildNotebookAuditPayload(notebookId, userId)
+  let reportsToday = await countReportLlmRunsToday(userId)
+
+  const canClassifyLlm =
+    prefs.classify_all_wrong &&
+    reportsToday < prefs.max_llm_explanations_per_day
+
+  const classifyResult = await classifyNotebookQuestions(
     userId,
     notebookId,
-    subjectId
+    subjectId,
+    payload,
+    { skipLlm: !canClassifyLlm }
   )
 
-  const reportsToday = await countReportLlmRunsToday(userId)
+  if (classifyResult.usedLlm) reportsToday += 1
+
+  let perQuestionErrors = classifyResult.items
+
   const skipAuditLlm = reportsToday >= prefs.max_llm_explanations_per_day
 
   const auditResult = await runBehavioralAuditForNotebook(
     notebookId,
     userId,
     subjectId,
-    { skipLlm: skipAuditLlm }
+    {
+      skipLlm: skipAuditLlm,
+      payload,
+      taxonomyByQuestion: classifyResult.byQuestionId,
+    }
   )
   perQuestionErrors = mergeUnifiedExplainIntoErrors(
     perQuestionErrors,
@@ -382,11 +401,8 @@ export async function generateNotebookReport(
     ? ((snapshot.subject_brain as Record<string, unknown> | null) ?? null)
     : null
 
-  const skipLlm =
-    skipAuditLlm ||
-    (auditResult.usedLlm
-      ? reportsToday + 1 >= prefs.max_llm_explanations_per_day
-      : reportsToday >= prefs.max_llm_explanations_per_day)
+  const reportsAfterAudit = auditResult.usedLlm ? reportsToday + 1 : reportsToday
+  const skipLlm = reportsAfterAudit >= prefs.max_llm_explanations_per_day
 
   const materialHints: { topic: string; document_title: string; excerpt: string }[] =
     []
@@ -438,14 +454,21 @@ export async function generateNotebookReport(
     structured,
     summaryMd: result.summaryMd,
     snapshot: snapshot as Record<string, unknown>,
-    modelUsed: auditResult.usedLlm
-      ? `${result.modelUsed}+audit:${auditResult.modelUsed}`
-      : result.modelUsed,
-    tokensIn: result.tokensIn + auditResult.tokensIn,
-    tokensOut: result.tokensOut + auditResult.tokensOut,
-    costUsd: result.costUsd + auditResult.costUsd,
+    modelUsed: [
+      classifyResult.usedLlm ? `classify:${classifyResult.modelUsed}` : null,
+      auditResult.usedLlm ? `audit:${auditResult.modelUsed}` : null,
+      result.modelUsed,
+    ]
+      .filter(Boolean)
+      .join("+") || result.modelUsed,
+    tokensIn:
+      result.tokensIn + auditResult.tokensIn + classifyResult.tokensIn,
+    tokensOut:
+      result.tokensOut + auditResult.tokensOut + classifyResult.tokensOut,
+    costUsd: result.costUsd + auditResult.costUsd + classifyResult.costUsd,
     perQuestionCount: perQuestionErrors.length,
-    usedLlm: result.usedLlm || auditResult.usedLlm,
+    usedLlm:
+      result.usedLlm || auditResult.usedLlm || classifyResult.usedLlm,
   }
 }
 
@@ -466,13 +489,38 @@ export async function regenerateBehavioralAuditOnly(
   if (!existing?.notebook_id) throw new Error("Relatório não encontrado")
 
   const prior = (existing.structured ?? {}) as import("../coach-types").NotebookReportStructured
-  const perQuestionErrors = prior.per_question_errors ?? []
+  const prefs = await getEffectiveReportPreferences(userId, existing.subject_id)
+  const payload = await buildNotebookAuditPayload(existing.notebook_id, userId)
+  let reportsToday = await countReportLlmRunsToday(userId)
+
+  const canClassifyLlm =
+    prefs.classify_all_wrong &&
+    reportsToday < prefs.max_llm_explanations_per_day
+
+  const classifyResult = await classifyNotebookQuestions(
+    userId,
+    existing.notebook_id,
+    existing.subject_id,
+    payload,
+    { skipLlm: !canClassifyLlm }
+  )
+  if (classifyResult.usedLlm) reportsToday += 1
+
+  let perQuestionErrors = classifyResult.items.length
+    ? classifyResult.items
+    : (prior.per_question_errors ?? [])
+
+  const skipAuditLlm = reportsToday >= prefs.max_llm_explanations_per_day
 
   const auditResult = await runBehavioralAuditForNotebook(
     existing.notebook_id,
     userId,
     existing.subject_id,
-    { skipLlm: false }
+    {
+      skipLlm: skipAuditLlm,
+      payload,
+      taxonomyByQuestion: classifyResult.byQuestionId,
+    }
   )
 
   const merged = mergeUnifiedExplainIntoErrors(

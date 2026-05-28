@@ -19,48 +19,32 @@ import {
   retrieveForTeacher,
 } from "../teacher-retrieval"
 import { supabaseServer } from "../../supabase-server"
-
-const VALID_TAXONOMIES = new Set<string>([
-  "desatencao",
-  "pegadinha_interpretacao",
-  "falta_compreensao",
-  "calculo_procedimento",
-  "falta_memorizacao",
-  "nao_aplicavel",
-])
+import { mergeUnifiedExplainIntoErrors } from "../merge-unified-errors"
 
 const CHUNKS_PER_QUESTION = 4
 const CHUNK_EXCERPT_MAX = 400
 
-const SYSTEM = `Você é o tutor unificado do relatório de caderno (explicação por questão).
-Para CADA questão das zonas vermelha e amarela você recebe: enunciado, marcada vs gabarito, nota do aluno e trechos RAG dos PDFs (material_chunks).
+const SYSTEM = `Você é o tutor do relatório de caderno — sua função é EXPLICAR, não reclassificar erros.
+A taxonomia (tipo de erro) já foi definida em error_taxonomy_hint — use-a no feedback, NÃO invente outra.
 
-REGRAS OBRIGATÓRIAS:
-1. Se existir user_note, o feedback DEVE começar corrigindo a lógica da nota (cite o equívoco).
+Para CADA questão red/yellow: enunciado, marcada vs gabarito, nota do aluno, error_taxonomy_hint e trechos RAG.
+
+REGRAS:
+1. Se existir user_note, o feedback DEVE começar corrigindo a lógica da nota.
 2. Proibido texto genérico quando a nota ou o enunciado revelam o erro específico.
-3. Use material_chunks quando cobrirem o ponto; cite no JSON citations com document_title, excerpt, page.
-4. source por questão:
-   - "material": feedback sustentado principalmente nos trechos fornecidos
-   - "mixed": trechos ajudam mas você complementou com raciocínio
-   - "ai_generated": sem trechos úteis ou insuficientes
-5. Marcada vs Gabarito sempre claro; se acertou com lógica errada ou chute, diga.
+3. Use material_chunks quando cobrirem o ponto; cite citations com document_title, excerpt, page.
+4. source: "material" | "mixed" | "ai_generated"
+5. Marcada vs Gabarito sempre claro.
 6. Português (BR), tom de professor de concurso.
 
 Responda JSON:
 {
-  "red_zone": [{
-    "question_index": 1,
-    "feedback": "",
-    "misconception": "",
-    "error_taxonomy": "falta_compreensao|...",
-    "source": "material|ai_generated|mixed",
-    "citations": [{"document_title":"","excerpt":"","page":null}]
-  }],
+  "red_zone": [{ "question_index": 1, "feedback": "", "misconception": "", "source": "material|ai_generated|mixed", "citations": [] }],
   "yellow_zone": [...],
   "green_zone": { "mastered_indexes": [], "theory_balance": "" }
 }
 
-Inclua TODAS as questões red e yellow do input (mesmos question_index).`
+Inclua TODAS as questões red e yellow do input (mesmos question_index). Não inclua error_taxonomy na resposta.`
 
 type MaterialChunk = {
   document_title: string
@@ -118,7 +102,8 @@ async function prefetchMaterialByQuestion(
 
 function toLlmItem(
   q: NotebookAuditQuestion,
-  materialChunks: MaterialChunk[]
+  materialChunks: MaterialChunk[],
+  taxonomyHint?: ErrorTaxonomy
 ) {
   return {
     question_index: q.question_index,
@@ -133,6 +118,7 @@ function toLlmItem(
     confidence_level: q.confidence_level,
     user_note: q.user_note || null,
     zone: q.zone,
+    error_taxonomy_hint: taxonomyHint ?? null,
     material_chunks: materialChunks,
   }
 }
@@ -144,7 +130,8 @@ function parseSource(raw: string | undefined): FeedbackSource {
 
 function buildFallbackItem(
   q: NotebookAuditQuestion,
-  materialChunks: MaterialChunk[] = []
+  materialChunks: MaterialChunk[] = [],
+  taxonomyHint?: ErrorTaxonomy
 ): BehavioralAuditQuestionItem {
   const marked = q.selected_answer
   const key = q.correct_answer
@@ -179,12 +166,8 @@ function buildFallbackItem(
     feedback,
     source,
     citations: citations.length > 0 ? citations : undefined,
+    error_taxonomy: taxonomyHint,
   }
-}
-
-function parseTaxonomy(raw: string | undefined): ErrorTaxonomy | undefined {
-  if (!raw || !VALID_TAXONOMIES.has(raw)) return undefined
-  return raw as ErrorTaxonomy
 }
 
 function parseCitations(
@@ -203,58 +186,7 @@ function parseCitations(
 
 /** @deprecated Use mergeUnifiedExplainIntoErrors */
 export const mergeBehavioralAuditIntoErrors = mergeUnifiedExplainIntoErrors
-
-export function mergeUnifiedExplainIntoErrors(
-  perQuestionErrors: PerQuestionError[],
-  audit: BehavioralAudit,
-  payload: NotebookAuditPayload
-): PerQuestionError[] {
-  const byQid = new Map(perQuestionErrors.map((e) => [e.question_id, { ...e }]))
-  const auditItems = [...audit.red_zone, ...audit.yellow_zone]
-
-  for (const item of auditItems) {
-    const q = payload.questions.find((x) => x.question_id === item.question_id)
-    const zone = q?.zone ?? "red"
-    const source = item.source ?? "ai_generated"
-
-    const patch: Partial<PerQuestionError> = {
-      feedback_detailed: item.feedback,
-      specific_mistake: item.misconception,
-      misconception: item.misconception,
-      question_index: item.question_index,
-      header_label: item.header_label,
-      statement_excerpt: item.statement_excerpt,
-      marked_answer: item.marked,
-      correct_answer: item.answer_key,
-      user_note: item.user_note,
-      zone,
-      outcome_category: item.outcome_category,
-      confidence_level: item.confidence_level,
-      feedback_source: source,
-      explanation_source: source,
-      explanation_citations: item.citations,
-      explanation: undefined,
-    }
-    if (item.error_taxonomy) patch.error_taxonomy = item.error_taxonomy
-
-    const existing = byQid.get(item.question_id)
-    if (existing) {
-      Object.assign(existing, patch)
-    } else if (zone === "yellow") {
-      byQid.set(item.question_id, {
-        question_id: item.question_id,
-        tec_id: q?.tec_id,
-        tec_topic: q?.tec_topic,
-        error_taxonomy: item.error_taxonomy ?? "pegadinha_interpretacao",
-        ...patch,
-      } as PerQuestionError)
-    }
-  }
-
-  return [...byQid.values()].sort(
-    (a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0)
-  )
-}
+export { mergeUnifiedExplainIntoErrors }
 
 export async function persistAuditInsightsToAttempts(
   audit: BehavioralAudit,
@@ -284,7 +216,6 @@ export async function persistAuditInsightsToAttempts(
           explanation_citations: item.citations,
           unified_explain: true,
         },
-        ...(item.error_taxonomy ? { error_taxonomy: item.error_taxonomy } : {}),
       })
       .eq("id", q.attempt_id)
   }
@@ -313,7 +244,10 @@ export async function runBehavioralAuditAgent(params: {
   subjectId: string | null
   payload: NotebookAuditPayload
   skipLlm?: boolean
+  taxonomyByQuestion?: Map<string, PerQuestionError>
 }): Promise<RunBehavioralAuditResult> {
+  const taxHint = (qid: string) =>
+    params.taxonomyByQuestion?.get(qid)?.error_taxonomy
   const redQs = params.payload.questions.filter((q) => q.zone === "red")
   const yellowQs = params.payload.questions.filter((q) => q.zone === "yellow")
   const greenQs = params.payload.questions.filter((q) => q.zone === "green")
@@ -328,10 +262,18 @@ export async function runBehavioralAuditAgent(params: {
   const baseAudit: BehavioralAudit = {
     performance_summary: params.payload.performance_summary,
     red_zone: redQs.map((q) =>
-      buildFallbackItem(q, materialByIndex.get(q.question_index) ?? [])
+      buildFallbackItem(
+        q,
+        materialByIndex.get(q.question_index) ?? [],
+        taxHint(q.question_id)
+      )
     ),
     yellow_zone: yellowQs.map((q) =>
-      buildFallbackItem(q, materialByIndex.get(q.question_index) ?? [])
+      buildFallbackItem(
+        q,
+        materialByIndex.get(q.question_index) ?? [],
+        taxHint(q.question_id)
+      )
     ),
     green_zone: {
       mastered_indexes: greenQs.map((q) => q.question_index),
@@ -373,10 +315,18 @@ export async function runBehavioralAuditAgent(params: {
     subject_name: params.payload.subject_name,
     performance_summary: params.payload.performance_summary,
     red_zone: redQs.map((q) =>
-      toLlmItem(q, materialByIndex.get(q.question_index) ?? [])
+      toLlmItem(
+        q,
+        materialByIndex.get(q.question_index) ?? [],
+        taxHint(q.question_id)
+      )
     ),
     yellow_zone: yellowQs.map((q) =>
-      toLlmItem(q, materialByIndex.get(q.question_index) ?? [])
+      toLlmItem(
+        q,
+        materialByIndex.get(q.question_index) ?? [],
+        taxHint(q.question_id)
+      )
     ),
     green_zone_summary: greenQs.map((q) => ({
       question_index: q.question_index,
@@ -432,7 +382,8 @@ export async function runBehavioralAuditAgent(params: {
         const llm = byIndex.get(q.question_index)
         const fallback = buildFallbackItem(
           q,
-          materialByIndex.get(q.question_index) ?? []
+          materialByIndex.get(q.question_index) ?? [],
+          taxHint(q.question_id)
         )
         if (!llm) return fallback
 
@@ -454,7 +405,7 @@ export async function runBehavioralAuditAgent(params: {
           confidence_level: q.confidence_level,
           feedback: llm.feedback?.trim() || fallback.feedback,
           misconception: llm.misconception,
-          error_taxonomy: parseTaxonomy(llm.error_taxonomy),
+          error_taxonomy: taxHint(q.question_id) ?? fallback.error_taxonomy,
           source: sourceParsed,
           citations,
         }
@@ -503,14 +454,20 @@ export async function runBehavioralAuditForNotebook(
   notebookId: string,
   userId: string,
   subjectId: string | null,
-  options?: { skipLlm?: boolean }
+  options?: {
+    skipLlm?: boolean
+    payload?: NotebookAuditPayload
+    taxonomyByQuestion?: Map<string, PerQuestionError>
+  }
 ): Promise<RunBehavioralAuditResult & { payload: NotebookAuditPayload }> {
-  const payload = await buildNotebookAuditPayload(notebookId, userId)
+  const payload =
+    options?.payload ?? (await buildNotebookAuditPayload(notebookId, userId))
   const result = await runBehavioralAuditAgent({
     userId,
     subjectId,
     payload,
     skipLlm: options?.skipLlm,
+    taxonomyByQuestion: options?.taxonomyByQuestion,
   })
   await persistAuditInsightsToAttempts(result.audit, payload)
   return { ...result, payload }

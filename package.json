@@ -13,7 +13,8 @@
     "test:pdf-regression": "npx tsx scripts/test-pdf-import-regression.ts",
     "test:pdf-repair": "npx tsx lib/pdf-text-repair.test.ts",
     "test:statement-format": "npx tsx lib/tec-pdf-statement-format.test.ts",
-    "test:text-corrections": "npx tsx lib/pdf-text-corrections.test.ts"
+    "test:text-corrections": "npx tsx lib/pdf-text-corrections.test.ts",
+    "test:error-classifier": "npx tsx lib/ai/error-classifier.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

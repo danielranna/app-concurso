@@ -22,7 +22,7 @@ const STEPS = [
   },
   {
     title: "5. Relatório de caderno (IA)",
-    body: "Ao concluir um caderno, a IA classifica erros, descreve equívocos e mescla fraquezas no mapa do cérebro.",
+    body: "Ao concluir um caderno, um passo dedicado de IA classifica cada erro (com rubrica e suas notas); depois outro passo explica e mescla fraquezas no mapa do cérebro.",
   },
   {
     title: "6. Prioridades do Coach",

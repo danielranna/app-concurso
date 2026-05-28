@@ -100,6 +100,8 @@ export type PerQuestionError = {
   outcome_category?: string
   confidence_level?: string
   feedback_detailed?: string
+  /** Origem da taxonomia: IA dedicada ou heurística */
+  classification_source?: "llm_classify" | "heuristic"
 }
 
 export type BehavioralAuditQuestionItem = {
