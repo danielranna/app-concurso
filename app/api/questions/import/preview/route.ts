@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
-import { parseTecPdf } from "@/lib/tec-pdf-parser"
+import { parseTecPdfPipeline } from "@/lib/tec-pdf-parse-pipeline"
 
 export const runtime = "nodejs"
-export const maxDuration = 60
+export const maxDuration = 90
 
+/** Legado: redireciona mentalmente para /parse; mantém resposta resumida. */
 export async function POST(req: Request) {
   try {
     const form = await req.formData()
@@ -12,21 +13,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "file é obrigatório" }, { status: 400 })
     }
     const buffer = Buffer.from(await file.arrayBuffer())
-    const parsed = await parseTecPdf(buffer)
+    const result = await parseTecPdfPipeline(buffer)
     return NextResponse.json({
-      name: parsed.name,
-      share_url: parsed.share_url,
-      ordering: parsed.ordering,
-      question_count: parsed.questions.length,
-      warnings: parsed.warnings,
-      preview: parsed.questions.slice(0, 5).map((q) => ({
-        tec_id: q.tec_id,
-        type: q.type,
-        tec_subject: q.tec_subject,
-        tec_topic: q.tec_topic,
-        statement: q.statement.slice(0, 200),
-        correct_answer: q.correct_answer,
-        options_count: q.options.length,
+      name: result.name,
+      share_url: result.share_url,
+      ordering: result.ordering,
+      question_count: result.questions.length,
+      warnings: result.warnings,
+      stats: result.stats,
+      preview: result.questions.slice(0, 5).map((q) => ({
+        tec_id: q.merged.tec_id,
+        type: q.merged.type,
+        tec_subject: q.merged.tec_subject,
+        tec_topic: q.merged.tec_topic,
+        statement: q.merged.statement.slice(0, 200),
+        correct_answer: q.merged.correct_answer,
+        options_count: q.merged.options.length,
+        confidence: q.confidence,
       })),
     })
   } catch (e) {

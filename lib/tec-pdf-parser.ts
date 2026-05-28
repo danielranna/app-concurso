@@ -105,25 +105,69 @@ function flattenText(text: string): string {
   return text.replace(/\n+/g, " ").replace(/\s+/g, " ").trim()
 }
 
-export function parseTecPdfText(rawText: string): ParsedTecNotebook {
-  const warnings: string[] = []
+/** Opções do parser: primary (padrão), lines (preserva quebras), strict (splits conservadores). */
+export type TecParserOptions = {
+  flattenBody: boolean
+  strictOptions: boolean
+}
+
+export const TEC_PARSER_PRIMARY: TecParserOptions = {
+  flattenBody: true,
+  strictOptions: false,
+}
+
+export const TEC_PARSER_LINES: TecParserOptions = {
+  flattenBody: false,
+  strictOptions: false,
+}
+
+export const TEC_PARSER_STRICT: TecParserOptions = {
+  flattenBody: true,
+  strictOptions: true,
+}
+
+function normalizeField(text: string, flattenBody: boolean): string {
+  if (flattenBody) return flattenText(text)
+  return text
+    .split("\n")
+    .map((l) => l.replace(/[ \t\f\v]+/g, " ").trim())
+    .join("\n")
+    .trim()
+}
+
+export type TecPdfExtracted = {
+  compact: string
+  name: string
+  share_url: string | null
+  ordering: string | null
+  answers: Map<number, string>
+  blocks: string[]
+}
+
+/** Extrai texto compacto, cabeçalho, gabarito e blocos (compartilhado entre variantes). */
+export function extractTecPdfStructure(rawText: string): TecPdfExtracted {
   const compact = compactPdfText(rawText)
   const flat = flattenText(compact)
-
   const { name, share_url, ordering } = extractNotebookHeader(flat)
-
   const gabaritoStart = compact.search(/\bGabarito\b/i)
   const body = gabaritoStart >= 0 ? compact.slice(0, gabaritoStart) : compact
-  const gabaritoBlock =
-    gabaritoStart >= 0 ? compact.slice(gabaritoStart) : ""
-
+  const gabaritoBlock = gabaritoStart >= 0 ? compact.slice(gabaritoStart) : ""
   const answers = parseGabarito(flattenText(gabaritoBlock))
   const blocks = splitQuestionBlocks(body)
+  return { compact, name, share_url, ordering, answers, blocks }
+}
+
+export function parseTecPdfText(
+  rawText: string,
+  parserOpts: TecParserOptions = TEC_PARSER_PRIMARY
+): ParsedTecNotebook {
+  const warnings: string[] = []
+  const { name, share_url, ordering, answers, blocks } = extractTecPdfStructure(rawText)
 
   const questions: ParsedTecQuestion[] = []
   blocks.forEach((block, i) => {
     try {
-      const q = parseQuestionBlock(block, i + 1)
+      const q = parseQuestionBlock(block, i + 1, parserOpts)
       const ans = answers.get(q.index)
       if (ans) q.correct_answer = ans
       else warnings.push(`Questão ${q.index} (${q.tec_id}): gabarito não encontrado`)
@@ -144,6 +188,14 @@ export function parseTecPdfText(rawText: string): ParsedTecNotebook {
   return { name, share_url, ordering, questions, warnings }
 }
 
+export function parseTecPdfTextLines(rawText: string): ParsedTecNotebook {
+  return parseTecPdfText(rawText, TEC_PARSER_LINES)
+}
+
+export function parseTecPdfTextStrict(rawText: string): ParsedTecNotebook {
+  return parseTecPdfText(rawText, TEC_PARSER_STRICT)
+}
+
 function parseGabarito(block: string): Map<number, string> {
   const map = new Map<number, string>()
   let m: RegExpExecArray | null
@@ -160,7 +212,7 @@ function parseGabarito(block: string): Map<number, string> {
   return map
 }
 
-function splitQuestionBlocks(body: string): string[] {
+export function splitQuestionBlocks(body: string): string[] {
   const indices: { pos: number; tecId: string }[] = []
   let m: RegExpExecArray | null
   const re = new RegExp(TEC_URL_RE.source, "gi")
@@ -296,11 +348,15 @@ function splitTaxonomyByLines(afterMeta: string): {
   return null
 }
 
-function splitTaxonomySingleLine(afterMeta: string): {
+function splitTaxonomySingleLine(
+  afterMeta: string,
+  flattenBody: boolean,
+  strictOptions: boolean
+): {
   taxonomyLine: string
   rest: string
 } {
-  const trimmed = flattenText(afterMeta)
+  const trimmed = flattenBody ? flattenText(afterMeta) : normalizeField(afterMeta, false)
   if (!trimmed) return { taxonomyLine: "", rest: "" }
 
   const dash = trimmed.search(/\s+-\s+/)
@@ -327,7 +383,10 @@ function splitTaxonomySingleLine(afterMeta: string): {
 /**
  * Matéria - Assunto: linha(s) após meta; enunciado na linha seguinte ou após N).
  */
-export function splitTaxonomyAndStatement(afterMeta: string): {
+export function splitTaxonomyAndStatement(
+  afterMeta: string,
+  parserOpts: TecParserOptions = TEC_PARSER_PRIMARY
+): {
   taxonomyLine: string
   rest: string
 } {
@@ -337,10 +396,55 @@ export function splitTaxonomyAndStatement(afterMeta: string): {
   const byLines = splitTaxonomyByLines(trimmed)
   if (byLines) return byLines
 
-  return splitTaxonomySingleLine(trimmed)
+  if (parserOpts.strictOptions) {
+    const taxLines = trimmed
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.includes(" - "))
+    if (taxLines.length > 0) {
+      const restLines = trimmed
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !taxLines.includes(l))
+      return {
+        taxonomyLine: taxLines.join(" "),
+        rest: restLines.join("\n"),
+      }
+    }
+  }
+
+  return splitTaxonomySingleLine(trimmed, parserOpts.flattenBody, parserOpts.strictOptions)
 }
 
-function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
+function parseMcqOptionsFromLines(rest: string): {
+  statement: string
+  options: { label: string; text: string }[]
+} {
+  const lines = rest.split("\n")
+  const optStart = lines.findIndex((l) => MCQ_OPTION_LINE_RE.test(l.trim()))
+  if (optStart < 0) throw new Error("alternativas não encontradas (strict)")
+  const statement = lines
+    .slice(0, optStart)
+    .join("\n")
+    .trim()
+    .replace(/^(?:\d+\)\s*)+/, "")
+    .trim()
+  const options: { label: string; text: string }[] = []
+  for (let i = optStart; i < lines.length; i++) {
+    const m = lines[i].trim().match(/^([a-e])\)\s+(.+)$/i)
+    if (m) {
+      options.push({ label: m[1].toUpperCase(), text: m[2].trim() })
+    }
+  }
+  if (options.length === 0) throw new Error("nenhuma alternativa parseada (strict)")
+  return { statement, options }
+}
+
+export function parseQuestionBlock(
+  block: string,
+  index: number,
+  parserOpts: TecParserOptions = TEC_PARSER_PRIMARY
+): ParsedTecQuestion {
   const urlMatch = block.match(
     /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/i
   )
@@ -355,9 +459,10 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
 
   const metaLine = cleanMetaLine(flattenText(metaMatch[1]))
   const { taxonomyLine, rest: afterTaxonomy } = splitTaxonomyAndStatement(
-    metaMatch[2].trim()
+    metaMatch[2].trim(),
+    parserOpts
   )
-  let rest = flattenText(afterTaxonomy)
+  let rest = normalizeField(afterTaxonomy, parserOpts.flattenBody)
 
   const { banca, cargo, orgao, ano } = parseMetaLine(metaLine)
   let { tec_subject, tec_topic } = parseTaxonomyLine(taxonomyLine)
@@ -365,7 +470,9 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
   tec_topic = capped.topic
   rest = capped.rest
 
-  const hasMcqOptions = MCQ_OPTION_RE.test(rest)
+  const hasMcqOptions = parserOpts.strictOptions
+    ? rest.split("\n").some((l) => MCQ_OPTION_LINE_RE.test(l.trim()))
+    : MCQ_OPTION_RE.test(rest)
   const isCertoErrado =
     !hasMcqOptions && /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
   const type: QuestionType = isCertoErrado ? "certo_errado" : "multiple_choice"
@@ -384,6 +491,10 @@ function parseQuestionBlock(block: string, index: number): ParsedTecQuestion {
       { label: "Certo", text: "Certo" },
       { label: "Errado", text: "Errado" },
     ]
+  } else if (parserOpts.strictOptions) {
+    const parsed = parseMcqOptionsFromLines(rest)
+    statement = parsed.statement
+    options = parsed.options
   } else {
     const firstOpt = rest.search(MCQ_OPTION_RE)
     if (firstOpt < 0) throw new Error("alternativas não encontradas")
