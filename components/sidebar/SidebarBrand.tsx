@@ -1,26 +1,16 @@
-import Image from "next/image"
+import AppLogo from "@/components/sidebar/AppLogo"
 
-const LOGO_SIZE = 26
+type Props = {
+  showName?: boolean
+}
 
-export default function SidebarBrand({ compact = false }: { compact?: boolean }) {
-  if (compact) return null
-
+export default function SidebarBrand({ showName = true }: Props) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      <span
-        className="relative shrink-0 overflow-hidden rounded-md"
-        style={{ width: LOGO_SIZE, height: LOGO_SIZE }}
-      >
-        <Image
-          src="/logo.png"
-          alt="Via Aprovação"
-          width={LOGO_SIZE}
-          height={LOGO_SIZE}
-          className="object-contain"
-          priority
-        />
-      </span>
-      <span className="truncate text-sm font-bold text-slate-800">Via Aprovação</span>
+      <AppLogo />
+      {showName && (
+        <span className="truncate text-sm font-bold text-slate-800">Via Aprovação</span>
+      )}
     </div>
   )
 }
