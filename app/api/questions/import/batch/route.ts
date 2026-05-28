@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
 import { parseTecPdf } from "@/lib/tec-pdf-parser"
 import { importNotebookFromParsed } from "@/lib/question-import"
 
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 })
     }
 
+    await loadPdfTextCorrectionConfig()
     const results = []
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer())

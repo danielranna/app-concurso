@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
 import { parseTecPdfPipeline } from "@/lib/tec-pdf-parse-pipeline"
 
 export const runtime = "nodejs"
@@ -15,6 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "PDF maior que 15 MB" }, { status: 400 })
     }
 
+    await loadPdfTextCorrectionConfig()
     const buffer = Buffer.from(await file.arrayBuffer())
     const result = await parseTecPdfPipeline(buffer)
 

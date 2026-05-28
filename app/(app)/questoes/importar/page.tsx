@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Loader2, Upload } from "lucide-react"
 import ImportQuestionReviewCard from "@/components/questions/ImportQuestionReviewCard"
+import PdfTextCorrectionsPanel from "@/components/questions/PdfTextCorrectionsPanel"
 import type { ParsedTecQuestion } from "@/lib/question-types"
 import type { QuestionParseResult } from "@/lib/tec-pdf-parse-merge"
 import type { NotebookParseResult } from "@/lib/tec-pdf-parse-pipeline"
@@ -238,6 +239,7 @@ function ImportarContent() {
             )}
             {loading ? "Analisando PDF…" : "Analisar PDF"}
           </button>
+          <PdfTextCorrectionsPanel />
 
           {parseResult && (
             <div className="rounded-lg border bg-slate-50 p-4 text-sm">

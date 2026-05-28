@@ -1,6 +1,7 @@
 import type { ParsedTecNotebook, ParsedTecQuestion, QuestionType } from "./question-types"
 import { extractPdfText } from "./pdf-extract"
 import { repairPdfSpuriousSpaces } from "./pdf-text-repair"
+import { applyPdfTextCorrections } from "./pdf-text-corrections"
 import { formatStatementStructure } from "./tec-pdf-statement-format"
 
 const TEC_URL_RE =
@@ -523,10 +524,14 @@ export function parseQuestionBlock(
   }
 
   statement = formatStatementStructure(statement, { type, options })
-  options = options.map((o) => ({
-    ...o,
-    text: cleanAlternativeText(o.text),
-  }))
+  statement = applyPdfTextCorrections(statement, "statement").text
+  options = options.map((o) => {
+    const cleaned = cleanAlternativeText(o.text)
+    return {
+      ...o,
+      text: applyPdfTextCorrections(cleaned, "option").text,
+    }
+  })
 
   return {
     index,

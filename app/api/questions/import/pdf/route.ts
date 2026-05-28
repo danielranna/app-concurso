@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
 import { parseTecPdf } from "@/lib/tec-pdf-parser"
 import { importNotebookFromParsed } from "@/lib/question-import"
 
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "PDF maior que 15 MB" }, { status: 400 })
     }
 
+    await loadPdfTextCorrectionConfig()
     const buffer = Buffer.from(await file.arrayBuffer())
     const parsed = await parseTecPdf(buffer)
     const result = await importNotebookFromParsed(user_id, parsed, {
