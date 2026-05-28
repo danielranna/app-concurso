@@ -17,7 +17,17 @@ const PT_SINGLE_WORD = new Set([
 /** Maiúscula isolada + espaço + palavra (≥2 letras): "P ara" → "Para" (exceto O/A artigos). */
 const UPPER_FRAG_RE = /([A-ZÁÉÍÓÚÃÕÇ])\s+(?=[a-záéíóúãõç]{2,})/g
 
-const PT_SINGLE_UPPER_KEEP_SPACE = new Set(["A", "E", "I", "O", "Á", "É", "Ó", "Ú"])
+const PT_SINGLE_UPPER_KEEP_SPACE = new Set([
+  "A",
+  "E",
+  "I",
+  "O",
+  "V",
+  "Á",
+  "É",
+  "Ó",
+  "Ú",
+])
 
 /**
  * Consoante (ou h) isolada + espaço + palavra: "f uncional" → "funcional".
@@ -27,7 +37,7 @@ const LOWER_CONSONANT_FRAG_RE =
   /\b([b-df-hj-np-tv-zçB-DF-HJ-NP-TV-ZÇ])\s+(?=[a-záéíóúãõç]{2,})/g
 
 function repairLine(line: string): string {
-  let out = line.replace(UPPER_FRAG_RE, (match, char: string) => {
+  let out = line.replace(UPPER_FRAG_RE, (match, char: string, offset: number) => {
     if (PT_SINGLE_UPPER_KEEP_SPACE.has(char)) return match
     return char
   })
@@ -40,10 +50,14 @@ function repairLine(line: string): string {
     if (PT_SINGLE_WORD.has(char.toLowerCase())) {
       return match
     }
+    const prev = out[offset - 1]
+    if (char.toLowerCase() === "s" && prev?.toLowerCase() === "a") {
+      return match
+    }
     return char
   })
 
-  return out
+  return out.replace(/\bVas\b/g, "V as")
 }
 
 export type RepairPdfTextResult = {

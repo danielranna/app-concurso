@@ -11,7 +11,8 @@
     "test:parser-merge": "npx tsx lib/tec-pdf-parse-merge.test.ts",
     "test:parser-quality": "npx tsx lib/tec-pdf-parse-quality.test.ts",
     "test:pdf-regression": "npx tsx scripts/test-pdf-import-regression.ts",
-    "test:pdf-repair": "npx tsx lib/pdf-text-repair.test.ts"
+    "test:pdf-repair": "npx tsx lib/pdf-text-repair.test.ts",
+    "test:statement-format": "npx tsx lib/tec-pdf-statement-format.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

@@ -1,6 +1,7 @@
 import type { ParsedTecNotebook, ParsedTecQuestion, QuestionType } from "./question-types"
 import { extractPdfText } from "./pdf-extract"
 import { repairPdfSpuriousSpaces } from "./pdf-text-repair"
+import { formatStatementStructure } from "./tec-pdf-statement-format"
 
 const TEC_URL_RE =
   /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/gi
@@ -27,15 +28,6 @@ const FIRST_QUESTION_URL_RE =
 
 function stripLeadingGabaritoNumbers(s: string): string {
   return s.replace(/^(?:\d+\)\s*)+/g, "").trim()
-}
-
-/** Após "julgue … .", quebra parágrafo antes do corpo do item (CEBRASPE). */
-function formatJulgueStatementBreaks(statement: string): string {
-  if (!/\bjulgue\b/i.test(statement)) return statement
-  return statement.replace(
-    /\b(julgue\b[^.]*\.)\s*(?=[A-Za-zÀ-ÿ])/gi,
-    (_, intro: string) => `${intro}\n\n`
-  )
 }
 
 /** Remove numeração de gabarito vazada nas alternativas (ex.: "Certo 6) 7)"). */
@@ -530,7 +522,7 @@ export function parseQuestionBlock(
     options = parsed.options
   }
 
-  statement = repairPdfSpuriousSpaces(formatJulgueStatementBreaks(statement))
+  statement = formatStatementStructure(statement, { type, options })
   options = options.map((o) => ({
     ...o,
     text: cleanAlternativeText(o.text),

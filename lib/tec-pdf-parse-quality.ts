@@ -3,6 +3,7 @@ import {
   hasResidualPdfSpacingArtifacts,
   repairPdfSpuriousSpacesWithMeta,
 } from "./pdf-text-repair"
+import { assessStatementFormatQuality } from "./tec-pdf-statement-format"
 
 type ParseCandidates = Partial<
   Record<"primary" | "lines" | "strict", ParsedTecQuestion | null>
@@ -121,6 +122,22 @@ export function assessQuestionQuality(
         : "Possível espaço espúrio residual no texto — confira alternativas",
     })
   }
+
+  if (/\n\s*I{1,3}\s*-/i.test(stmt) || /\n\s*II\s*-/i.test(stmt)) {
+    flags.push({
+      code: "roman_list_formatted",
+      severity: "warn",
+      message: "Lista romana formatada com quebras de linha",
+    })
+  }
+  if (/\n\s*\(\s*\)\s+/i.test(stmt)) {
+    flags.push({
+      code: "vf_sequence_formatted",
+      severity: "warn",
+      message: "Sequência V/F formatada com quebras de linha",
+    })
+  }
+  flags.push(...assessStatementFormatQuality(stmt))
 
   const primary = candidates?.primary
   const lines = candidates?.lines

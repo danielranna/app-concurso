@@ -32,6 +32,10 @@ assert(
   repairPdfSpuriousSpaces("A respeito da lei") === "A respeito da lei",
   "preserve A respeito"
 )
+assert(
+  repairPdfSpuriousSpaces("jurídica. Vas normas") === "jurídica. V as normas",
+  "fix Vas roman artifact"
+)
 
 assert(
   !hasResidualPdfSpacingArtifacts(repairPdfSpuriousSpaces(ex1)),

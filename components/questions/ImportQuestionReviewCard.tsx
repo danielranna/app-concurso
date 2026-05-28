@@ -189,8 +189,8 @@ export default function ImportQuestionReviewCard({
             <textarea
               value={q.statement}
               onChange={(e) => update("statement", e.target.value)}
-              rows={5}
-              className="mt-1 w-full rounded border px-2 py-1 text-sm"
+              rows={8}
+              className="mt-1 w-full whitespace-pre-wrap rounded border px-2 py-1 font-sans text-sm leading-relaxed"
             />
           </div>
 
