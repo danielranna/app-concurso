@@ -2,9 +2,10 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, HelpCircle, Layers, Sparkles } from "lucide-react"
+import { BookOpen, HelpCircle, Home, Layers, Sparkles } from "lucide-react"
 
 const links = [
+  { href: "/", label: "Início", icon: Home, exact: true },
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/questoes", label: "Questões", icon: HelpCircle },
@@ -18,8 +19,10 @@ export default function Sidebar() {
     <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white px-4 py-6">
       <p className="mb-6 text-sm font-semibold text-slate-500">Via Aprovação</p>
       <nav className="flex flex-col gap-1">
-        {links.map(({ href, label, icon: Icon }) => {
-          const active = pathname.startsWith(href)
+        {links.map(({ href, label, icon: Icon, exact }) => {
+          const active = exact
+            ? pathname === href || pathname === ""
+            : pathname.startsWith(href)
           return (
             <Link
               key={href}
