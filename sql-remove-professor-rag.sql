@@ -1,13 +1,13 @@
 -- Remoção do Professor / RAG (~930 MB)
 -- Executar APENAS após deploy do código que não referencia document_chunks.
+--
+-- Se der "upstream timeout" no SQL Editor, use:
+--   sql-remove-professor-rag-steps.sql
+-- (um bloco por vez; o passo 3 em loop até retornar 0 linhas)
 
--- Inventário (opcional, antes de apagar)
--- SELECT doc_type, COUNT(*) FROM subject_documents GROUP BY doc_type;
--- SELECT COUNT(*) AS chunks FROM document_chunks;
--- SELECT COUNT(*) AS source_rows FROM document_source_text;
-
--- 1) Cancelar jobs pendentes de ingest
-DELETE FROM ai_jobs WHERE job_type IN (
+-- Passo A — rápido
+DELETE FROM ai_jobs
+WHERE job_type IN (
   'document_parse',
   'document_chunk',
   'document_embed',
@@ -15,15 +15,22 @@ DELETE FROM ai_jobs WHERE job_type IN (
   'document_batch_ingest'
 );
 
--- 2) Apagar PDFs de estudo (CASCADE limpa chunks/text se ainda existir)
+-- Passo B — índices pesados (libera I/O antes do truncate)
+DROP INDEX IF EXISTS idx_document_chunks_embedding;
+DROP INDEX IF EXISTS idx_document_chunks_search;
+
+-- Passo C — NÃO use DELETE em subject_documents antes disto (CASCADE = timeout)
+TRUNCATE TABLE document_chunks;
+TRUNCATE TABLE document_source_text;
+
+-- Passo D — metadados dos PDFs (agora sem milhões de filhos)
 DELETE FROM subject_documents WHERE doc_type = 'study_material';
 
--- 3) Dropar RAG
-DROP FUNCTION IF EXISTS match_document_chunks(vector, uuid[], int);
-DROP TABLE IF EXISTS document_chunks CASCADE;
-DROP TABLE IF EXISTS document_source_text CASCADE;
+-- Passo E — limpeza final
+DROP FUNCTION IF EXISTS match_document_chunks(vector(1536), uuid[], integer);
+DROP TABLE IF EXISTS document_chunks;
+DROP TABLE IF EXISTS document_source_text;
 
--- 4) Colunas só de ingest de material
 ALTER TABLE subject_documents
   DROP COLUMN IF EXISTS file_sha256,
   DROP COLUMN IF EXISTS page_count,
@@ -34,9 +41,8 @@ ALTER TABLE subject_documents
   DROP COLUMN IF EXISTS last_ingested_at,
   DROP COLUMN IF EXISTS material_tags;
 
--- 5) Preferências
 ALTER TABLE coach_report_preferences
   DROP COLUMN IF EXISTS max_teacher_queries_per_day;
 
--- 6) Extensão vector — descomente se nada mais usar pgvector
+-- Opcional, só se nada mais usar pgvector:
 -- DROP EXTENSION IF EXISTS vector;

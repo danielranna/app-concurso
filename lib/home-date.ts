@@ -1,3 +1,7 @@
+export function isTodayDate(dayStr: string, now = new Date()): boolean {
+  return dayStr === toDateInputValue(now)
+}
+
 export function toDateInputValue(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
