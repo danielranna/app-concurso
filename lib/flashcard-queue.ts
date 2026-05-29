@@ -2,6 +2,7 @@ import { State } from "ts-fsrs"
 import { supabaseServer } from "./supabase-server"
 import { DEFAULT_WEEKDAY_LIMITS, type FlashcardRow, type WeekdayLimits } from "./flashcard-types"
 import { isEligibleForStudy } from "./flashcard-due"
+import { applyDeferToQueue } from "./flashcard-study-order"
 import { deserializeFsrsCard } from "./fsrs-scheduler"
 
 const STATE_PRIORITY: Record<number, number> = {
@@ -169,7 +170,7 @@ export function shuffleStudyQueue(rows: DueRow[]): DueRow[] {
 
 export async function getStudyQueue(
   userId: string,
-  options?: { deckId?: string; subjectId?: string }
+  options?: { deckId?: string; subjectId?: string; deferCardIds?: string[] }
 ): Promise<{
   rows: DueRow[]
   limit: number | null
@@ -191,8 +192,9 @@ export async function getStudyQueue(
     isEligibleForStudy(r.due_at, r.state_data, now)
   )
   const shuffled = shuffleStudyQueue(studyDue)
+  const ordered = applyDeferToQueue(shuffled, options?.deferCardIds ?? [])
   const totalDue = studyDue.length
-  const capped = limit === null ? shuffled : shuffled.slice(0, limit)
+  const capped = limit === null ? ordered : ordered.slice(0, limit)
 
   const laterToday = allToday.filter(
     (r) => !isEligibleForStudy(r.due_at, r.state_data, now)

@@ -1,6 +1,3 @@
-import { State } from "ts-fsrs"
-import { deserializeFsrsCard } from "./fsrs-scheduler"
-
 export function startOfDay(date = new Date()): Date {
   const d = new Date(date)
   d.setHours(0, 0, 0, 0)
@@ -25,22 +22,13 @@ export function isDueForToday(dueAt: Date | null, now = new Date()): boolean {
   return due < startOfDay(now)
 }
 
-/** Fila de estudo: já venceu OU revisão agendada para mais tarde hoje. */
+/** Fila de estudo: já venceu ou qualquer horário no dia de hoje (todos os estados FSRS). */
 export function isEligibleForStudy(
   dueAt: string | Date,
-  stateData: Record<string, unknown> | null | undefined,
+  _stateData?: Record<string, unknown> | null,
   now = new Date()
 ): boolean {
   const due = new Date(dueAt)
   if (due <= now) return true
-
-  const st = stateData
-    ? deserializeFsrsCard(stateData).state
-    : State.New
-
-  if (isSameCalendarDay(due, now) && (st === State.Review || st === State.New)) {
-    return true
-  }
-
-  return false
+  return isSameCalendarDay(due, now)
 }

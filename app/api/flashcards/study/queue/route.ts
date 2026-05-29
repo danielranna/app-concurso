@@ -13,6 +13,10 @@ export async function GET(req: Request) {
   const user_id = searchParams.get("user_id")
   const deck_id = searchParams.get("deck_id") ?? undefined
   const subject_id = searchParams.get("subject_id") ?? undefined
+  const defer_card_ids = (searchParams.get("defer_card_ids") ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
@@ -22,6 +26,7 @@ export async function GET(req: Request) {
     const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(user_id, {
       deckId: deck_id,
       subjectId: subject_id,
+      deferCardIds: defer_card_ids.length ? defer_card_ids : undefined,
     })
 
     if (rows.length === 0) {

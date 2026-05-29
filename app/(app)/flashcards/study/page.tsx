@@ -29,39 +29,32 @@ export default function StudyPage() {
   const [remaining, setRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
-  const [waitingUntil, setWaitingUntil] = useState<string | null>(null)
-  const [laterCount, setLaterCount] = useState(0)
+  const [deferredCardIds, setDeferredCardIds] = useState<string[]>([])
 
-  const loadQueue = useCallback(async (uid: string, silent = false) => {
-    if (!silent) setLoading(true)
-    setRevealed(false)
-    const params = new URLSearchParams({ user_id: uid })
-    if (deckId) params.set("deck_id", deckId)
-    if (subjectId) params.set("subject_id", subjectId)
-    const res = await fetch(`/api/flashcards/study/queue?${params}`)
-    const data = await res.json()
-    if (!silent) setLoading(false)
-    if (!data.card) {
-      if (data.later_count > 0 && data.next_due_at) {
-        setDone(false)
+  const loadQueue = useCallback(
+    async (uid: string, deferIds?: string[]) => {
+      setLoading(true)
+      setRevealed(false)
+      const params = new URLSearchParams({ user_id: uid })
+      if (deckId) params.set("deck_id", deckId)
+      if (subjectId) params.set("subject_id", subjectId)
+      const defer = deferIds ?? deferredCardIds
+      if (defer.length) params.set("defer_card_ids", defer.join(","))
+      const res = await fetch(`/api/flashcards/study/queue?${params}`)
+      const data = await res.json()
+      setLoading(false)
+      if (!data.card) {
+        setDone(true)
         setCard(null)
-        setWaitingUntil(data.next_due_at)
-        setLaterCount(data.later_count)
         return
       }
-      setWaitingUntil(null)
-      setLaterCount(0)
-      setDone(true)
-      setCard(null)
-      return
-    }
-    setDone(false)
-    setWaitingUntil(null)
-    setLaterCount(0)
-    setCard(data.card)
-    setPreview(data.preview)
-    setRemaining(data.remaining)
-  }, [deckId, subjectId])
+      setDone(false)
+      setCard(data.card)
+      setPreview(data.preview)
+      setRemaining(data.remaining)
+    },
+    [deckId, subjectId, deferredCardIds]
+  )
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -74,24 +67,13 @@ export default function StudyPage() {
     })
   }, [router, loadQueue])
 
-  useEffect(() => {
-    if (!userId || !waitingUntil) return
-    const poll = () => loadQueue(userId, true)
-    const id = setInterval(poll, 15000)
-    return () => clearInterval(id)
-  }, [userId, waitingUntil, loadQueue])
-
-  function formatWaitLabel(iso: string) {
-    const ms = new Date(iso).getTime() - Date.now()
-    if (ms <= 0) return "em instantes"
-    const mins = Math.ceil(ms / 60000)
-    if (mins < 60) return `em ~${mins} min`
-    const hours = Math.ceil(ms / 3600000)
-    return `em ~${hours} h`
-  }
-
   async function answer(rating: number) {
     if (!userId || !card) return
+    let nextDeferred = deferredCardIds
+    if (rating === 1 && !deferredCardIds.includes(card.id)) {
+      nextDeferred = [...deferredCardIds, card.id]
+      setDeferredCardIds(nextDeferred)
+    }
     await fetch("/api/flashcards/study/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -102,26 +84,10 @@ export default function StudyPage() {
         deck_id: deckId,
       }),
     })
-    loadQueue(userId)
+    loadQueue(userId, nextDeferred)
   }
 
   if (!userId) return null
-
-  if (waitingUntil && !card) {
-    return (
-      <main className="flex min-h-[60vh] flex-col items-center justify-center px-6 text-center">
-        <p className="text-xl font-semibold text-slate-800">Pausa entre revisões</p>
-        <p className="mt-2 text-slate-600">
-          Próximo card {formatWaitLabel(waitingUntil)}
-          {laterCount > 1 ? ` (+${laterCount - 1} depois)` : ""}
-        </p>
-        <p className="mt-4 text-sm text-slate-500">A fila atualiza sozinha. Você pode sair e voltar depois.</p>
-        <Link href="/flashcards" className="mt-6 text-emerald-600 hover:underline">
-          Voltar aos baralhos
-        </Link>
-      </main>
-    )
-  }
 
   if (done) {
     return (

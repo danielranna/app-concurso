@@ -27,34 +27,41 @@ export default function HomeFlashcardWidget({ userId }: Props) {
   const [remaining, setRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
+  const [deferredCardIds, setDeferredCardIds] = useState<string[]>([])
 
-  const loadQueue = useCallback(async () => {
-    setLoading(true)
-    setRevealed(false)
-    const panelRes = await fetch(
-      `/api/flashcards/panel?user_id=${userId}&filter=due_today`
-    )
-    const panel = await panelRes.json()
-    const totalDue =
-      (panel.subjects ?? []).reduce(
-        (acc: number, s: { due_today: number }) => acc + (s.due_today ?? 0),
-        0
-      ) + (panel.orphan?.due_today ?? 0)
-    setDueTotal(totalDue)
+  const loadQueue = useCallback(
+    async (deferIds?: string[]) => {
+      setLoading(true)
+      setRevealed(false)
+      const panelRes = await fetch(
+        `/api/flashcards/panel?user_id=${userId}&filter=due_today`
+      )
+      const panel = await panelRes.json()
+      const totalDue =
+        (panel.subjects ?? []).reduce(
+          (acc: number, s: { due_today: number }) => acc + (s.due_today ?? 0),
+          0
+        ) + (panel.orphan?.due_today ?? 0)
+      setDueTotal(totalDue)
 
-    const res = await fetch(`/api/flashcards/study/queue?user_id=${userId}`)
-    const data = await res.json()
-    setLoading(false)
-    if (!data.card) {
-      setDone(true)
-      setCard(null)
-      return
-    }
-    setDone(false)
-    setCard(data.card)
-    setPreview(data.preview)
-    setRemaining(data.remaining ?? 0)
-  }, [userId])
+      const params = new URLSearchParams({ user_id: userId })
+      const defer = deferIds ?? deferredCardIds
+      if (defer.length) params.set("defer_card_ids", defer.join(","))
+      const res = await fetch(`/api/flashcards/study/queue?${params}`)
+      const data = await res.json()
+      setLoading(false)
+      if (!data.card) {
+        setDone(true)
+        setCard(null)
+        return
+      }
+      setDone(false)
+      setCard(data.card)
+      setPreview(data.preview)
+      setRemaining(data.remaining ?? 0)
+    },
+    [userId, deferredCardIds]
+  )
 
   useEffect(() => {
     loadQueue()
@@ -62,12 +69,17 @@ export default function HomeFlashcardWidget({ userId }: Props) {
 
   async function answer(rating: number) {
     if (!card) return
+    let nextDeferred = deferredCardIds
+    if (rating === 1 && !deferredCardIds.includes(card.id)) {
+      nextDeferred = [...deferredCardIds, card.id]
+      setDeferredCardIds(nextDeferred)
+    }
     await fetch("/api/flashcards/study/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, card_id: card.id, rating }),
     })
-    loadQueue()
+    loadQueue(nextDeferred)
   }
 
   const display = revealed && card ? card.back : card?.front

@@ -15,7 +15,8 @@
     "test:statement-format": "npx tsx lib/tec-pdf-statement-format.test.ts",
     "test:text-corrections": "npx tsx lib/pdf-text-corrections.test.ts",
     "test:error-classifier": "npx tsx lib/ai/error-classifier.test.ts",
-    "test:behavioral-audit": "npx tsx lib/ai/agents/behavioral-audit.test.ts"
+    "test:behavioral-audit": "npx tsx lib/ai/agents/behavioral-audit.test.ts",
+    "test:flashcard-due": "npx tsx lib/flashcard-due.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
