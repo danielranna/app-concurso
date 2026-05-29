@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Eye, EyeOff, Loader2, Send } from "lucide-react"
+import { Eye, EyeOff, Loader2, Send, Trash2 } from "lucide-react"
 
 type NoteEntry = {
   id: string
@@ -22,6 +22,7 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
   const [draft, setDraft] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [justSentIds, setJustSentIds] = useState<Set<string>>(new Set())
@@ -70,6 +71,37 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
     setExpandedIds((prev) => new Set(prev).add(entry.id))
   }, [draft, questionId, userId])
 
+  async function removeEntry(entryId: string) {
+    const ok = window.confirm(
+      "Apagar esta anotação? Essa ação não pode ser desfeita."
+    )
+    if (!ok) return
+
+    setDeletingId(entryId)
+    setError(null)
+    const res = await fetch(
+      `/api/questions/${questionId}/notes/${entryId}?user_id=${userId}`,
+      { method: "DELETE" }
+    )
+    const data = await res.json()
+    setDeletingId(null)
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao apagar")
+      return
+    }
+    setEntries((prev) => prev.filter((e) => e.id !== entryId))
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(entryId)
+      return next
+    })
+    setJustSentIds((prev) => {
+      const next = new Set(prev)
+      next.delete(entryId)
+      return next
+    })
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault()
@@ -105,6 +137,7 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
           {entries.map((entry) => {
             const expanded = isExpanded(entry)
             const isNew = justSentIds.has(entry.id)
+            const busy = deletingId === entry.id
             return (
               <li
                 key={entry.id}
@@ -121,13 +154,17 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
                       dateStyle: "short",
                       timeStyle: "short",
                     })}
+                    {!expanded && !isNew && (
+                      <span className="text-slate-400"> · oculta</span>
+                    )}
                   </p>
-                  {!isNew && (
+                  <div className="flex shrink-0 items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => toggleExpanded(entry.id)}
-                      className="shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                      title={expanded ? "Ocultar" : "Ver anotação"}
+                      disabled={busy}
+                      className="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                      title={expanded ? "Ocultar texto" : "Ver anotação"}
                       aria-label={expanded ? "Ocultar anotação" : "Ver anotação"}
                     >
                       {expanded ? (
@@ -136,19 +173,26 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
                         <Eye className="h-3.5 w-3.5" />
                       )}
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => void removeEntry(entry.id)}
+                      disabled={busy || deletingId !== null}
+                      className="rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      title="Apagar anotação"
+                      aria-label="Apagar anotação"
+                    >
+                      {busy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
-                {expanded ? (
+                {expanded && (
                   <p className="mt-1 whitespace-pre-wrap text-slate-800">
                     {entry.body}
                   </p>
-                ) : (
-                  !isNew && (
-                    <p className="mt-0.5 truncate text-xs text-slate-400">
-                      {entry.body.slice(0, 60)}
-                      {entry.body.length > 60 ? "…" : ""}
-                    </p>
-                  )
                 )}
               </li>
             )
