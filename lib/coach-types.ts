@@ -96,6 +96,8 @@ export type PerQuestionError = {
   marked_answer?: string
   correct_answer?: string
   user_note?: string
+  note_entry_id?: string
+  note_body?: string
   zone?: AuditZone
   outcome_category?: string
   confidence_level?: string
@@ -107,6 +109,8 @@ export type PerQuestionError = {
 export type BehavioralAuditQuestionItem = {
   question_index: number
   question_id: string
+  note_entry_id?: string
+  note_body?: string
   header_label: string
   statement_excerpt: string
   marked: string

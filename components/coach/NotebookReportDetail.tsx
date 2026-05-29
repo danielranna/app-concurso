@@ -75,7 +75,8 @@ function QuestionAuditCard({
     (perQ?.question_index != null ? `Q${perQ.question_index}` : "")
   const marked = perQ?.marked_answer ?? auditItem?.marked
   const key = perQ?.correct_answer ?? auditItem?.answer_key
-  const note = perQ?.user_note ?? auditItem?.user_note
+  const note =
+    perQ?.note_body ?? auditItem?.note_body ?? perQ?.user_note ?? auditItem?.user_note
   const feedback =
     perQ?.feedback_detailed ?? perQ?.explanation ?? auditItem?.feedback
   const feedbackSource =
@@ -407,7 +408,7 @@ export default function NotebookReportDetail({
               <ul className="space-y-4">
                 {audit.green_zone.note_clarifications!.map((eq, i) => (
                   <QuestionAuditCard
-                    key={eq.question_id ?? `gn-${i}`}
+                    key={eq.note_entry_id ?? `${eq.question_id}-gn-${i}`}
                     eq={eq}
                     feedbackLabel="Esclarecimento da sua nota"
                     zoneOverride="green"

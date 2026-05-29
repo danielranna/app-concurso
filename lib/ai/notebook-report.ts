@@ -132,13 +132,14 @@ export async function buildNotebookReportSnapshot(
   let notes_sample: { content: string }[] = []
   if (qIds.length) {
     const { data: notes } = await supabaseServer
-      .from("question_notes")
-      .select("note, question_id")
+      .from("question_note_entries")
+      .select("body, question_id")
       .eq("user_id", userId)
       .in("question_id", qIds.slice(0, 50))
+      .order("created_at", { ascending: false })
       .limit(10)
     notes_sample = (notes ?? []).map((n) => ({
-      content: String(n.note ?? "").slice(0, 200),
+      content: String(n.body ?? "").slice(0, 200),
       question_id: n.question_id,
     }))
   }
@@ -332,7 +333,7 @@ export function buildRuleBasedReport(
 export async function generateNotebookReport(
   notebookId: string,
   userId: string,
-  options?: { force?: boolean }
+  options?: { force?: boolean; reprocessNotes?: boolean }
 ): Promise<{
   structured: NotebookReportStructured
   summaryMd: string
@@ -352,6 +353,11 @@ export async function generateNotebookReport(
 
   const subjectId = nb?.subject_id ?? null
   const prefs = await getEffectiveReportPreferences(userId, subjectId)
+
+  if (options?.reprocessNotes) {
+    const { clearNoteAiCacheForNotebook } = await import("../question-notes")
+    await clearNoteAiCacheForNotebook(notebookId, userId)
+  }
 
   const payload = await buildNotebookAuditPayload(notebookId, userId)
   let reportsToday = await countReportLlmRunsToday(userId)
@@ -461,7 +467,8 @@ export async function generateNotebookReport(
 
 export async function regenerateBehavioralAuditOnly(
   reportId: string,
-  userId: string
+  userId: string,
+  options?: { reprocessNotes?: boolean }
 ): Promise<{
   structured: import("../coach-types").NotebookReportStructured
   auditModelUsed: string
@@ -474,6 +481,11 @@ export async function regenerateBehavioralAuditOnly(
     .maybeSingle()
 
   if (!existing?.notebook_id) throw new Error("Relatório não encontrado")
+
+  if (options?.reprocessNotes) {
+    const { clearNoteAiCacheForNotebook } = await import("../question-notes")
+    await clearNoteAiCacheForNotebook(existing.notebook_id, userId)
+  }
 
   const prior = (existing.structured ?? {}) as import("../coach-types").NotebookReportStructured
   const prefs = await getEffectiveReportPreferences(userId, existing.subject_id)
@@ -560,7 +572,7 @@ export type CreateNotebookReportSyncResult =
 export async function createNotebookReportSync(
   notebookId: string,
   userId: string,
-  options?: { force?: boolean }
+  options?: { force?: boolean; reprocessNotes?: boolean }
 ): Promise<CreateNotebookReportSyncResult> {
   const force = Boolean(options?.force)
 
@@ -597,7 +609,10 @@ export async function createNotebookReportSync(
     throw new Error("Caderno ainda não foi concluído")
   }
 
-  const report = await generateNotebookReport(notebookId, userId, { force })
+  const report = await generateNotebookReport(notebookId, userId, {
+    force,
+    reprocessNotes: options?.reprocessNotes,
+  })
   const { data: nb } = await supabaseServer
     .from("notebooks")
     .select("subject_id")

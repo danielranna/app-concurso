@@ -28,6 +28,7 @@ export default function CoachReportDetailPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [regenerating, setRegenerating] = useState(false)
   const [regeneratingAudit, setRegeneratingAudit] = useState(false)
+  const [regenModalOpen, setRegenModalOpen] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -65,14 +66,15 @@ export default function CoachReportDetailPage() {
     if (r.ok) setReport(refreshed)
   }
 
-  async function regenerate() {
+  async function regenerate(reprocessNotes: boolean) {
     if (!userId) return
+    setRegenModalOpen(false)
     setRegenerating(true)
     try {
       const res = await fetch(`/api/coach/reports/${id}/regenerate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({ user_id: userId, reprocess_notes: reprocessNotes }),
       })
       const data = await res.json()
       if (!res.ok) alert(data.error ?? "Erro ao regenerar")
@@ -82,14 +84,17 @@ export default function CoachReportDetailPage() {
     }
   }
 
-  async function regenerateAudit() {
+  async function regenerateAudit(reprocessNotes: boolean) {
     if (!userId) return
     setRegeneratingAudit(true)
     try {
       const res = await fetch(`/api/coach/reports/${id}/regenerate-audit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({
+          user_id: userId,
+          reprocess_notes: reprocessNotes,
+        }),
       })
       const data = await res.json()
       if (!res.ok) alert(data.error ?? "Erro ao regenerar auditoria")
@@ -107,16 +112,67 @@ export default function CoachReportDetailPage() {
     <div className="space-y-4">
       <button
         type="button"
-        onClick={regenerate}
+        onClick={() => setRegenModalOpen(true)}
         disabled={regenerating}
         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
       >
         {regenerating ? "Regenerando…" : "Regenerar relatório"}
       </button>
+
+      {regenModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="regen-modal-title"
+        >
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-lg">
+            <h2
+              id="regen-modal-title"
+              className="text-base font-semibold text-slate-900"
+            >
+              Regenerar relatório
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              As respostas da IA às suas anotações já processadas podem ser
+              reutilizadas para economizar chamadas de API. O que você prefere?
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => void regenerate(false)}
+                className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-medium text-white hover:bg-violet-800"
+              >
+                Só anotações novas (recomendado)
+              </button>
+              <button
+                type="button"
+                onClick={() => void regenerate(true)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Reprocessar todas as anotações
+              </button>
+              <button
+                type="button"
+                onClick={() => setRegenModalOpen(false)}
+                className="text-sm text-slate-500 hover:text-slate-700"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <NotebookReportDetail
         report={report}
         backHref="/coach"
-        onRegenerateAudit={regenerateAudit}
+        onRegenerateAudit={() => {
+          const all = window.confirm(
+            "Regenerar auditoria:\n\nOK = reprocessar TODAS as anotações\nCancelar = só anotações novas"
+          )
+          void regenerateAudit(all)
+        }}
         regeneratingAudit={regeneratingAudit}
       />
     </div>

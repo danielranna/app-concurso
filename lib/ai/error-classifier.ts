@@ -20,6 +20,13 @@ import {
   type NotebookAuditPayload,
   type NotebookAuditQuestion,
 } from "./notebook-audit-payload"
+import { splitPendingNoteEntries } from "../note-entry-utils"
+import {
+  parseStoredClassify,
+  persistClassifyOnPendingEntries,
+  pendingNoteTextForQuestion,
+  questionHasPendingNotes,
+} from "./note-incremental-audit"
 import { loadOptionsByQuestion } from "./question-options"
 import type {
   ClassificationResult,
@@ -149,7 +156,7 @@ export function buildClassificationInput(
         options: row?.options ?? [],
         marked: q.selected_answer,
         answer_key: q.correct_answer,
-        user_note: q.user_note || null,
+        user_note: pendingNoteTextForQuestion(q) || q.user_note || null,
         outcome_category: q.outcome_category,
         confidence_level: q.confidence_level,
         duration_ms: q.duration_ms,
@@ -272,8 +279,13 @@ export async function classifyNotebookQuestions(
   let tokensOut = 0
   let costUsd = 0
 
-  if (!options?.skipLlm && rows.length > 0) {
-    const input = buildClassificationInput(payload, rows)
+  const rowsNeedingLlm = rows.filter((row) => {
+    const q = qById.get(row.question_id)
+    return q ? questionHasPendingNotes(q) : true
+  })
+
+  if (!options?.skipLlm && rowsNeedingLlm.length > 0) {
+    const input = buildClassificationInput(payload, rowsNeedingLlm)
     const result = await runAgent({
       agentType: "report",
       userId,
@@ -329,7 +341,19 @@ export async function classifyNotebookQuestions(
 
   for (const row of rows) {
     const q = qById.get(row.question_id)!
-    const classified = llmByQ.get(row.question_id) ?? heuristicByQ.get(row.question_id)!
+    let classified = llmByQ.get(row.question_id) ?? heuristicByQ.get(row.question_id)!
+
+    if (!llmByQ.has(row.question_id) && !questionHasPendingNotes(q)) {
+      const { cached } = splitPendingNoteEntries(q.note_entries ?? [])
+      const fromCache = cached
+        .map((e) => parseStoredClassify(e.ai_classify))
+        .find(Boolean)
+      if (fromCache) classified = fromCache
+    }
+
+    if (llmByQ.has(row.question_id)) {
+      await persistClassifyOnPendingEntries(q, classified, modelUsed)
+    }
     const brainFound = brain?.topic_map ? findTopicEntry(brain.topic_map, row.tec_topic) : null
 
     const errorDetail = {

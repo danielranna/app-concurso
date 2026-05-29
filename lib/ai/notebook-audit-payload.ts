@@ -1,5 +1,10 @@
 import { supabaseServer } from "../supabase-server"
 import type { AuditZone } from "../coach-types"
+import { combineNoteBodies } from "../note-entry-utils"
+import {
+  loadNoteEntriesByQuestion,
+  type QuestionNoteEntryRow,
+} from "../question-notes"
 
 export type NotebookAuditQuestion = {
   question_index: number
@@ -20,6 +25,7 @@ export type NotebookAuditQuestion = {
   confidence_level: string
   duration_ms: number | null
   user_note: string
+  note_entries: QuestionNoteEntryRow[]
   zone: AuditZone
 }
 
@@ -154,18 +160,7 @@ export async function buildNotebookAuditPayload(
     latestAttemptByQ.set(a.question_id, a)
   }
 
-  const notesByQuestion = new Map<string, string>()
-  if (questionIds.length) {
-    const { data: notes } = await supabaseServer
-      .from("question_notes")
-      .select("question_id, note")
-      .eq("user_id", userId)
-      .in("question_id", questionIds)
-    for (const n of notes ?? []) {
-      const text = String(n.note ?? "").trim()
-      if (text) notesByQuestion.set(n.question_id, text)
-    }
-  }
+  const entriesByQuestion = await loadNoteEntriesByQuestion(userId, questionIds)
 
   const questions: NotebookAuditQuestion[] = []
   let index = 0
@@ -176,7 +171,8 @@ export async function buildNotebookAuditPayload(
     if (!qu) continue
 
     const att = latestAttemptByQ.get(row.question_id)
-    const userNote = notesByQuestion.get(row.question_id) ?? ""
+    const noteEntries = entriesByQuestion.get(row.question_id) ?? []
+    const userNote = combineNoteBodies(noteEntries)
     const topic = qu.tec_topic?.trim() || "Sem tópico"
     const isCorrect = att?.is_correct ?? false
     const outcome = att?.outcome_category ?? "conhecimento_solido"
@@ -216,6 +212,7 @@ export async function buildNotebookAuditPayload(
       confidence_level: confidence,
       duration_ms: att?.duration_ms ?? null,
       user_note: userNote,
+      note_entries: noteEntries,
       zone,
     })
   }

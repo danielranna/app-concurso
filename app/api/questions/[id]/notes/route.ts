@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 
-/** Legado: PUT cria uma nova entry na thread (não substitui mais texto único). */
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -12,30 +11,38 @@ export async function GET(
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  const { data } = await supabaseServer
+  const { data, error } = await supabaseServer
     .from("question_note_entries")
-    .select("body")
+    .select("id, body, created_at, ai_processed_at, ai_feedback")
     .eq("user_id", user_id)
     .eq("question_id", question_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .order("created_at", { ascending: true })
 
-  return NextResponse.json({ note: data?.body ?? "" })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const entries = (data ?? []).map((row) => ({
+    id: row.id as string,
+    body: row.body as string,
+    created_at: row.created_at as string,
+    has_ai_response: Boolean(row.ai_processed_at && row.ai_feedback),
+  }))
+
+  return NextResponse.json({ entries })
 }
 
-export async function PUT(
+export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: question_id } = await params
   const body = await req.json()
-  const { user_id, note } = body
+  const { user_id, body: noteBody } = body
+
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  const trimmed = String(note ?? "").trim()
+  const trimmed = String(noteBody ?? "").trim()
   if (!trimmed) {
     return NextResponse.json({ error: "Escreva algo antes de enviar" }, { status: 400 })
   }
@@ -47,20 +54,17 @@ export async function PUT(
       question_id,
       body: trimmed,
     })
-    .select("id, body, created_at")
+    .select("id, body, created_at, ai_processed_at, ai_feedback")
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  await supabaseServer.from("question_notes").upsert(
-    {
-      user_id,
-      question_id,
-      note: trimmed,
-      updated_at: new Date().toISOString(),
+  return NextResponse.json({
+    entry: {
+      id: data.id,
+      body: data.body,
+      created_at: data.created_at,
+      has_ai_response: false,
     },
-    { onConflict: "user_id,question_id" }
-  )
-
-  return NextResponse.json(data)
+  })
 }

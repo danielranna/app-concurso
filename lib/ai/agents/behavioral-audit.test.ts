@@ -30,6 +30,7 @@ function baseQuestion(
     confidence_level: "seguro",
     duration_ms: 60_000,
     user_note: "falha de mercado era só monopólio",
+    note_entries: [],
     zone: "red",
     ...overrides,
   }

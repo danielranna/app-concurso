@@ -7,7 +7,7 @@ export async function POST(
 ) {
   const { id } = await params
   const body = await req.json()
-  const { user_id } = body
+  const { user_id, reprocess_notes } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
@@ -16,7 +16,8 @@ export async function POST(
   try {
     const { structured, auditModelUsed } = await regenerateBehavioralAuditOnly(
       id,
-      user_id
+      user_id,
+      { reprocessNotes: Boolean(reprocess_notes) }
     )
     return NextResponse.json({
       ok: true,

@@ -41,10 +41,10 @@ Feedback esperado: "Você acertou porque identificou a lógica da externalidade 
 
 Responda JSON estrito:
 {
-  "red_zone": [{ "question_index": 1, "feedback": "", "misconception": "", "source": "ai_generated" }],
+  "red_zone": [{ "note_entry_id": "uuid-opcional", "question_index": 1, "feedback": "", "misconception": "", "source": "ai_generated" }],
   "yellow_zone": [...],
-  "green_note_zone": [{ "question_index": 5, "feedback": "", "misconception": "", "source": "ai_generated" }],
+  "green_note_zone": [{ "note_entry_id": "uuid", "question_index": 5, "feedback": "", "misconception": "", "source": "ai_generated" }],
   "green_zone": { "mastered_indexes": [], "theory_balance": "" }
 }
 
-Inclua TODAS as questões de red_zone, yellow_zone e green_note_zone do input (mesmos question_index). Não inclua error_taxonomy na resposta.`
+Inclua TODOS os itens de red_zone, yellow_zone e green_note_zone do input (mesmos question_index e note_entry_id quando existir). Não inclua error_taxonomy na resposta.`

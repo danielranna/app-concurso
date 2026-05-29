@@ -11,7 +11,10 @@ export function filterGreenNoteQuestions(
   questions: NotebookAuditQuestion[]
 ): NotebookAuditQuestion[] {
   return questions.filter(
-    (q) => q.zone === "green" && q.user_note.trim().length > 0
+    (q) =>
+      q.zone === "green" &&
+      ((q.note_entries ?? []).some((e) => e.body.trim().length > 0) ||
+        q.user_note.trim().length > 0)
   )
 }
 
@@ -19,13 +22,16 @@ export function buildExplainLlmItem(
   q: NotebookAuditQuestion,
   options: QuestionOption[],
   perQuestion?: PerQuestionError,
-  mode: ExplainMode = "red_yellow"
+  mode: ExplainMode = "red_yellow",
+  noteEntry?: { id: string; body: string } | null
 ) {
+  const noteText = noteEntry?.body?.trim() || q.user_note || ""
   const markedText = resolveOptionText(q.selected_answer, options)
   const correctText = resolveOptionText(q.correct_answer, options)
 
   return {
     mode,
+    note_entry_id: noteEntry?.id ?? null,
     question_index: q.question_index,
     question_id: q.question_id,
     header_label: q.header_label,
@@ -39,7 +45,7 @@ export function buildExplainLlmItem(
     is_correct: q.is_correct,
     outcome_category: q.outcome_category,
     confidence_level: q.confidence_level,
-    user_note: q.user_note || null,
+    user_note: noteText || null,
     zone: q.zone,
     error_taxonomy_hint: perQuestion?.error_taxonomy ?? null,
     specific_mistake: perQuestion?.specific_mistake ?? null,

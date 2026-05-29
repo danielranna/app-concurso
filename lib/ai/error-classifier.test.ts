@@ -94,6 +94,7 @@ function baseRow(
         confidence_level: "inseguro",
         duration_ms: 50_000,
         user_note: "Quase errei",
+        note_entries: [],
         zone: "yellow",
       },
     ],

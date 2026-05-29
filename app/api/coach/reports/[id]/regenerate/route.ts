@@ -11,7 +11,7 @@ export async function POST(
 ) {
   const { id } = await params
   const body = await req.json()
-  const { user_id } = body
+  const { user_id, reprocess_notes } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
@@ -32,7 +32,7 @@ export async function POST(
     const report = await generateNotebookReport(
       existing.notebook_id,
       user_id,
-      { force: true }
+      { force: true, reprocessNotes: Boolean(reprocess_notes) }
     )
 
     const { data: row, error } = await supabaseServer
