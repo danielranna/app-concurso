@@ -446,7 +446,7 @@ export default function NotebookReportDetail({
           <p className="mb-3 text-sm text-amber-800">
             Aprove em{" "}
             <Link href="/coach/inbox" className="font-medium underline">
-              Ações pendentes
+              Pendências
             </Link>{" "}
             ou use o botão na matéria (Insights).
           </p>

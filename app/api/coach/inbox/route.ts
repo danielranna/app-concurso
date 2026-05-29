@@ -11,16 +11,34 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  const { data, error } = await supabaseServer
-    .from("ai_action_drafts")
-    .select("*")
-    .eq("user_id", user_id)
-    .eq("status", status)
-    .order("created_at", { ascending: false })
-    .limit(100)
+  const [draftsRes, pendingRes] = await Promise.all([
+    supabaseServer
+      .from("ai_action_drafts")
+      .select("*")
+      .eq("user_id", user_id)
+      .eq("status", status)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabaseServer
+      .from("notebooks")
+      .select("id, name, completed_at")
+      .eq("user_id", user_id)
+      .eq("report_pending", true)
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .limit(50),
+  ])
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+  if (draftsRes.error) {
+    return NextResponse.json({ error: draftsRes.error.message }, { status: 500 })
+  }
+  if (pendingRes.error) {
+    return NextResponse.json({ error: pendingRes.error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({
+    drafts: draftsRes.data ?? [],
+    pending_reports: pendingRes.data ?? [],
+  })
 }
 
 export async function POST(req: Request) {

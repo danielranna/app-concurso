@@ -16,11 +16,6 @@ import {
 type HubData = {
   pending_drafts: number
   pending_reports: number
-  pending_report_notebooks?: {
-    id: string
-    name: string | null
-    completed_at: string | null
-  }[]
   report_mode?: "rules" | "llm"
   active_exam: { id: string; name: string } | null
   recent_reports: {
@@ -37,9 +32,6 @@ export default function CoachHubPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [hub, setHub] = useState<HubData | null>(null)
-  const [processing, setProcessing] = useState(false)
-  const [processingNotebookId, setProcessingNotebookId] = useState<string | null>(null)
-  const [processMessage, setProcessMessage] = useState<string | null>(null)
 
   function load(uid: string) {
     fetch(`/api/coach/hub?user_id=${uid}`)
@@ -67,49 +59,8 @@ export default function CoachHubPage() {
       window.removeEventListener("coach-ai-credentials-updated", refresh)
   }, [userId])
 
-  async function processPendingReports(notebookId?: string) {
-    if (!userId) return
-    if (notebookId) setProcessingNotebookId(notebookId)
-    else setProcessing(true)
-    setProcessMessage(null)
-    try {
-      const res = await fetch("/api/coach/reports/process-pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          notebook_id: notebookId,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setProcessMessage(data.error ?? "Erro ao gerar relatórios")
-        return
-      }
-      if (data.still_pending > 0) {
-        setProcessMessage(
-          `Processados ${data.jobs_processed} job(s). Ainda há ${data.still_pending} na fila — tente de novo em instantes.`
-        )
-      } else if (data.latest_report_id) {
-        setProcessMessage(
-          notebookId
-            ? "Relatório deste caderno pronto!"
-            : "Relatório pronto!"
-        )
-        router.push(`/coach/relatorios/${data.latest_report_id}`)
-      } else if (data.notebooks_found === 0) {
-        setProcessMessage("Nenhum caderno pendente de relatório.")
-      } else {
-        setProcessMessage("Processamento concluído. Veja em Relatórios recentes abaixo.")
-      }
-      load(userId)
-    } catch {
-      setProcessMessage("Falha de rede ao gerar relatórios.")
-    } finally {
-      if (notebookId) setProcessingNotebookId(null)
-      else setProcessing(false)
-    }
-  }
+  const pendingTotal =
+    (hub?.pending_drafts ?? 0) + (hub?.pending_reports ?? 0)
 
   return (
     <div className="space-y-6">
@@ -141,64 +92,17 @@ export default function CoachHubPage() {
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300"
         >
           <Inbox className="mb-2 h-5 w-5 text-violet-600" />
-          <p className="text-2xl font-bold text-slate-900">
-            {hub?.pending_drafts ?? 0}
-          </p>
-          <p className="text-sm text-slate-500">Ações para aprovar</p>
+          <p className="text-2xl font-bold text-slate-900">{pendingTotal}</p>
+          <p className="text-sm text-slate-500">Pendências</p>
+          {(hub?.pending_reports ?? 0) > 0 && (
+            <p className="mt-1 text-xs text-slate-500">
+              {hub!.pending_reports} relatório
+              {hub!.pending_reports === 1 ? "" : "s"} ·{" "}
+              {hub?.pending_drafts ?? 0} ação
+              {(hub?.pending_drafts ?? 0) === 1 ? "" : "ões"}
+            </p>
+          )}
         </Link>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <Sparkles className="mb-2 h-5 w-5 text-amber-600" />
-          <p className="text-2xl font-bold text-slate-900">
-            {hub?.pending_reports ?? 0}
-          </p>
-          <p className="text-sm text-slate-500">Relatórios na fila</p>
-          {!!hub?.pending_report_notebooks?.length && (
-            <div className="mt-2 rounded-md bg-slate-50 p-2">
-              <p className="text-[11px] font-medium text-slate-500">
-                Pendentes agora:
-              </p>
-              <ul className="mt-1 space-y-1">
-                {hub.pending_report_notebooks.slice(0, 6).map((nb) => (
-                  <li
-                    key={nb.id}
-                    className="flex items-center justify-between gap-2 text-xs text-slate-700"
-                  >
-                    <span className="truncate">
-                      {nb.name?.trim() || "Caderno sem nome"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => processPendingReports(nb.id)}
-                      disabled={processingNotebookId === nb.id || processing}
-                      className="shrink-0 rounded-md border border-violet-200 bg-white px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
-                    >
-                      {processingNotebookId === nb.id ? "Gerando..." : "Gerar"}
-                    </button>
-                  </li>
-                ))}
-                {hub.pending_report_notebooks.length > 6 && (
-                  <li className="text-[11px] text-slate-500">
-                    +{hub.pending_report_notebooks.length - 6} outros
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
-          {userId && (
-            <button
-              type="button"
-              onClick={() => processPendingReports()}
-              disabled={processing || Boolean(processingNotebookId)}
-              className="mt-2 rounded-lg bg-violet-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-800 disabled:opacity-50"
-            >
-              {processing ? "Gerando…" : "Gerar relatórios agora"}
-            </button>
-          )}
-          {processMessage && (
-            <p className="mt-2 text-xs text-slate-600">{processMessage}</p>
-          )}
-        </div>
 
         <Link
           href="/coach/editais"
@@ -222,11 +126,14 @@ export default function CoachHubPage() {
       </div>
 
       <p className="text-sm text-slate-600">
-        Ao concluir um caderno, a IA também sugere flashcards e erros em{" "}
-        <Link href="/coach/inbox" className="font-medium text-violet-700 hover:underline">
-          Ações pendentes
+        Ao concluir um caderno, gere o relatório em{" "}
+        <Link
+          href="/coach/inbox"
+          className="font-medium text-violet-700 hover:underline"
+        >
+          Pendências
         </Link>
-        .
+        . Depois, aprove sugestões de reforço na mesma página.
       </p>
 
       <section>
@@ -236,7 +143,7 @@ export default function CoachHubPage() {
         </h2>
         {!hub?.recent_reports?.length ? (
           <p className="text-sm text-slate-500">
-            Conclua um caderno de questões para gerar o primeiro relatório.
+            Conclua um caderno de questões e gere o relatório em Pendências.
           </p>
         ) : (
           <ul className="space-y-2">

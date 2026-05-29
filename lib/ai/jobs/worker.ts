@@ -1,16 +1,11 @@
 import { supabaseServer } from "../../supabase-server"
 import type { NotebookReportStructured } from "../../coach-types"
-import { generateNotebookReport } from "../notebook-report"
+import { createNotebookReportSync } from "../notebook-report"
 import { classifyWrongAttempts } from "../error-classifier"
-import { persistReportExecutableActions } from "../report-action-drafts"
 import { persistSubjectBrain } from "../subject-brain"
 import { recomputeStrategicQueue } from "../strategic-queue"
 import { generateDailyStudyPlan } from "../execution-plan"
-import { generateRemediationDrafts } from "../remediation-drafts"
-import {
-  filterReportStructuredForSubject,
-  resolveNotebookQuestionIdsBySubject,
-} from "../notebook-subject-split"
+import { filterReportStructuredForSubject } from "../notebook-subject-split"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -27,136 +22,22 @@ export async function processJob(job: {
       case "notebook_report_aggregate": {
         const notebookId = payload.notebook_id as string
         const force = Boolean(payload.force)
-
-        const { data: existing } = await supabaseServer
-          .from("subject_notebook_reports")
-          .select("id")
-          .eq("notebook_id", notebookId)
-          .maybeSingle()
-
-        if (existing && !force) {
-          await supabaseServer
-            .from("notebooks")
-            .update({ report_pending: false })
-            .eq("id", notebookId)
-          await completeJob(job.id, { skipped: true, report_id: existing.id })
-          return
-        }
-
-        if (existing && force) {
-          await supabaseServer
-            .from("subject_notebook_reports")
-            .delete()
-            .eq("id", existing.id)
-        }
-
-        const report = await generateNotebookReport(notebookId, userId, { force })
-        const { data: nb } = await supabaseServer
-          .from("notebooks")
-          .select("subject_id")
-          .eq("id", notebookId)
-          .single()
-
-        const { data: row, error } = await supabaseServer
-          .from("subject_notebook_reports")
-          .insert({
-            user_id: userId,
-            subject_id: nb?.subject_id,
-            notebook_id: notebookId,
-            summary_md: report.summaryMd,
-            structured: report.structured,
-            input_snapshot: report.snapshot,
-            model_used: report.modelUsed,
-            tokens_in: report.tokensIn,
-            tokens_out: report.tokensOut,
-            cost_usd_estimate: report.costUsd,
+        const result = await createNotebookReportSync(notebookId, userId, { force })
+        if (result.skipped) {
+          await completeJob(job.id, {
+            skipped: true,
+            report_id: result.report_id,
           })
-          .select("id")
-          .single()
-
-        if (error) throw new Error(error.message)
-
-        await supabaseServer
-          .from("notebooks")
-          .update({ report_pending: false })
-          .eq("id", notebookId)
-
-        let draftsCreated = 0
-        const bySubject = await resolveNotebookQuestionIdsBySubject(
-          userId,
-          notebookId
-        )
-        const subjectIdsInNotebook = [...bySubject.keys()]
-
-        if (subjectIdsInNotebook.length > 0) {
-          for (const subjectId of subjectIdsInNotebook) {
-            const qids = bySubject.get(subjectId) ?? []
-            const filtered = filterReportStructuredForSubject(
-              report.structured,
-              new Set(qids)
-            )
-            await generateRemediationDrafts({
-              userId,
-              subjectId,
-              notebookId,
-              structured: filtered,
-              snapshot: report.snapshot,
-            })
-            draftsCreated += await persistReportExecutableActions({
-              userId,
-              subjectId,
-              structured: filtered,
-              reportModelUsed: report.modelUsed,
-            })
-          }
-        } else if (nb?.subject_id) {
-          await generateRemediationDrafts({
-            userId,
-            subjectId: nb.subject_id,
-            notebookId,
-            structured: report.structured,
-            snapshot: report.snapshot,
+        } else {
+          await completeJob(job.id, {
+            report_id: result.report_id,
+            llm_used: result.llm_used,
+            per_question_count: result.per_question_count,
+            actions_count: result.actions_count,
+            drafts_created: result.drafts_created,
+            topics_weak: result.topics_weak,
+            subjects_in_notebook: result.subjects_in_notebook,
           })
-          draftsCreated = await persistReportExecutableActions({
-            userId,
-            subjectId: nb.subject_id,
-            structured: report.structured,
-            reportModelUsed: report.modelUsed,
-          })
-        }
-
-        await completeJob(job.id, {
-          report_id: row!.id,
-          llm_used: report.usedLlm,
-          per_question_count: report.perQuestionCount,
-          actions_count: report.structured.executable_actions?.length ?? 0,
-          drafts_created: draftsCreated,
-          topics_weak: report.structured.weaknesses?.length ?? 0,
-          subjects_in_notebook: subjectIdsInNotebook.length,
-        })
-
-        if (row?.id) {
-          const brainTargets =
-            subjectIdsInNotebook.length > 0
-              ? subjectIdsInNotebook
-              : nb?.subject_id
-                ? [nb.subject_id]
-                : []
-
-          for (const subjectId of brainTargets) {
-            const qids = bySubject.get(subjectId)
-            await enqueueJob({
-              userId,
-              jobType: "brain_ingest_report",
-              idempotencyKey: `brain:${row.id}:${subjectId}`,
-              payload: {
-                subject_id: subjectId,
-                report_id: row.id,
-                filter_question_ids: qids ?? [],
-              },
-              priority: 8,
-            })
-          }
         }
         break
       }

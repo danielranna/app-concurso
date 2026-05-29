@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { enqueueNotebookReport } from "@/lib/ai/notebook-report"
+import { createNotebookReportSync } from "@/lib/ai/notebook-report"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -44,10 +44,14 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await enqueueNotebookReport(notebook_id, user_id, {
+    const result = await createNotebookReportSync(notebook_id, user_id, {
       force: Boolean(force),
     })
-    return NextResponse.json(result)
+    return NextResponse.json({
+      ok: true,
+      report_id: result.report_id,
+      skipped: result.skipped,
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })

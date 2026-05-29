@@ -137,7 +137,7 @@ export default function ExamPlanReportCard({
             <p className="mt-1 text-xs text-amber-800">
               Confira em{" "}
               <Link href="/coach/inbox" className="font-medium underline">
-                Ações pendentes
+                Pendências
               </Link>
               .
             </p>

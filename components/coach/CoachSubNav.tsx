@@ -9,7 +9,7 @@ const links = [
   { href: "/coach/executor", label: "Executor" },
   { href: "/coach/materias", label: "Matérias" },
   { href: "/coach/editais", label: "Prova / Edital" },
-  { href: "/coach/inbox", label: "Ações pendentes" },
+  { href: "/coach/inbox", label: "Pendências" },
   { href: "/coach/configuracoes", label: "Configurações" },
 ]
 

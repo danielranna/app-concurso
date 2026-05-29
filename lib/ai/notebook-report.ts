@@ -25,6 +25,13 @@ import {
   percentToIncidenceWeight,
 } from "../strategic-weights"
 import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
+import { persistReportExecutableActions } from "./report-action-drafts"
+import { generateRemediationDrafts } from "./remediation-drafts"
+import {
+  filterReportStructuredForSubject,
+  resolveNotebookQuestionIdsBySubject,
+} from "./notebook-subject-split"
+import { enqueueJob } from "./jobs/queue"
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
@@ -535,6 +542,165 @@ export async function regenerateBehavioralAuditOnly(
   }
 
   return { structured, auditModelUsed: auditResult.modelUsed }
+}
+
+export type CreateNotebookReportSyncResult =
+  | { skipped: true; report_id: string; reason: "already_exists" }
+  | {
+      skipped: false
+      report_id: string
+      llm_used: boolean
+      per_question_count: number
+      actions_count: number
+      drafts_created: number
+      topics_weak: number
+      subjects_in_notebook: number
+    }
+
+export async function createNotebookReportSync(
+  notebookId: string,
+  userId: string,
+  options?: { force?: boolean }
+): Promise<CreateNotebookReportSyncResult> {
+  const force = Boolean(options?.force)
+
+  const { data: existing } = await supabaseServer
+    .from("subject_notebook_reports")
+    .select("id")
+    .eq("notebook_id", notebookId)
+    .maybeSingle()
+
+  if (existing && !force) {
+    await supabaseServer
+      .from("notebooks")
+      .update({ report_pending: false })
+      .eq("id", notebookId)
+      .eq("user_id", userId)
+    return { skipped: true, report_id: existing.id, reason: "already_exists" }
+  }
+
+  if (existing && force) {
+    await supabaseServer
+      .from("subject_notebook_reports")
+      .delete()
+      .eq("id", existing.id)
+  }
+
+  const { data: nbCheck } = await supabaseServer
+    .from("notebooks")
+    .select("completed_at")
+    .eq("id", notebookId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (!nbCheck?.completed_at) {
+    throw new Error("Caderno ainda não foi concluído")
+  }
+
+  const report = await generateNotebookReport(notebookId, userId, { force })
+  const { data: nb } = await supabaseServer
+    .from("notebooks")
+    .select("subject_id")
+    .eq("id", notebookId)
+    .single()
+
+  const { data: row, error } = await supabaseServer
+    .from("subject_notebook_reports")
+    .insert({
+      user_id: userId,
+      subject_id: nb?.subject_id,
+      notebook_id: notebookId,
+      summary_md: report.summaryMd,
+      structured: report.structured,
+      input_snapshot: report.snapshot,
+      model_used: report.modelUsed,
+      tokens_in: report.tokensIn,
+      tokens_out: report.tokensOut,
+      cost_usd_estimate: report.costUsd,
+    })
+    .select("id")
+    .single()
+
+  if (error) throw new Error(error.message)
+
+  await supabaseServer
+    .from("notebooks")
+    .update({ report_pending: false })
+    .eq("id", notebookId)
+
+  let draftsCreated = 0
+  const bySubject = await resolveNotebookQuestionIdsBySubject(userId, notebookId)
+  const subjectIdsInNotebook = [...bySubject.keys()]
+
+  if (subjectIdsInNotebook.length > 0) {
+    for (const subjectId of subjectIdsInNotebook) {
+      const qids = bySubject.get(subjectId) ?? []
+      const filtered = filterReportStructuredForSubject(
+        report.structured,
+        new Set(qids)
+      )
+      await generateRemediationDrafts({
+        userId,
+        subjectId,
+        notebookId,
+        structured: filtered,
+        snapshot: report.snapshot,
+      })
+      draftsCreated += await persistReportExecutableActions({
+        userId,
+        subjectId,
+        structured: filtered,
+        reportModelUsed: report.modelUsed,
+      })
+    }
+  } else if (nb?.subject_id) {
+    await generateRemediationDrafts({
+      userId,
+      subjectId: nb.subject_id,
+      notebookId,
+      structured: report.structured,
+      snapshot: report.snapshot,
+    })
+    draftsCreated = await persistReportExecutableActions({
+      userId,
+      subjectId: nb.subject_id,
+      structured: report.structured,
+      reportModelUsed: report.modelUsed,
+    })
+  }
+
+  const brainTargets =
+    subjectIdsInNotebook.length > 0
+      ? subjectIdsInNotebook
+      : nb?.subject_id
+        ? [nb.subject_id]
+        : []
+
+  for (const subjectId of brainTargets) {
+    const qids = bySubject.get(subjectId)
+    await enqueueJob({
+      userId,
+      jobType: "brain_ingest_report",
+      idempotencyKey: `brain:${row!.id}:${subjectId}`,
+      payload: {
+        subject_id: subjectId,
+        report_id: row!.id,
+        filter_question_ids: qids ?? [],
+      },
+      priority: 8,
+    })
+  }
+
+  return {
+    skipped: false,
+    report_id: row!.id,
+    llm_used: report.usedLlm,
+    per_question_count: report.perQuestionCount,
+    actions_count: report.structured.executable_actions?.length ?? 0,
+    drafts_created: draftsCreated,
+    topics_weak: report.structured.weaknesses?.length ?? 0,
+    subjects_in_notebook: subjectIdsInNotebook.length,
+  }
 }
 
 export async function enqueueNotebookReport(

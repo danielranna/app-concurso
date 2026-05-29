@@ -44,20 +44,7 @@ export async function POST(
     confidence_level: confidence,
   })
 
-  const { justCompleted } = await refreshNotebookProgress(notebook_id, user_id)
-
-  if (justCompleted) {
-    void (async () => {
-      try {
-        const { enqueueNotebookReport } = await import("@/lib/ai/notebook-report")
-        const { runJobWorker } = await import("@/lib/ai/jobs/worker")
-        await enqueueNotebookReport(notebook_id, user_id)
-        await runJobWorker(3)
-      } catch (err) {
-        console.error("notebook_report:", err)
-      }
-    })()
-  }
+  await refreshNotebookProgress(notebook_id, user_id)
 
   return NextResponse.json({
     is_correct,
