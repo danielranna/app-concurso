@@ -1,4 +1,4 @@
-import type { ErrorTaxonomy, PerQuestionError } from "./coach-types"
+import type { ErrorTaxonomy, PerQuestionError } from "../coach-types"
 import type { NotebookAuditQuestion } from "./notebook-audit-payload"
 import {
   resolveOptionText,
