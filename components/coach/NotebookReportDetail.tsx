@@ -58,8 +58,12 @@ function sourceBadgeClass(source?: FeedbackSource) {
 
 function QuestionAuditCard({
   eq,
+  feedbackLabel = "Explicação",
+  zoneOverride,
 }: {
   eq: PerQuestionError | BehavioralAuditQuestionItem
+  feedbackLabel?: string
+  zoneOverride?: "red" | "yellow" | "green"
 }) {
   const isPerQuestion = "error_taxonomy" in eq && eq.error_taxonomy != null
   const perQ = isPerQuestion ? (eq as PerQuestionError) : null
@@ -84,7 +88,7 @@ function QuestionAuditCard({
   const taxonomy = perQ?.error_taxonomy ?? auditItem?.error_taxonomy
   const classificationSource = perQ?.classification_source
   const classificationEvidence = perQ?.evidence
-  const zone = perQ?.zone
+  const zone = zoneOverride ?? perQ?.zone
   const statement =
     perQ?.statement_excerpt ?? auditItem?.statement_excerpt
 
@@ -166,7 +170,7 @@ function QuestionAuditCard({
       {feedback && (
         <div className="mt-2 rounded border border-slate-200 bg-white p-2">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-medium text-slate-500">Explicação</p>
+            <p className="text-xs font-medium text-slate-500">{feedbackLabel}</p>
             {feedbackSource && (
               <span
                 className={`rounded px-2 py-0.5 text-xs font-medium ${sourceBadgeClass(feedbackSource)}`}
@@ -394,6 +398,23 @@ export default function NotebookReportDetail({
             <p className="whitespace-pre-wrap text-sm text-slate-700">
               <strong>Balanço de teoria:</strong> {audit.green_zone.theory_balance}
             </p>
+          )}
+          {(audit.green_zone.note_clarifications?.length ?? 0) > 0 && (
+            <div className="mt-4 border-t border-green-100 pt-4">
+              <h3 className="mb-3 text-sm font-semibold text-green-900">
+                Esclarecimentos das suas notas
+              </h3>
+              <ul className="space-y-4">
+                {audit.green_zone.note_clarifications!.map((eq, i) => (
+                  <QuestionAuditCard
+                    key={eq.question_id ?? `gn-${i}`}
+                    eq={eq}
+                    feedbackLabel="Esclarecimento da sua nota"
+                    zoneOverride="green"
+                  />
+                ))}
+              </ul>
+            </div>
           )}
         </section>
       )}

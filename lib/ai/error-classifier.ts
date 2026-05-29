@@ -20,6 +20,7 @@ import {
   type NotebookAuditPayload,
   type NotebookAuditQuestion,
 } from "./notebook-audit-payload"
+import { loadOptionsByQuestion } from "./question-options"
 import type {
   ClassificationResult,
   ClassificationSource,
@@ -70,26 +71,6 @@ async function loadWeightContext(userId: string, subjectId: string | null) {
   )
 
   return { examId, editalWeight, topicIndex }
-}
-
-async function loadOptionsByQuestion(
-  questionIds: string[]
-): Promise<Map<string, { label: string; text: string }[]>> {
-  const map = new Map<string, { label: string; text: string }[]>()
-  if (!questionIds.length) return map
-
-  const { data } = await supabaseServer
-    .from("question_options")
-    .select("question_id, label, text, sort_order")
-    .in("question_id", questionIds)
-    .order("sort_order", { ascending: true })
-
-  for (const o of data ?? []) {
-    const list = map.get(o.question_id) ?? []
-    list.push({ label: String(o.label), text: String(o.text ?? "").slice(0, 200) })
-    map.set(o.question_id, list)
-  }
-  return map
 }
 
 async function loadPriorCorrectCounts(

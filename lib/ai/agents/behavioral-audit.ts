@@ -1,7 +1,6 @@
 import type {
   BehavioralAudit,
   BehavioralAuditQuestionItem,
-  ErrorTaxonomy,
   FeedbackSource,
   PerQuestionError,
 } from "../../coach-types"
@@ -15,82 +14,17 @@ import {
 } from "../notebook-audit-payload"
 import { supabaseServer } from "../../supabase-server"
 import { mergeUnifiedExplainIntoErrors } from "../merge-unified-errors"
-
-const SYSTEM = `Você é o tutor do relatório de caderno — sua função é EXPLICAR, não reclassificar erros.
-A taxonomia (tipo de erro) já foi definida em error_taxonomy_hint — use-a no feedback, NÃO invente outra.
-
-Para CADA questão red/yellow use: enunciado (statement_excerpt), marcada vs gabarito, nota do aluno e error_taxonomy_hint.
-
-REGRAS:
-1. Se existir user_note, o feedback DEVE começar corrigindo a lógica da nota.
-2. Proibido texto genérico quando a nota ou o enunciado revelam o erro específico.
-3. Baseie-se no enunciado, alternativas e gabarito — não invente trechos de PDF.
-4. source deve ser sempre "ai_generated".
-5. Marcada vs Gabarito sempre claro.
-6. Português (BR), tom de tutor de concurso.
-
-Responda JSON:
-{
-  "red_zone": [{ "question_index": 1, "feedback": "", "misconception": "", "source": "ai_generated" }],
-  "yellow_zone": [...],
-  "green_zone": { "mastered_indexes": [], "theory_balance": "" }
-}
-
-Inclua TODAS as questões red e yellow do input (mesmos question_index). Não inclua error_taxonomy na resposta.`
-
-function toLlmItem(q: NotebookAuditQuestion, taxonomyHint?: ErrorTaxonomy) {
-  return {
-    question_index: q.question_index,
-    question_id: q.question_id,
-    header_label: q.header_label,
-    tec_topic: q.tec_topic,
-    statement_excerpt: q.statement_excerpt,
-    marked: q.selected_answer,
-    answer_key: q.correct_answer,
-    is_correct: q.is_correct,
-    outcome_category: q.outcome_category,
-    confidence_level: q.confidence_level,
-    user_note: q.user_note || null,
-    zone: q.zone,
-    error_taxonomy_hint: taxonomyHint ?? null,
-  }
-}
+import { UNIFIED_EXPLAIN_SYSTEM_PROMPT } from "../prompts/unified-explain-prompt"
+import { loadOptionsByQuestion } from "../question-options"
+import {
+  buildExplainLlmItem,
+  buildFallbackAuditItem,
+  filterGreenNoteQuestions,
+} from "../behavioral-audit-helpers"
 
 function parseSource(raw: string | undefined): FeedbackSource {
   if (raw === "material" || raw === "mixed" || raw === "ai_generated") return raw
   return "ai_generated"
-}
-
-function buildFallbackItem(
-  q: NotebookAuditQuestion,
-  taxonomyHint?: ErrorTaxonomy
-): BehavioralAuditQuestionItem {
-  const marked = q.selected_answer
-  const key = q.correct_answer
-  let feedback = q.is_correct
-    ? `Marcada: [${marked}] | Gabarito: [${key}]. Acerto registrado (${q.outcome_category}).`
-    : `Marcada: [${marked}] | Gabarito: [${key}]. Você errou nesta questão (${q.outcome_category}).`
-
-  if (q.user_note) {
-    feedback += ` Sua nota: "${q.user_note}". Revise o conceito no enunciado e confronte com o gabarito.`
-  } else {
-    feedback += ` Revise o trecho central do enunciado sobre ${q.tec_topic}.`
-  }
-
-  return {
-    question_index: q.question_index,
-    question_id: q.question_id,
-    header_label: q.header_label,
-    statement_excerpt: q.statement_excerpt.slice(0, 400),
-    marked,
-    answer_key: key,
-    user_note: q.user_note || undefined,
-    outcome_category: q.outcome_category,
-    confidence_level: q.confidence_level,
-    feedback,
-    source: "ai_generated",
-    error_taxonomy: taxonomyHint,
-  }
 }
 
 /** @deprecated Use mergeUnifiedExplainIntoErrors */
@@ -101,7 +35,13 @@ export async function persistAuditInsightsToAttempts(
   audit: BehavioralAudit,
   payload: NotebookAuditPayload
 ): Promise<void> {
-  for (const item of [...audit.red_zone, ...audit.yellow_zone]) {
+  const items = [
+    ...audit.red_zone,
+    ...audit.yellow_zone,
+    ...(audit.green_zone.note_clarifications ?? []),
+  ]
+
+  for (const item of items) {
     const q = payload.questions.find((x) => x.question_id === item.question_id)
     if (!q?.attempt_id) continue
 
@@ -147,6 +87,93 @@ type LlmZoneItem = {
   source?: string
 }
 
+function buildBaseAudit(
+  payload: NotebookAuditPayload,
+  optionsByQ: Map<string, { label: string; text: string }[]>,
+  taxHint: (qid: string) => PerQuestionError["error_taxonomy"] | undefined
+): BehavioralAudit {
+  const redQs = payload.questions.filter((q) => q.zone === "red")
+  const yellowQs = payload.questions.filter((q) => q.zone === "yellow")
+  const greenQs = payload.questions.filter((q) => q.zone === "green")
+  const greenNoteQs = filterGreenNoteQuestions(payload.questions)
+
+  return {
+    performance_summary: payload.performance_summary,
+    red_zone: redQs.map((q) =>
+      buildFallbackAuditItem(
+        q,
+        optionsByQ.get(q.question_id) ?? [],
+        "red_yellow",
+        taxHint(q.question_id)
+      )
+    ),
+    yellow_zone: yellowQs.map((q) =>
+      buildFallbackAuditItem(
+        q,
+        optionsByQ.get(q.question_id) ?? [],
+        "red_yellow",
+        taxHint(q.question_id)
+      )
+    ),
+    green_zone: {
+      mastered_indexes: greenQs.map((q) => q.question_index),
+      theory_balance:
+        greenQs.length > 0
+          ? `Questões dominadas: ${greenQs.map((q) => `Q${q.question_index}`).join(", ")}.`
+          : "Nenhuma questão na zona verde neste caderno.",
+      note_clarifications: greenNoteQs.map((q) =>
+        buildFallbackAuditItem(
+          q,
+          optionsByQ.get(q.question_id) ?? [],
+          "green_note_only"
+        )
+      ),
+    },
+    generated_at: new Date().toISOString(),
+    model_used: "rule-based",
+  }
+}
+
+function mapZoneItems(
+  raw: LlmZoneItem[] | undefined,
+  sourceQs: NotebookAuditQuestion[],
+  optionsByQ: Map<string, { label: string; text: string }[]>,
+  mode: "red_yellow" | "green_note_only",
+  taxHint: (qid: string) => PerQuestionError["error_taxonomy"] | undefined
+): BehavioralAuditQuestionItem[] {
+  const byIndex = new Map((raw ?? []).map((r) => [r.question_index, r]))
+
+  return sourceQs.map((q) => {
+    const llm = byIndex.get(q.question_index)
+    const fallback = buildFallbackAuditItem(
+      q,
+      optionsByQ.get(q.question_id) ?? [],
+      mode,
+      taxHint(q.question_id)
+    )
+    if (!llm) return fallback
+
+    return {
+      question_index: q.question_index,
+      question_id: q.question_id,
+      header_label: q.header_label,
+      statement_excerpt: q.statement_excerpt.slice(0, 400),
+      marked: q.selected_answer,
+      answer_key: q.correct_answer,
+      user_note: q.user_note || undefined,
+      outcome_category: q.outcome_category,
+      confidence_level: q.confidence_level,
+      feedback: llm.feedback?.trim() || fallback.feedback,
+      misconception: llm.misconception,
+      error_taxonomy:
+        mode === "red_yellow"
+          ? taxHint(q.question_id) ?? fallback.error_taxonomy
+          : undefined,
+      source: parseSource(llm.source),
+    }
+  })
+}
+
 export async function runBehavioralAuditAgent(params: {
   userId: string
   subjectId: string | null
@@ -156,27 +183,27 @@ export async function runBehavioralAuditAgent(params: {
 }): Promise<RunBehavioralAuditResult> {
   const taxHint = (qid: string) =>
     params.taxonomyByQuestion?.get(qid)?.error_taxonomy
+  const perQ = (qid: string) => params.taxonomyByQuestion?.get(qid)
+
   const redQs = params.payload.questions.filter((q) => q.zone === "red")
   const yellowQs = params.payload.questions.filter((q) => q.zone === "yellow")
   const greenQs = params.payload.questions.filter((q) => q.zone === "green")
+  const greenNoteQs = filterGreenNoteQuestions(params.payload.questions)
   const explainQs = [...redQs, ...yellowQs]
 
-  const baseAudit: BehavioralAudit = {
-    performance_summary: params.payload.performance_summary,
-    red_zone: redQs.map((q) => buildFallbackItem(q, taxHint(q.question_id))),
-    yellow_zone: yellowQs.map((q) => buildFallbackItem(q, taxHint(q.question_id))),
-    green_zone: {
-      mastered_indexes: greenQs.map((q) => q.question_index),
-      theory_balance:
-        greenQs.length > 0
-          ? `Questões dominadas: ${greenQs.map((q) => `Q${q.question_index}`).join(", ")}.`
-          : "Nenhuma questão na zona verde neste caderno.",
-    },
-    generated_at: new Date().toISOString(),
-    model_used: "rule-based",
-  }
+  const explainIds = [
+    ...new Set([
+      ...explainQs.map((q) => q.question_id),
+      ...greenNoteQs.map((q) => q.question_id),
+    ]),
+  ]
+  const optionsByQ = await loadOptionsByQuestion(explainIds)
 
-  if (params.skipLlm || explainQs.length === 0) {
+  const baseAudit = buildBaseAudit(params.payload, optionsByQ, taxHint)
+
+  const nothingToExplain = explainQs.length === 0 && greenNoteQs.length === 0
+
+  if (params.skipLlm || nothingToExplain) {
     return {
       audit: baseAudit,
       modelUsed: "rule-based",
@@ -204,8 +231,30 @@ export async function runBehavioralAuditAgent(params: {
     notebook_name: params.payload.notebook_name,
     subject_name: params.payload.subject_name,
     performance_summary: params.payload.performance_summary,
-    red_zone: redQs.map((q) => toLlmItem(q, taxHint(q.question_id))),
-    yellow_zone: yellowQs.map((q) => toLlmItem(q, taxHint(q.question_id))),
+    red_zone: redQs.map((q) =>
+      buildExplainLlmItem(
+        q,
+        optionsByQ.get(q.question_id) ?? [],
+        perQ(q.question_id),
+        "red_yellow"
+      )
+    ),
+    yellow_zone: yellowQs.map((q) =>
+      buildExplainLlmItem(
+        q,
+        optionsByQ.get(q.question_id) ?? [],
+        perQ(q.question_id),
+        "red_yellow"
+      )
+    ),
+    green_note_zone: greenNoteQs.map((q) =>
+      buildExplainLlmItem(
+        q,
+        optionsByQ.get(q.question_id) ?? [],
+        undefined,
+        "green_note_only"
+      )
+    ),
     green_zone_summary: greenQs.map((q) => ({
       question_index: q.question_index,
       tec_topic: q.tec_topic,
@@ -216,10 +265,10 @@ export async function runBehavioralAuditAgent(params: {
     agentType: "report",
     userId: params.userId,
     subjectId: params.subjectId,
-    systemPrompt: SYSTEM,
+    systemPrompt: UNIFIED_EXPLAIN_SYSTEM_PROMPT,
     userContent: `Explicação unificada (auditoria):\n${JSON.stringify(input)}`,
     jsonMode: true,
-    maxTokens: 6000,
+    maxTokens: 8000,
     model: "gpt-4o",
     metadata: {
       notebook_id: params.payload.notebook_id,
@@ -242,6 +291,7 @@ export async function runBehavioralAuditAgent(params: {
     const parsed = JSON.parse(result.text) as {
       red_zone?: LlmZoneItem[]
       yellow_zone?: LlmZoneItem[]
+      green_note_zone?: LlmZoneItem[]
       green_zone?: { mastered_indexes?: number[]; theory_balance?: string }
     }
 
@@ -249,49 +299,38 @@ export async function runBehavioralAuditAgent(params: {
       params.payload.questions.map((q) => [q.question_index, q])
     )
 
-    function mapItems(
-      raw: LlmZoneItem[] | undefined,
-      zone: "red" | "yellow"
-    ): BehavioralAuditQuestionItem[] {
-      const source = zone === "red" ? redQs : yellowQs
-      const byIndex = new Map((raw ?? []).map((r) => [r.question_index, r]))
-
-      return source.map((q) => {
-        const llm = byIndex.get(q.question_index)
-        const fallback = buildFallbackItem(q, taxHint(q.question_id))
-        if (!llm) return fallback
-
-        return {
-          question_index: q.question_index,
-          question_id: q.question_id,
-          header_label: q.header_label,
-          statement_excerpt: q.statement_excerpt.slice(0, 400),
-          marked: q.selected_answer,
-          answer_key: q.correct_answer,
-          user_note: q.user_note || undefined,
-          outcome_category: q.outcome_category,
-          confidence_level: q.confidence_level,
-          feedback: llm.feedback?.trim() || fallback.feedback,
-          misconception: llm.misconception,
-          error_taxonomy: taxHint(q.question_id) ?? fallback.error_taxonomy,
-          source: parseSource(llm.source),
-        }
-      })
-    }
-
     const greenIndexes =
       parsed.green_zone?.mastered_indexes ??
       greenQs.map((q) => q.question_index)
 
     const audit: BehavioralAudit = {
       performance_summary: params.payload.performance_summary,
-      red_zone: mapItems(parsed.red_zone, "red"),
-      yellow_zone: mapItems(parsed.yellow_zone, "yellow"),
+      red_zone: mapZoneItems(
+        parsed.red_zone,
+        redQs,
+        optionsByQ,
+        "red_yellow",
+        taxHint
+      ),
+      yellow_zone: mapZoneItems(
+        parsed.yellow_zone,
+        yellowQs,
+        optionsByQ,
+        "red_yellow",
+        taxHint
+      ),
       green_zone: {
         mastered_indexes: greenIndexes.filter((i) => indexToQuestion.has(i)),
         theory_balance:
           parsed.green_zone?.theory_balance?.trim() ||
           baseAudit.green_zone.theory_balance,
+        note_clarifications: mapZoneItems(
+          parsed.green_note_zone,
+          greenNoteQs,
+          optionsByQ,
+          "green_note_only",
+          taxHint
+        ),
       },
       model_used: result.model,
       generated_at: new Date().toISOString(),
@@ -339,3 +378,10 @@ export async function runBehavioralAuditForNotebook(
   await persistAuditInsightsToAttempts(result.audit, payload)
   return { ...result, payload }
 }
+
+export {
+  buildExplainLlmItem,
+  buildFallbackAuditItem,
+  buildFallbackFeedback,
+  filterGreenNoteQuestions,
+} from "../behavioral-audit-helpers"

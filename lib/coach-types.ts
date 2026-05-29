@@ -134,6 +134,8 @@ export type BehavioralAudit = {
   green_zone: {
     mastered_indexes: number[]
     theory_balance: string
+    /** Acertos sólidos com nota — esclarecimento focado na anotação */
+    note_clarifications?: BehavioralAuditQuestionItem[]
   }
   model_used?: string
   generated_at?: string
