@@ -40,6 +40,8 @@ function ImportarContent() {
   const [error, setError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<Record<string, unknown> | null>(null)
   const [pendingSharedLinks, setPendingSharedLinks] = useState<ImportPendingSharedLink[]>([])
+  /** null = ainda não escolheu; true = passo de conteúdos; false = importa todas */
+  const [linkSharedContent, setLinkSharedContent] = useState<boolean | null>(null)
 
   const [filterNeedsReview, setFilterNeedsReview] = useState(false)
   const [filterLow, setFilterLow] = useState(false)
@@ -83,13 +85,34 @@ function ImportarContent() {
   const pageCount = Math.max(1, Math.ceil(filteredQuestions.length / PAGE_SIZE))
   const pageItems = filteredQuestions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
 
-  const missingGabarito = useMemo(
+  const linkedTecIds = useMemo(
+    () => new Set(pendingSharedLinks.flatMap((l) => l.tecIds)),
+    [pendingSharedLinks]
+  )
+
+  const questionsToImport = useMemo(() => {
+    if (linkSharedContent === true) {
+      return questions.filter((q) => linkedTecIds.has(q.tec_id))
+    }
+    return questions
+  }, [questions, linkedTecIds, linkSharedContent])
+
+  const missingGabaritoAll = useMemo(
     () =>
       questions.filter((q) => {
         const keepingBank = q.existing_in_bank && !q.replace_in_bank
         return !keepingBank && !q.merged.correct_answer?.trim()
       }),
     [questions]
+  )
+
+  const missingGabarito = useMemo(
+    () =>
+      questionsToImport.filter((q) => {
+        const keepingBank = q.existing_in_bank && !q.replace_in_bank
+        return !keepingBank && !q.merged.correct_answer?.trim()
+      }),
+    [questionsToImport]
   )
 
   const linkedLabelByTecId = useMemo(() => {
@@ -101,13 +124,13 @@ function ImportarContent() {
   }, [pendingSharedLinks])
 
   const bankStats = useMemo(() => {
-    const inBank = questions.filter((q) => q.existing_in_bank)
+    const inBank = questionsToImport.filter((q) => q.existing_in_bank)
     return {
       keeping: inBank.filter((q) => !q.replace_in_bank).length,
       replacing: inBank.filter((q) => q.replace_in_bank).length,
-      newCount: questions.filter((q) => !q.existing_in_bank).length,
+      newCount: questionsToImport.filter((q) => !q.existing_in_bank).length,
     }
-  }, [questions])
+  }, [questionsToImport])
 
   const updateQuestion = useCallback((tecId: number, merged: ParsedTecQuestion) => {
     setQuestions((prev) =>
@@ -127,6 +150,7 @@ function ImportarContent() {
     setQuestions([])
     setCommitResult(null)
     setPendingSharedLinks([])
+    setLinkSharedContent(null)
     setError(null)
     setPage(0)
   }
@@ -155,6 +179,10 @@ function ImportarContent() {
 
   async function handleCommit() {
     if (!userId || !parseResult) return
+    if (linkSharedContent === true && questionsToImport.length === 0) {
+      setError("Vincule ao menos uma questão a um conteúdo antes de salvar.")
+      return
+    }
     if (missingGabarito.length > 0) {
       setError(
         `${missingGabarito.length} questão(ões) sem gabarito. Volte à revisão e corrija.`
@@ -179,14 +207,18 @@ function ImportarContent() {
           ...q.merged,
           replace_in_bank: q.existing_in_bank ? q.replace_in_bank : undefined,
         })),
-        shared_links: pendingSharedLinks.map((l) => ({
-          asset_id: l.assetId,
-          tec_ids: l.tecIds,
-          overrides: Object.entries(l.overridesByTecId ?? {}).map(([tecId, content]) => ({
-            tec_id: Number(tecId),
-            content_override: content,
-          })),
-        })),
+        only_linked_questions: linkSharedContent === true,
+        shared_links:
+          linkSharedContent === true
+            ? pendingSharedLinks.map((l) => ({
+                asset_id: l.assetId,
+                tec_ids: l.tecIds,
+                overrides: Object.entries(l.overridesByTecId ?? {}).map(([tecId, content]) => ({
+                  tec_id: Number(tecId),
+                  content_override: content,
+                })),
+              }))
+            : undefined,
       }),
     })
     const data = await res.json()
@@ -214,25 +246,32 @@ function ImportarContent() {
       </Link>
       <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
       <p className="mt-2 text-sm text-slate-600">
-        Analise o PDF, revise as questões, vincule textos compartilhados e salve no banco.
+        Analise o PDF, revise as questões e, se quiser, vincule textos compartilhados antes de
+        salvar.
       </p>
 
       <div className="mt-6 flex gap-2">
-        {steps.map(({ n, label }) => (
-          <div
-            key={n}
-            className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-medium ${
-              step === n
-                ? "border-slate-900 bg-slate-900 text-white"
-                : step > n
-                  ? "border-green-300 bg-green-50 text-green-800"
-                  : "border-slate-200 bg-slate-50 text-slate-500"
-            }`}
-          >
-            {step > n ? <Check className="h-3 w-3" /> : null}
-            {n}. {label}
-          </div>
-        ))}
+        {steps.map(({ n, label }) => {
+          const skipped = n === 3 && linkSharedContent === false && step >= 4
+          const done = step > n || skipped
+          return (
+            <div
+              key={n}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-medium ${
+                step === n
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : done
+                    ? skipped
+                      ? "border-slate-200 bg-slate-100 text-slate-400 line-through"
+                      : "border-green-300 bg-green-50 text-green-800"
+                    : "border-slate-200 bg-slate-50 text-slate-500"
+              }`}
+            >
+              {done && !skipped ? <Check className="h-3 w-3" /> : null}
+              {n}. {label}
+            </div>
+          )
+        })}
       </div>
 
       {error && (
@@ -422,9 +461,9 @@ function ImportarContent() {
             />
           </div>
 
-          {missingGabarito.length > 0 && (
+          {missingGabaritoAll.length > 0 && (
             <p className="text-sm text-red-700">
-              {missingGabarito.length} questão(ões) sem gabarito — corrija antes de salvar.
+              {missingGabaritoAll.length} questão(ões) sem gabarito — corrija antes de salvar.
             </p>
           )}
 
@@ -471,22 +510,46 @@ function ImportarContent() {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="rounded border px-4 py-2 text-sm"
-            >
-              Voltar
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              disabled={questions.length === 0}
-              className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
-            >
-              Continuar para conteúdos
-            </button>
+          <div className="space-y-3 border-t pt-4">
+            <p className="text-sm font-medium text-slate-800">
+              Deseja vincular algum conteúdo compartilhado (texto, tabela ou imagem)?
+            </p>
+            <p className="text-xs text-slate-600">
+              Se sim, você escolhe quais questões entram no caderno. Se não, todas as questões do
+              PDF serão importadas normalmente.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className="rounded border px-4 py-2 text-sm"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkSharedContent(true)
+                  setStep(3)
+                }}
+                disabled={questions.length === 0 || missingGabaritoAll.length > 0}
+                className="rounded bg-violet-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Sim, vincular conteúdos
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkSharedContent(false)
+                  setPendingSharedLinks([])
+                  setStep(4)
+                }}
+                disabled={questions.length === 0 || missingGabaritoAll.length > 0}
+                className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Não, importar todas
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -507,11 +570,16 @@ function ImportarContent() {
         <div className="mt-6 space-y-4">
           <div className="rounded-lg border bg-slate-50 p-4 text-sm">
             <p className="font-medium">Caderno: {parseResult.name}</p>
-            <p className="mt-1">Questões a importar: {questions.length}</p>
-            <p className="text-slate-600">
-              Alta confiança: {parseResult.stats.high} · Revisadas manualmente:{" "}
-              {questions.length - parseResult.stats.high}
+            <p className="mt-1">
+              Questões neste caderno: {questionsToImport.length}
+              {linkSharedContent === true ? " (somente as vinculadas a conteúdo)" : ""}
             </p>
+            {linkSharedContent === true && questions.length > questionsToImport.length && (
+              <p className="text-slate-500">
+                {questions.length - questionsToImport.length} questão(ões) do PDF ficam de fora —
+                só entram as que você associou.
+              </p>
+            )}
             {bankStats.keeping > 0 && (
               <p className="mt-1 text-green-800">
                 <Check className="mr-1 inline h-4 w-4" />
@@ -526,10 +594,15 @@ function ImportarContent() {
             {bankStats.newCount > 0 && (
               <p className="mt-1 text-slate-600">{bankStats.newCount} novas no banco global</p>
             )}
-            {pendingSharedLinks.length > 0 && (
+            {linkSharedContent === true && pendingSharedLinks.length > 0 && (
               <p className="mt-1 text-violet-800">
-                {pendingSharedLinks.length} conteúdo(s) compartilhado(s) serão vinculados às
-                questões ao salvar.
+                {pendingSharedLinks.length} conteúdo(s) compartilhado(s) em{" "}
+                {questionsToImport.length} questão(ões).
+              </p>
+            )}
+            {linkSharedContent === true && questionsToImport.length === 0 && (
+              <p className="mt-1 text-amber-800">
+                Volte ao passo de conteúdos e vincule ao menos uma questão para importar.
               </p>
             )}
             {subjectId && subjects.length > 0 && (
@@ -543,15 +616,19 @@ function ImportarContent() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setStep(3)}
+                onClick={() => setStep(linkSharedContent === true ? 3 : 2)}
                 className="rounded border px-4 py-2 text-sm"
               >
-                Voltar aos conteúdos
+                {linkSharedContent === true ? "Voltar aos conteúdos" : "Voltar à revisão"}
               </button>
               <button
                 type="button"
                 onClick={handleCommit}
-                disabled={loading || missingGabarito.length > 0}
+                disabled={
+                  loading ||
+                  missingGabarito.length > 0 ||
+                  (linkSharedContent === true && questionsToImport.length === 0)
+                }
                 className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -561,12 +638,28 @@ function ImportarContent() {
           ) : (
             <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
               <p className="font-medium text-green-900">Importação concluída!</p>
-              <p className="mt-1">Novas questões: {String(commitResult.created_questions ?? 0)}</p>
-              <p>Mantidas do banco: {String(commitResult.reused_questions ?? 0)}</p>
-              <p>Substituídas no banco: {String(commitResult.updated_questions ?? 0)}</p>
+              <p className="mt-2 font-medium text-slate-800">
+                Questões neste caderno:{" "}
+                {String(
+                  commitResult.notebook_question_count ??
+                    commitResult.question_count ??
+                    questionsToImport.length
+                )}
+              </p>
+              <p className="mt-2 text-xs text-slate-600">
+                No banco global de questões (todas as provas):
+              </p>
+              <ul className="mt-1 list-inside list-disc text-slate-700">
+                <li>
+                  {String(commitResult.created_questions ?? 0)} novas (primeira vez importadas)
+                </li>
+                <li>{String(commitResult.reused_questions ?? 0)} já existiam e foram mantidas</li>
+                <li>{String(commitResult.updated_questions ?? 0)} substituídas no banco</li>
+              </ul>
               {Number(commitResult.linked_questions ?? 0) > 0 && (
-                <p>
-                  Conteúdos vinculados: {String(commitResult.linked_questions)} associação(ões)
+                <p className="mt-2 text-violet-900">
+                  Conteúdos compartilhados vinculados em{" "}
+                  {String(commitResult.linked_questions)} questão(ões).
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-3">

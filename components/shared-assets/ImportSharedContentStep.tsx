@@ -518,13 +518,14 @@ export default function ImportSharedContentStep({
         <button
           type="button"
           onClick={onContinue}
-          className="inline-flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm text-white"
+          disabled={linkedTecIds.size === 0}
+          className="inline-flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
         >
           Ir para confirmação <ChevronRight className="h-4 w-4" />
         </button>
         {pendingLinks.length === 0 && (
           <span className="self-center text-xs text-slate-500">
-            Opcional — pode pular e vincular depois ao editar questões.
+            Vincule ao menos uma questão para continuar.
           </span>
         )}
       </div>

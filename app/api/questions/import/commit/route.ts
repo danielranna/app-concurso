@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import {
   fetchBankQuestionsByTecIds,
+  filterQuestionsForImport,
   importNotebookFromParsed,
   type ImportSharedLinkInput,
 } from "@/lib/question-import"
@@ -22,12 +23,23 @@ type CommitBody = {
   }
   questions: ImportQuestionInput[]
   shared_links?: ImportSharedLinkInput[]
+  only_linked_questions?: boolean
 }
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as CommitBody
-    const { user_id, subject_id, folder_id, name, notebook, questions, shared_links } = body
+    const {
+      user_id,
+      subject_id,
+      folder_id,
+      name,
+      notebook,
+      questions,
+      shared_links,
+      only_linked_questions,
+    } = body
+    const onlyLinked = only_linked_questions === true
 
     if (!user_id || !notebook?.name || !Array.isArray(questions)) {
       return NextResponse.json(
@@ -36,11 +48,23 @@ export async function POST(req: Request) {
       )
     }
 
+    const questionsToImport = filterQuestionsForImport(questions, shared_links, onlyLinked)
+
+    if (onlyLinked && questionsToImport.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Nenhuma questão vinculada a conteúdo. Volte ao passo de conteúdos e associe ao menos uma questão.",
+        },
+        { status: 400 }
+      )
+    }
+
     const existingByTecId = await fetchBankQuestionsByTecIds(
-      questions.map((q) => q.tec_id)
+      questionsToImport.map((q) => q.tec_id)
     )
 
-    const missingAnswer = questions.filter((q) => {
+    const missingAnswer = questionsToImport.filter((q) => {
       const keepingBank = existingByTecId.has(q.tec_id) && !q.replace_in_bank
       return !keepingBank && !q.correct_answer?.trim()
     })
@@ -68,11 +92,12 @@ export async function POST(req: Request) {
       folder_id: folder_id ?? null,
       name,
       shared_links: shared_links ?? [],
+      only_linked_questions: onlyLinked,
     })
 
     return NextResponse.json({
       ...result,
-      question_count: questions.length,
+      question_count: questionsToImport.length,
       parsed_name: parsed.name,
     })
   } catch (e) {

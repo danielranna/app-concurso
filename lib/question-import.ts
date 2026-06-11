@@ -19,6 +19,17 @@ export type ImportQuestionResult = {
   updated: boolean
 }
 
+/** Quando onlyLinked, importa só questões presentes em sharedLinks. */
+export function filterQuestionsForImport(
+  questions: ImportQuestionInput[],
+  sharedLinks: ImportSharedLinkInput[] | undefined,
+  onlyLinked: boolean
+): ImportQuestionInput[] {
+  if (!onlyLinked) return questions
+  const linkedTecIds = new Set((sharedLinks ?? []).flatMap((l) => l.tec_ids))
+  return questions.filter((q) => linkedTecIds.has(q.tec_id))
+}
+
 export async function fetchBankQuestionsByTecIds(
   tecIds: number[]
 ): Promise<Map<number, BankQuestionSnapshot>> {
@@ -173,9 +184,11 @@ export async function importNotebookFromParsed(
     folder_id?: string | null
     name?: string
     shared_links?: ImportSharedLinkInput[]
+    only_linked_questions?: boolean
   }
 ): Promise<{
   notebook_id: string
+  notebook_question_count: number
   created_questions: number
   reused_questions: number
   updated_questions: number
@@ -183,6 +196,12 @@ export async function importNotebookFromParsed(
   linked_questions: number
   warnings: string[]
 }> {
+  const questionsToImport = filterQuestionsForImport(
+    parsed.questions,
+    opts.shared_links,
+    opts.only_linked_questions === true
+  )
+
   let created_questions = 0
   let reused_questions = 0
   let updated_questions = 0
@@ -190,11 +209,11 @@ export async function importNotebookFromParsed(
   const questionIds: { question_id: string; position: number }[] = []
   const tecToQuestionId = new Map<number, string>()
   const existingByTecId = await fetchBankQuestionsByTecIds(
-    parsed.questions.map((q) => q.tec_id)
+    questionsToImport.map((q) => q.tec_id)
   )
 
-  for (let i = 0; i < parsed.questions.length; i++) {
-    const q = parsed.questions[i]
+  for (let i = 0; i < questionsToImport.length; i++) {
+    const q = questionsToImport[i]
     const keepingBank = existingByTecId.has(q.tec_id) && !q.replace_in_bank
     if (!keepingBank && !q.correct_answer?.trim()) continue
 
@@ -257,6 +276,7 @@ export async function importNotebookFromParsed(
 
   return {
     notebook_id: notebook.id,
+    notebook_question_count: questionIds.length,
     created_questions,
     reused_questions,
     updated_questions,
