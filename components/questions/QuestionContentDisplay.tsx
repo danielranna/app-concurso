@@ -1,5 +1,7 @@
 "use client"
 
+import { useState } from "react"
+import { ChevronDown } from "lucide-react"
 import type { QuestionContentBlock, QuestionContentBlocks } from "@/lib/question-content-blocks"
 import { isImageContent } from "@/lib/question-content-blocks"
 import type { ResolvedSharedBlock } from "@/lib/shared-assets"
@@ -55,13 +57,17 @@ export function QuestionContentBlockList({
   )
 }
 
-function SharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
+function sharedBlockKindLabel(kind: ResolvedSharedBlock["kind"]) {
+  return kind === "image" ? "Imagem" : "Texto"
+}
+
+function SharedBlockBody({ block }: { block: ResolvedSharedBlock }) {
   if (block.kind === "image") {
     return <ResizableQuestionImage src={block.content} widthPct={block.widthPct} />
   }
 
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+    <>
       {block.title && (
         <p className="mb-2 text-sm font-semibold text-slate-900">{block.title}</p>
       )}
@@ -77,6 +83,53 @@ function SharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
         <p className="mt-3 border-t border-slate-200 pt-2 text-xs italic text-slate-500">
           {block.fonte.trim()}
         </p>
+      )}
+    </>
+  )
+}
+
+function SharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
+  if (block.kind === "image") {
+    return (
+      <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+        <SharedBlockBody block={block} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+      <SharedBlockBody block={block} />
+    </div>
+  )
+}
+
+function CollapsibleSharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
+  const [open, setOpen] = useState(true)
+  const kindLabel = sharedBlockKindLabel(block.kind)
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/80">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-sm font-semibold text-slate-800">
+          {kindLabel} {block.label}:
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+          {open ? "Ocultar" : "Mostrar"}
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-slate-200 px-4 pb-4 pt-3">
+          <SharedBlockBody block={block} />
+        </div>
       )}
     </div>
   )
@@ -105,15 +158,18 @@ export function SharedContentPreview({
 export function SharedContentBlockList({
   blocks,
   className = "",
+  studyMode = false,
 }: {
   blocks: ResolvedSharedBlock[]
   className?: string
+  studyMode?: boolean
 }) {
   if (!blocks.length) return null
+  const Item = studyMode ? CollapsibleSharedBlockItem : SharedBlockItem
   return (
     <div className={`space-y-4 ${className}`}>
       {blocks.map((block) => (
-        <SharedBlockItem key={block.id} block={block} />
+        <Item key={block.id} block={block} />
       ))}
     </div>
   )
@@ -124,15 +180,18 @@ export default function QuestionContentDisplay({
   sharedBlocks = [],
   statement,
   statementClassName = "mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800",
+  studyMode = false,
 }: {
   blocks: QuestionContentBlocks
   sharedBlocks?: ResolvedSharedBlock[]
   statement: string
   statementClassName?: string
+  /** Modo estudo: cabeçalho "Texto [rótulo]:" com toggle para ocultar */
+  studyMode?: boolean
 }) {
   return (
     <>
-      <SharedContentBlockList blocks={sharedBlocks} />
+      <SharedContentBlockList blocks={sharedBlocks} studyMode={studyMode} />
       <QuestionContentBlockList blocks={blocks.before} className={sharedBlocks.length ? "mt-4" : ""} />
       {renderStatement(statement, statementClassName)}
       <QuestionContentBlockList blocks={blocks.after} className="mt-3" />

@@ -668,6 +668,7 @@ export default function QuestionSolver({
           </p>
           <div className="mt-3">
             <QuestionContentDisplay
+              studyMode
               sharedBlocks={question.shared_blocks ?? []}
               blocks={resolveQuestionContentBlocks({
                 content_blocks: question.content_blocks,

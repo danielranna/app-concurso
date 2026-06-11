@@ -149,6 +149,7 @@ export default function HomeWrongQuestion({ userId }: Props) {
 
           <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50 p-4">
             <QuestionContentDisplay
+              studyMode
               sharedBlocks={
                 (question as { shared_blocks?: ResolvedSharedBlock[] }).shared_blocks ?? []
               }
