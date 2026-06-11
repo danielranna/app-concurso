@@ -9,6 +9,10 @@ import { useNotebookFolders } from "@/components/questions/NotebookFolderSelect"
 import MateriaNotebookRow, {
   type MateriaNotebook,
 } from "@/components/questions/MateriaNotebookRow"
+import NotebookBulkToolbar from "@/components/questions/NotebookBulkToolbar"
+import MoveNotebookModal from "@/components/questions/MoveNotebookModal"
+import { useNotebookSelection } from "@/hooks/useNotebookSelection"
+import { bulkDeleteNotebooks } from "@/lib/notebook-bulk-actions"
 
 type FolderRow = {
   id: string
@@ -36,7 +40,12 @@ export default function MateriaQuestoesPage() {
   const [allNotebooks, setAllNotebooks] = useState<MateriaNotebook[]>([])
   const [newFolderName, setNewFolderName] = useState("")
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
+  const [moveTarget, setMoveTarget] = useState<{ ids: string[]; label: string } | null>(null)
+  const [busy, setBusy] = useState(false)
   const allFolders = useNotebookFolders(userId, subjectId)
+
+  const allIds = useMemo(() => allNotebooks.map((n) => n.id), [allNotebooks])
+  const selection = useNotebookSelection(allIds)
 
   function reload(uid: string) {
     Promise.all([
@@ -122,6 +131,29 @@ export default function MateriaQuestoesPage() {
   async function deleteNotebook(id: string) {
     if (!userId || !confirm("Excluir caderno?")) return
     await fetch(`/api/notebooks/${id}`, { method: "DELETE" })
+    selection.clear()
+    reload(userId)
+  }
+
+  async function bulkDelete() {
+    if (!userId || selection.selectedCount === 0) return
+    const n = selection.selectedCount
+    if (!confirm(`Excluir ${n} caderno(s)?`)) return
+    setBusy(true)
+    try {
+      await bulkDeleteNotebooks(selection.selectedIds)
+      selection.clear()
+      reload(userId)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao excluir")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function afterBulkAction() {
+    if (!userId) return
+    selection.clear()
     reload(userId)
   }
 
@@ -155,6 +187,22 @@ export default function MateriaQuestoesPage() {
           Importar (sem matéria)
         </Link>
       </div>
+
+      <NotebookBulkToolbar
+        selectedCount={selection.selectedCount}
+        totalCount={allNotebooks.length}
+        allSelected={selection.allSelected}
+        onSelectAll={selection.selectAll}
+        onClear={selection.clear}
+        onMove={() =>
+          setMoveTarget({
+            ids: selection.selectedIds,
+            label: `${selection.selectedCount} cadernos`,
+          })
+        }
+        onDelete={bulkDelete}
+        busy={busy}
+      />
 
       <section className="mt-8">
         <h2 className="mb-3 font-semibold text-slate-700">Subpastas</h2>
@@ -232,6 +280,8 @@ export default function MateriaQuestoesPage() {
                       onMoved={() => reload(userId)}
                       onDelete={deleteNotebook}
                       nested
+                      selected={selection.isSelected(nb.id)}
+                      onToggleSelect={() => selection.toggle(nb.id)}
                     />
                   ))}
                   {folderNotebooks.length === 0 && (
@@ -266,6 +316,8 @@ export default function MateriaQuestoesPage() {
               folders={allFolders}
               onMoved={() => reload(userId)}
               onDelete={deleteNotebook}
+              selected={selection.isSelected(nb.id)}
+              onToggleSelect={() => selection.toggle(nb.id)}
             />
           ))}
         {rootNotebooks.length === 0 && (
@@ -274,6 +326,19 @@ export default function MateriaQuestoesPage() {
           </p>
         )}
       </section>
+
+      {userId && moveTarget && (
+        <MoveNotebookModal
+          isOpen
+          onClose={() => setMoveTarget(null)}
+          userId={userId}
+          notebookIds={moveTarget.ids.length > 1 ? moveTarget.ids : undefined}
+          notebookId={moveTarget.ids.length === 1 ? moveTarget.ids[0] : undefined}
+          notebookName={moveTarget.label}
+          initialSubjectId={subjectId}
+          onMoved={afterBulkAction}
+        />
+      )}
     </div>
   )
 }

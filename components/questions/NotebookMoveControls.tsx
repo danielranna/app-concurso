@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import MoveNotebookModal, { moveNotebookLocation } from "@/components/questions/MoveNotebookModal"
+import MoveNotebookModal from "@/components/questions/MoveNotebookModal"
+import { moveNotebookLocation } from "@/lib/notebook-bulk-actions"
 
 type Folder = { id: string; name: string }
 

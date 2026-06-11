@@ -23,6 +23,8 @@ type Props = {
   onMoved: () => void
   onDelete: (id: string) => void
   nested?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
 }
 
 export default function MateriaNotebookRow({
@@ -33,19 +35,32 @@ export default function MateriaNotebookRow({
   onMoved,
   onDelete,
   nested = false,
+  selected = false,
+  onToggleSelect,
 }: Props) {
   return (
     <div
       className={`mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-4 py-3 ${
         nested ? "ml-6 border-slate-200" : ""
-      }`}
+      } ${selected ? "border-slate-400 ring-1 ring-slate-300" : ""}`}
     >
-      <div>
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+            aria-label={`Selecionar ${notebook.name}`}
+          />
+        )}
+        <div className="min-w-0">
         <p className="font-medium text-blue-700">{notebook.name}</p>
         <p className="text-sm text-slate-500">
           {notebook.answered_count}/{notebook.question_count} respondidas
           {notebook.completed_at && " · Concluído"}
         </p>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <NotebookMoveControls

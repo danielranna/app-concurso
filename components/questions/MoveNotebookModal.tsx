@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react"
 import { Loader2, X } from "lucide-react"
 import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
+import {
+  bulkMoveNotebooks,
+  moveNotebookLocation,
+} from "@/lib/notebook-bulk-actions"
 
 type Subject = { id: string; name: string }
 
@@ -10,37 +14,22 @@ type Props = {
   isOpen: boolean
   onClose: () => void
   userId: string
-  notebookId: string
+  notebookId?: string
+  notebookIds?: string[]
   notebookName: string
   initialSubjectId?: string | null
   initialFolderId?: string | null
   onMoved: () => void
 }
 
-export async function moveNotebookLocation(
-  notebookId: string,
-  subjectId: string,
-  folderId: string | null
-) {
-  const res = await fetch(`/api/notebooks/${notebookId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      subject_id: subjectId,
-      folder_id: folderId,
-    }),
-  })
-  if (!res.ok) {
-    const data = await res.json()
-    throw new Error(data.error ?? "Erro ao mover caderno")
-  }
-}
+export { moveNotebookLocation }
 
 export default function MoveNotebookModal({
   isOpen,
   onClose,
   userId,
   notebookId,
+  notebookIds,
   notebookName,
   initialSubjectId,
   initialFolderId,
@@ -64,15 +53,25 @@ export default function MoveNotebookModal({
 
   if (!isOpen) return null
 
+  const ids = notebookIds?.length ? notebookIds : notebookId ? [notebookId] : []
+
   async function handleMove() {
     if (!subjectId) {
       setError("Escolha uma matéria")
       return
     }
+    if (!ids.length) {
+      setError("Nenhum caderno selecionado")
+      return
+    }
     setSaving(true)
     setError(null)
     try {
-      await moveNotebookLocation(notebookId, subjectId, folderId || null)
+      if (ids.length === 1) {
+        await moveNotebookLocation(ids[0], subjectId, folderId || null)
+      } else {
+        await bulkMoveNotebooks(ids, subjectId, folderId || null)
+      }
       onMoved()
       onClose()
     } catch (e) {
@@ -92,7 +91,13 @@ export default function MoveNotebookModal({
           </button>
         </div>
         <p className="mb-4 text-sm text-slate-600">
-          <span className="font-medium text-slate-800">{notebookName}</span>
+          {ids.length > 1 ? (
+            <span>
+              Mover <strong>{ids.length} cadernos</strong> para o mesmo destino
+            </span>
+          ) : (
+            <span className="font-medium text-slate-800">{notebookName}</span>
+          )}
         </p>
         <label className="mb-3 block text-sm">
           <span className="font-medium text-slate-700">Matéria</span>
@@ -138,7 +143,7 @@ export default function MoveNotebookModal({
             className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Mover
+            {ids.length > 1 ? `Mover ${ids.length}` : "Mover"}
           </button>
         </div>
       </div>
