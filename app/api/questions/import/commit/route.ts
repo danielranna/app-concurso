@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   fetchBankQuestionsByTecIds,
   importNotebookFromParsed,
+  type ImportSharedLinkInput,
 } from "@/lib/question-import"
 import type { ImportQuestionInput, ParsedTecNotebook } from "@/lib/question-types"
 
@@ -20,12 +21,13 @@ type CommitBody = {
     warnings?: string[]
   }
   questions: ImportQuestionInput[]
+  shared_links?: ImportSharedLinkInput[]
 }
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as CommitBody
-    const { user_id, subject_id, folder_id, name, notebook, questions } = body
+    const { user_id, subject_id, folder_id, name, notebook, questions, shared_links } = body
 
     if (!user_id || !notebook?.name || !Array.isArray(questions)) {
       return NextResponse.json(
@@ -65,6 +67,7 @@ export async function POST(req: Request) {
       subject_id: subject_id ?? null,
       folder_id: folder_id ?? null,
       name,
+      shared_links: shared_links ?? [],
     })
 
     return NextResponse.json({

@@ -7,6 +7,9 @@ import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Loader2, Upload } from "lucide-react"
 import ImportQuestionReviewCard from "@/components/questions/ImportQuestionReviewCard"
 import PdfTextCorrectionsPanel from "@/components/questions/PdfTextCorrectionsPanel"
+import ImportSharedContentStep, {
+  type ImportPendingSharedLink,
+} from "@/components/shared-assets/ImportSharedContentStep"
 import type { ParsedTecQuestion } from "@/lib/question-types"
 import type {
   ImportNotebookParseResult,
@@ -14,7 +17,7 @@ import type {
 } from "@/lib/tec-pdf-parse-pipeline"
 
 type Subject = { id: string; name: string }
-type WizardStep = 1 | 2 | 3
+type WizardStep = 1 | 2 | 3 | 4
 
 const PAGE_SIZE = 10
 const LLM_ENABLED =
@@ -36,6 +39,7 @@ function ImportarContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<Record<string, unknown> | null>(null)
+  const [pendingSharedLinks, setPendingSharedLinks] = useState<ImportPendingSharedLink[]>([])
 
   const [filterNeedsReview, setFilterNeedsReview] = useState(false)
   const [filterLow, setFilterLow] = useState(false)
@@ -88,6 +92,14 @@ function ImportarContent() {
     [questions]
   )
 
+  const linkedLabelByTecId = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const link of pendingSharedLinks) {
+      for (const tecId of link.tecIds) map.set(tecId, link.asset.label)
+    }
+    return map
+  }, [pendingSharedLinks])
+
   const bankStats = useMemo(() => {
     const inBank = questions.filter((q) => q.existing_in_bank)
     return {
@@ -114,6 +126,7 @@ function ImportarContent() {
     setParseResult(null)
     setQuestions([])
     setCommitResult(null)
+    setPendingSharedLinks([])
     setError(null)
     setPage(0)
   }
@@ -166,6 +179,10 @@ function ImportarContent() {
           ...q.merged,
           replace_in_bank: q.existing_in_bank ? q.replace_in_bank : undefined,
         })),
+        shared_links: pendingSharedLinks.map((l) => ({
+          asset_id: l.assetId,
+          tec_ids: l.tecIds,
+        })),
       }),
     })
     const data = await res.json()
@@ -175,24 +192,25 @@ function ImportarContent() {
       return
     }
     setCommitResult(data)
-    setStep(3)
+    setStep(4)
     setLoading(false)
   }
 
   const steps: { n: WizardStep; label: string }[] = [
     { n: 1, label: "Analisar" },
     { n: 2, label: "Revisar" },
-    { n: 3, label: "Salvar" },
+    { n: 3, label: "Conteúdos" },
+    { n: 4, label: "Salvar" },
   ]
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className={`mx-auto p-6 ${step === 3 ? "max-w-6xl" : "max-w-3xl"}`}>
       <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
       <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
       <p className="mt-2 text-sm text-slate-600">
-        Analise o PDF com três parsers, revise as questões e só então salve no banco.
+        Analise o PDF, revise as questões, vincule textos compartilhados e salve no banco.
       </p>
 
       <div className="mt-6 flex gap-2">
@@ -414,6 +432,7 @@ function ImportarContent() {
                 userId={userId}
                 llmEnabled={LLM_ENABLED}
                 replaceInBank={item.replace_in_bank}
+                linkedContentLabel={linkedLabelByTecId.get(item.tec_id) ?? null}
                 onReplaceChange={(replace) => updateReplaceInBank(item.tec_id, replace)}
                 onChange={(merged) => updateQuestion(item.tec_id, merged)}
               />
@@ -462,13 +481,24 @@ function ImportarContent() {
               disabled={questions.length === 0}
               className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
             >
-              Ir para confirmação
+              Continuar para conteúdos
             </button>
           </div>
         </div>
       )}
 
-      {step === 3 && parseResult && (
+      {step === 3 && parseResult && userId && (
+        <ImportSharedContentStep
+          userId={userId}
+          questions={questions}
+          pendingLinks={pendingSharedLinks}
+          onPendingLinksChange={setPendingSharedLinks}
+          onBack={() => setStep(2)}
+          onContinue={() => setStep(4)}
+        />
+      )}
+
+      {step === 4 && parseResult && (
         <div className="mt-6 space-y-4">
           <div className="rounded-lg border bg-slate-50 p-4 text-sm">
             <p className="font-medium">Caderno: {parseResult.name}</p>
@@ -491,6 +521,12 @@ function ImportarContent() {
             {bankStats.newCount > 0 && (
               <p className="mt-1 text-slate-600">{bankStats.newCount} novas no banco global</p>
             )}
+            {pendingSharedLinks.length > 0 && (
+              <p className="mt-1 text-violet-800">
+                {pendingSharedLinks.length} conteúdo(s) compartilhado(s) serão vinculados às
+                questões ao salvar.
+              </p>
+            )}
             {subjectId && subjects.length > 0 && (
               <p className="mt-1 text-slate-600">
                 Matéria: {subjects.find((s) => s.id === subjectId)?.name ?? "—"}
@@ -502,10 +538,10 @@ function ImportarContent() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 className="rounded border px-4 py-2 text-sm"
               >
-                Voltar à revisão
+                Voltar aos conteúdos
               </button>
               <button
                 type="button"
@@ -523,6 +559,11 @@ function ImportarContent() {
               <p className="mt-1">Novas questões: {String(commitResult.created_questions ?? 0)}</p>
               <p>Mantidas do banco: {String(commitResult.reused_questions ?? 0)}</p>
               <p>Substituídas no banco: {String(commitResult.updated_questions ?? 0)}</p>
+              {Number(commitResult.linked_questions ?? 0) > 0 && (
+                <p>
+                  Conteúdos vinculados: {String(commitResult.linked_questions)} associação(ões)
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap gap-3">
                 {typeof commitResult.notebook_id === "string" && (
                   <Link

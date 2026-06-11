@@ -16,6 +16,7 @@ type Props = {
   onChange: (merged: ParsedTecQuestion) => void
   replaceInBank?: boolean
   onReplaceChange?: (replace: boolean) => void
+  linkedContentLabel?: string | null
 }
 
 function BankSnapshotPanel({ snapshot }: { snapshot: BankQuestionSnapshot }) {
@@ -85,6 +86,7 @@ export default function ImportQuestionReviewCard({
   onChange,
   replaceInBank = false,
   onReplaceChange,
+  linkedContentLabel,
 }: Props) {
   const q = item.merged
   const existingInBank =
@@ -153,6 +155,11 @@ export default function ImportQuestionReviewCard({
           {item.needs_review && (
             <span className="ml-2 rounded border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-900">
               Revisar conteúdo
+            </span>
+          )}
+          {linkedContentLabel && (
+            <span className="ml-2 rounded border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
+              {linkedContentLabel}
             </span>
           )}
           {keepingBank && (

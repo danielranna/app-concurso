@@ -1,9 +1,15 @@
 import { supabaseServer } from "./supabase-server"
+import { bulkLinkAssetToQuestions } from "./shared-assets"
 import type {
   BankQuestionSnapshot,
   ImportQuestionInput,
   ParsedTecNotebook,
 } from "./question-types"
+
+export type ImportSharedLinkInput = {
+  asset_id: string
+  tec_ids: number[]
+}
 
 export type ImportQuestionResult = {
   question_id: string
@@ -165,6 +171,7 @@ export async function importNotebookFromParsed(
     subject_id?: string | null
     folder_id?: string | null
     name?: string
+    shared_links?: ImportSharedLinkInput[]
   }
 ): Promise<{
   notebook_id: string
@@ -179,6 +186,7 @@ export async function importNotebookFromParsed(
   let updated_questions = 0
   let skipped_in_notebook = 0
   const questionIds: { question_id: string; position: number }[] = []
+  const tecToQuestionId = new Map<number, string>()
   const existingByTecId = await fetchBankQuestionsByTecIds(
     parsed.questions.map((q) => q.tec_id)
   )
@@ -192,6 +200,7 @@ export async function importNotebookFromParsed(
     if (result.created) created_questions++
     else if (result.updated) updated_questions++
     else reused_questions++
+    tecToQuestionId.set(q.tec_id, result.question_id)
     questionIds.push({ question_id: result.question_id, position: i })
   }
 
@@ -222,12 +231,22 @@ export async function importNotebookFromParsed(
     }
   }
 
+  let linked_questions = 0
+  for (const link of opts.shared_links ?? []) {
+    const ids = link.tec_ids
+      .map((tecId) => tecToQuestionId.get(tecId))
+      .filter((id): id is string => Boolean(id))
+    if (!ids.length) continue
+    linked_questions += await bulkLinkAssetToQuestions(link.asset_id, userId, ids)
+  }
+
   return {
     notebook_id: notebook.id,
     created_questions,
     reused_questions,
     updated_questions,
     skipped_in_notebook,
+    linked_questions,
     warnings: parsed.warnings,
   }
 }
