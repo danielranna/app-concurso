@@ -1,4 +1,5 @@
 import { supabaseServer } from "../supabase-server"
+import { resolvePrioritySource } from "../priority-source"
 import { buildSubjectPriorityMap } from "./strategy-helpers"
 import type { SubjectBrainState } from "../coach-types"
 import { buildNotebookReportSnapshot } from "./notebook-report"
@@ -59,6 +60,9 @@ export async function getStudyPreferences(userId: string) {
       error_reviews: 10,
     }) as Record<string, number>,
     rotate_subjects: data?.rotate_subjects ?? true,
+    cycle_enabled: data?.cycle_enabled ?? false,
+    cycle_paused_at: data?.cycle_paused_at ?? null,
+    subjects_per_cycle_day: Number(data?.subjects_per_cycle_day ?? 2),
   }
 }
 
@@ -110,10 +114,14 @@ export async function buildBrainContext(userId: string, subjectId: string) {
 }
 
 export async function buildStrategyContext(userId: string, subjectId?: string) {
+  const prefs = await getStudyPreferences(userId)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
+
   let query = supabaseServer
     .from("strategic_queue_items")
     .select("*")
     .eq("user_id", userId)
+    .eq("priority_source", prioritySource)
     .order("priority_score", { ascending: false })
     .limit(30)
 
@@ -134,6 +142,7 @@ export async function buildStrategyContext(userId: string, subjectId?: string) {
 
 export async function buildExecutionContext(userId: string) {
   const prefs = await getStudyPreferences(userId)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
   const today = new Date().toISOString().slice(0, 10)
 
   const { data: existingPlan } = await supabaseServer
@@ -147,6 +156,7 @@ export async function buildExecutionContext(userId: string) {
     .from("strategic_queue_items")
     .select("*")
     .eq("user_id", userId)
+    .eq("priority_source", prioritySource)
     .order("priority_score", { ascending: false })
     .limit(40)
 
@@ -196,6 +206,7 @@ export async function buildExecutionContext(userId: string) {
 
   return {
     prefs,
+    priority_source: prioritySource,
     today,
     existing_plan: existingPlan,
     queue: queueRows,

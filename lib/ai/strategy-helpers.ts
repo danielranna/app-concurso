@@ -16,6 +16,7 @@ export type StrategicQueueRow = {
   source: string
   computed_at: string
   recent_boost?: boolean
+  priority_source?: "crossed" | "brain"
 }
 
 const SIGNAL_BOOST: Partial<Record<LearningSignalType, number>> = {

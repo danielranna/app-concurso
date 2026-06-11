@@ -9,6 +9,7 @@ import {
   Home,
   Layers,
   LogOut,
+  RotateCw,
   Sparkles,
 } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -21,6 +22,7 @@ const links = [
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/questoes", label: "Questões", icon: HelpCircle },
+  { href: "/ciclo", label: "Ciclo de estudo", icon: RotateCw },
   { href: "/coach", label: "Coach IA", icon: Sparkles },
 ]
 

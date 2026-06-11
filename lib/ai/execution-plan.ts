@@ -17,6 +17,10 @@ import {
   resolveExecutorSubjectPool,
 } from "./execution-subjects"
 import {
+  advanceCycleDayIndex,
+  getTodayCycleDay,
+} from "../study-cycle-db"
+import {
   buildRoundRobinQuestionSet,
   buildTopNQuestionSet,
   type QueueRow,
@@ -128,10 +132,31 @@ export async function generateDailyStudyPlan(
   }
 
   const mode = execPrefs.study_mode
+  const useCycle =
+    execPrefs.cycle_enabled && mode === "pre_edital"
+
+  let cycleContext: Awaited<ReturnType<typeof getTodayCycleDay>> = null
+  if (useCycle) {
+    cycleContext = await getTodayCycleDay(userId)
+  }
+
+  let questionsBudget = limits.questions
+  let flashBudget = limits.flashcards
+  let summariesBudget = limits.summaries
+
+  if (cycleContext?.day) {
+    const todayWd = new Date(ctx.today + "T12:00:00").getDay()
+    const wdLimit = cycleContext.cycle.weekday_limits.find(
+      (w) => w.weekday === todayWd
+    )
+    if (wdLimit?.daily_limits) {
+      questionsBudget = Number(wdLimit.daily_limits.questions ?? questionsBudget)
+      flashBudget = Number(wdLimit.daily_limits.flashcards ?? flashBudget)
+      summariesBudget = Number(wdLimit.daily_limits.summaries ?? summariesBudget)
+    }
+  }
+
   const blocks: DailyStudyBlock[] = []
-  const questionsBudget = limits.questions
-  const flashBudget = limits.flashcards
-  const summariesBudget = limits.summaries
 
   const rotate =
     execPrefs.rotate_subjects && mode !== "reta_final"
@@ -149,7 +174,22 @@ export async function generateDailyStudyPlan(
   }
 
   const pool = await resolveExecutorSubjectPool(userId, queue)
-  const { subjectNames, orderedForCycle } = pool
+  let { subjectNames, orderedForCycle } = pool
+
+  if (cycleContext?.day?.subject_ids?.length) {
+    const cycleSubjects = cycleContext.day.subject_ids.filter((id) =>
+      pool.allowlist.includes(id)
+    )
+    if (cycleSubjects.length) {
+      orderedForCycle = cycleSubjects
+    }
+  }
+
+  const planSource: PlanGenerationMeta["source"] = useCycle && cycleContext
+    ? "cycle"
+    : useCycle
+      ? "executor"
+      : "consultancy"
 
   const perRound = Math.max(
     1,
@@ -281,16 +321,26 @@ export async function generateDailyStudyPlan(
     subject_pick_diagnostics: aggregatePickDiagnostics(
       questionResult.subject_pick_diagnostics
     ),
+    source: planSource,
+    cycle_day_index: cycleContext?.cycle.current_day_index,
+    cycle_id: cycleContext?.cycle.id,
   }
 
-  const rotation_note = rotate
+  const rotation_note = useCycle && cycleContext
+    ? `Ciclo ativo — dia ${cycleContext.cycle.current_day_index + 1}/${cycleContext.cycle.total_days}: ${orderedForCycle.map((id) => subjectNames.get(id)).filter(Boolean).join(", ")}. Fila: cérebro (pré-edital).`
+    : rotate
     ? `Rodízio: ${perRound} questões erradas por matéria (${execPrefs.question_distribution_mode === "equal_split" ? "quota igual no ciclo" : "fixo"}). ${orderedForCycle.length} matérias no ciclo.`
-    : `Top da fila cruzada até ${questionsBudget} questões erradas (sem consolidar).`
+    : `Top da fila ${mode === "pre_edital" ? "cérebro" : "cruzada"} até ${questionsBudget} questões erradas (sem consolidar).`
 
   const plan: DailyStudyPlan = {
     date: ctx.today,
     mode,
-    limits,
+    limits: {
+      ...limits,
+      questions: questionsBudget,
+      flashcards: flashBudget,
+      summaries: summariesBudget,
+    },
     blocks,
     rotation_note,
     combined_notebook_id: combinedNotebookId,
@@ -349,6 +399,13 @@ export async function generateDailyStudyPlan(
     plan.id = row2?.id
   } else {
     plan.id = row?.id
+  }
+
+  if (useCycle && cycleContext && !ctx.existing_plan) {
+    await advanceCycleDayIndex(
+      cycleContext.cycle.id,
+      cycleContext.cycle.total_days
+    )
   }
 
   return {

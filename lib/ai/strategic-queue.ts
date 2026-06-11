@@ -2,7 +2,10 @@ import { supabaseServer } from "../supabase-server"
 import { fetchEditalSubjectRank } from "../edital-subject-rank-db"
 import { topicBrainKey } from "./brain-helpers"
 import { runStrategyNarrativeAgent } from "./agents/strategy"
+import { resolvePrioritySource } from "../priority-source"
+import { getExecutorStudyPreferences } from "./execution-subjects"
 import {
+  brainRowsToStrategicQueue,
   computePriorityBreakdown,
   crossedRowsToStrategicQueue,
 } from "./priority-breakdown"
@@ -41,12 +44,23 @@ export async function recomputeStrategicQueue(
     recentWrongTopics: options?.recentWrongTopics,
   })
 
-  const rows = crossedRowsToStrategicQueue(
-    userId,
-    subjectId,
-    breakdown.crossed,
-    recentWrong
-  )
+  const prefs = await getExecutorStudyPreferences(userId)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
+
+  const rows =
+    prioritySource === "brain"
+      ? brainRowsToStrategicQueue(
+          userId,
+          subjectId,
+          breakdown.brain_performance,
+          recentWrong
+        )
+      : crossedRowsToStrategicQueue(
+          userId,
+          subjectId,
+          breakdown.crossed,
+          recentWrong
+        )
 
   let recentBoostCount = 0
   for (const r of rows) {
@@ -61,10 +75,12 @@ export async function recomputeStrategicQueue(
     .delete()
     .eq("user_id", userId)
     .eq("subject_id", subjectId)
+    .eq("priority_source", prioritySource)
 
   const toInsert = rows.slice(0, 40).map((r) => ({
     ...r,
     subject_priority,
+    priority_source: prioritySource,
   }))
 
   if (toInsert.length) {
@@ -78,6 +94,7 @@ export async function recomputeStrategicQueue(
         delete copy.subject_priority
         delete copy.recent_boost
         delete copy.edital_weight
+        delete copy.priority_source
         return copy
       })
       const retry = await supabaseServer
@@ -125,6 +142,7 @@ export async function recomputeStrategicQueue(
         .eq("user_id", userId)
         .eq("subject_id", subjectId)
         .eq("topic_key", row.topic_key)
+        .eq("priority_source", prioritySource)
       row.reason = merged
       row.source = "llm"
     }

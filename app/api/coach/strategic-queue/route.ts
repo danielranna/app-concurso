@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { recomputeStrategicQueue, recomputeAllSubjectsQueue } from "@/lib/ai/strategic-queue"
 import { supabaseServer } from "@/lib/supabase-server"
+import { getExecutorStudyPreferences } from "@/lib/ai/execution-subjects"
+import { resolvePrioritySource } from "@/lib/priority-source"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -11,10 +13,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
+  const prefs = await getExecutorStudyPreferences(user_id)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
+
   let query = supabaseServer
     .from("strategic_queue_items")
     .select("*")
     .eq("user_id", user_id)
+    .eq("priority_source", prioritySource)
     .order("priority_score", { ascending: false })
     .limit(50)
 
@@ -25,7 +31,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ items: data ?? [] })
+  return NextResponse.json({
+    items: data ?? [],
+    priority_source: prioritySource,
+  })
 }
 
 export async function POST(req: Request) {

@@ -6,7 +6,9 @@ import { useParams, useRouter } from "next/navigation"
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import PriorityRankingPanel from "@/components/coach/PriorityRankingPanel"
+import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
 import type { PriorityBreakdown } from "@/lib/ai/priority-breakdown"
+import { resolvePrioritySource, type PrioritySource } from "@/lib/priority-source"
 
 export default function CoachPrioridadesPage() {
   const params = useParams()
@@ -14,11 +16,20 @@ export default function CoachPrioridadesPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [breakdown, setBreakdown] = useState<PriorityBreakdown | null>(null)
+  const [studyMode, setStudyMode] = useState<string>("pre_edital")
   const [loading, setLoading] = useState(true)
   const [recomputing, setRecomputing] = useState(false)
   const [mobileTab, setMobileTab] = useState<"edital" | "brain" | "crossed">(
-    "edital"
+    "crossed"
   )
+
+  const activeSource: PrioritySource = resolvePrioritySource(
+    studyMode as "pre_edital" | "pos_edital" | "reta_final"
+  )
+
+  useEffect(() => {
+    setMobileTab(activeSource === "brain" ? "brain" : "crossed")
+  }, [activeSource])
 
   const loadBreakdown = useCallback(
     (uid: string) => {
@@ -46,6 +57,9 @@ export default function CoachPrioridadesPage() {
         return
       }
       setUserId(user.id)
+      fetch(`/api/coach/preferences?user_id=${user.id}`)
+        .then((r) => r.json())
+        .then((d) => setStudyMode(d.study?.study_mode ?? "pre_edital"))
       loadBreakdown(user.id)
     })
   }, [subjectId, router, loadBreakdown])
@@ -86,8 +100,8 @@ export default function CoachPrioridadesPage() {
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
             Três visões didáticas: o que cai na prova (edital + incidência), onde
-            você está fraco (cérebro, só com questões feitas) e o resultado cruzado
-            — que alimenta a fila estratégica no insights.
+            você está fraco (cérebro) e o cruzado (pós-edital). No pré-edital, o
+            executor usa só a fila cérebro.
           </p>
         </div>
         <button
@@ -104,6 +118,8 @@ export default function CoachPrioridadesPage() {
           Recalcular e salvar fila
         </button>
       </div>
+
+      <PrioritySourceBanner source={activeSource} studyMode={studyMode} />
 
       {/* Mobile tabs */}
       <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 lg:hidden">
@@ -151,10 +167,11 @@ export default function CoachPrioridadesPage() {
         >
           <PriorityRankingPanel
             title="2. Cérebro (desempenho)"
-            subtitle="Só tópicos com questões resolvidas. Domínio baixo e status crítico sobem."
+            subtitle="Só tópicos com questões resolvidas. No pré-edital, esta fila alimenta o executor."
             items={breakdown?.brain_performance ?? []}
             loading={loading}
             variant="brain"
+            highlighted={activeSource === "brain"}
             collapseAfter={15}
           />
         </div>
@@ -165,11 +182,11 @@ export default function CoachPrioridadesPage() {
         >
           <PriorityRankingPanel
             title="3. Cruzado (resultado)"
-            subtitle="Edital × incidência × urgência do cérebro. É o que vai para a fila estratégica."
+            subtitle="Edital × incidência × urgência. No pós-edital, esta fila alimenta o executor."
             items={breakdown?.crossed ?? []}
             loading={loading}
             variant="crossed"
-            highlighted
+            highlighted={activeSource === "crossed"}
             collapseAfter={15}
           />
         </div>

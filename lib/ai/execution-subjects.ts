@@ -13,6 +13,9 @@ export type ExecutorStudyPrefs = {
   executor_subject_ids: string[]
   question_distribution_mode: QuestionDistributionMode
   questions_per_subject_round: number
+  cycle_enabled: boolean
+  cycle_paused_at: string | null
+  subjects_per_cycle_day: number
 }
 
 export async function getExecutorStudyPreferences(
@@ -43,6 +46,9 @@ export async function getExecutorStudyPreferences(
       (data?.question_distribution_mode as QuestionDistributionMode) ??
       "fixed_per_subject",
     questions_per_subject_round: Number(data?.questions_per_subject_round ?? 5),
+    cycle_enabled: data?.cycle_enabled ?? false,
+    cycle_paused_at: data?.cycle_paused_at ?? null,
+    subjects_per_cycle_day: Number(data?.subjects_per_cycle_day ?? 2),
   }
 }
 
@@ -108,6 +114,9 @@ export async function seedExecutorAllowlistIfEmpty(userId: string): Promise<stri
       executor_subject_ids: merged,
       question_distribution_mode: current.question_distribution_mode,
       questions_per_subject_round: current.questions_per_subject_round,
+      cycle_enabled: current.cycle_enabled,
+      cycle_paused_at: current.cycle_paused_at,
+      subjects_per_cycle_day: current.subjects_per_cycle_day,
       updated_at: new Date().toISOString(),
     })
   }
@@ -178,6 +187,9 @@ export async function mergeEditalIntoAllowlist(userId: string): Promise<string[]
     executor_subject_ids: merged,
     question_distribution_mode: current.question_distribution_mode,
     questions_per_subject_round: current.questions_per_subject_round,
+    cycle_enabled: current.cycle_enabled,
+    cycle_paused_at: current.cycle_paused_at,
+    subjects_per_cycle_day: current.subjects_per_cycle_day,
     updated_at: new Date().toISOString(),
   })
   return merged

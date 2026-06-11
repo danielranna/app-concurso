@@ -423,5 +423,31 @@ export function crossedRowsToStrategicQueue(
     source: "sql",
     computed_at: new Date().toISOString(),
     recent_boost: recentBoostKeys.has(r.topic_key),
+    priority_source: "crossed" as const,
+  }))
+}
+
+/** Pré-edital: fila só por fraqueza (cérebro), sem incidência. */
+export function brainRowsToStrategicQueue(
+  userId: string,
+  subjectId: string,
+  brain: PriorityBreakdownRow[],
+  recentBoostKeys: Set<string>
+): StrategicQueueRow[] {
+  return brain.map((r) => ({
+    user_id: userId,
+    subject_id: subjectId,
+    topic_key: r.topic_key,
+    topic_label: r.topic_label,
+    priority_score: r.score,
+    incidence_weight: 0,
+    edital_weight: 0,
+    gap_score: r.gap_score ?? 0,
+    retention_penalty: r.retention_penalty ?? 1,
+    reason: r.reason ?? "Fraqueza no cérebro (pré-edital)",
+    source: "sql",
+    computed_at: new Date().toISOString(),
+    recent_boost: recentBoostKeys.has(r.topic_key),
+    priority_source: "brain" as const,
   }))
 }

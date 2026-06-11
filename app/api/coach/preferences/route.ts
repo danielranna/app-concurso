@@ -34,6 +34,9 @@ export async function GET(req: Request) {
       executor_subject_ids: [],
       question_distribution_mode: "fixed_per_subject",
       questions_per_subject_round: 5,
+      cycle_enabled: false,
+      cycle_paused_at: null,
+      subjects_per_cycle_day: 2,
     },
   })
 }

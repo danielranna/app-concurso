@@ -16,9 +16,9 @@ const MODE_LABELS: Record<StudyMode, string> = {
 
 const MODE_HELP: Record<StudyMode, string> = {
   pre_edital:
-    "Rodízio de questões erradas entre todas as matérias do executor (ver página Executor).",
+    "Fila cérebro (só fraqueza). Use Ciclo de estudo para planejar ou pause para seguir a consultoria.",
   pos_edital:
-    "Mais peso em incidência e matérias do edital ativo.",
+    "Fila cruzada: incidência × fraqueza. Matérias do edital ativo.",
   reta_final:
     "Menos matérias por dia, mais questões por bloco; foco intenso.",
 }
@@ -160,6 +160,10 @@ export default function CoachConfiguracoesPage() {
         <p className="text-xs text-slate-500">
           <Link href="/coach/executor" className="font-medium text-violet-700 hover:underline">
             Gerenciar matérias do executor →
+          </Link>
+          {" · "}
+          <Link href="/ciclo" className="font-medium text-teal-700 hover:underline">
+            Ciclo de estudo (pré-edital) →
           </Link>
         </p>
       </section>

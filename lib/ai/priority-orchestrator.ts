@@ -1,6 +1,8 @@
 import { supabaseServer } from "../supabase-server"
 import { computeLearningSignals } from "../learning-signals"
 import type { ExecutableAction } from "../coach-types"
+import { getExecutorStudyPreferences } from "./execution-subjects"
+import { resolvePrioritySource } from "../priority-source"
 import {
   buildExecutableActionsFromQueue,
   formatQueueNarrativeSummary,
@@ -21,11 +23,15 @@ export async function generatePriorityVerdict(
     return { diag, attempts, hasMaterial }
   }
 
+  const prefs = await getExecutorStudyPreferences(userId)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
+
   const { data: queue } = await supabaseServer
     .from("strategic_queue_items")
     .select("*")
     .eq("user_id", userId)
     .eq("subject_id", subjectId)
+    .eq("priority_source", prioritySource)
     .order("priority_score", { ascending: false })
     .limit(15)
 

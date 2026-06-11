@@ -8,6 +8,7 @@ import {
   seedExecutorAllowlistIfEmpty,
 } from "@/lib/ai/execution-subjects"
 import { buildSubjectPriorityMap } from "@/lib/ai/strategy-helpers"
+import { resolvePrioritySource } from "@/lib/priority-source"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
     const editalIds = await getEditalSubjectIdSet(user_id)
     const attemptedIds = await getSubjectIdsWithAttempts(user_id)
     const prefs = await getExecutorStudyPreferences(user_id)
+    const prioritySource = resolvePrioritySource(prefs.study_mode)
 
     const { data: subjects } = await supabaseServer
       .from("subjects")
@@ -38,6 +40,7 @@ export async function GET(req: Request) {
       .from("strategic_queue_items")
       .select("subject_id, priority_score")
       .eq("user_id", user_id)
+      .eq("priority_source", prioritySource)
 
     const priorityMap = buildSubjectPriorityMap(
       (queue ?? []).map((q) => ({
