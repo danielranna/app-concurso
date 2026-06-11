@@ -1,26 +1,29 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronRight, Folder, Play, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, ChevronDown, Folder, Plus, Trash2 } from "lucide-react"
 import { useNotebookFolders } from "@/components/questions/NotebookFolderSelect"
+import MateriaNotebookRow, {
+  type MateriaNotebook,
+} from "@/components/questions/MateriaNotebookRow"
 
 type FolderRow = {
   id: string
   name: string
   notebook_count: number
+  question_total: number
   subfolder_count: number
 }
 
-type NotebookRow = {
-  id: string
-  name: string
-  question_count: number
-  answered_count: number
-  completed_at: string | null
-  folder_id: string | null
+function folderStatsLabel(notebookCount: number, questionTotal: number) {
+  const cadernos =
+    notebookCount === 1 ? "1 caderno" : `${notebookCount} cadernos`
+  const questoes =
+    questionTotal === 1 ? "1 questão" : `${questionTotal} questões`
+  return `${cadernos} · ${questoes}`
 }
 
 export default function MateriaQuestoesPage() {
@@ -30,8 +33,9 @@ export default function MateriaQuestoesPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [subjectName, setSubjectName] = useState("")
   const [folders, setFolders] = useState<FolderRow[]>([])
-  const [notebooks, setNotebooks] = useState<NotebookRow[]>([])
+  const [allNotebooks, setAllNotebooks] = useState<MateriaNotebook[]>([])
   const [newFolderName, setNewFolderName] = useState("")
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
   const allFolders = useNotebookFolders(userId, subjectId)
 
   function reload(uid: string) {
@@ -39,17 +43,36 @@ export default function MateriaQuestoesPage() {
       fetch(`/api/notebooks/folders?user_id=${uid}&subject_id=${subjectId}&root_only=1`).then(
         (r) => r.json()
       ),
-      fetch(`/api/notebooks?user_id=${uid}&subject_id=${subjectId}&root_only=1`).then((r) =>
-        r.json()
-      ),
+      fetch(`/api/notebooks?user_id=${uid}&subject_id=${subjectId}`).then((r) => r.json()),
       fetch(`/api/subjects?user_id=${uid}`).then((r) => r.json()),
     ]).then(([f, n, subs]) => {
       setFolders(f ?? [])
-      setNotebooks(n ?? [])
+      setAllNotebooks(n ?? [])
       const sub = (subs ?? []).find((s: { id: string }) => s.id === subjectId)
       setSubjectName(sub?.name ?? "Matéria")
     })
   }
+
+  const rootNotebooks = useMemo(
+    () => allNotebooks.filter((nb) => !nb.folder_id),
+    [allNotebooks]
+  )
+
+  const notebooksByFolder = useMemo(() => {
+    const map = new Map<string, MateriaNotebook[]>()
+    for (const nb of allNotebooks) {
+      if (!nb.folder_id) continue
+      const list = map.get(nb.folder_id) ?? []
+      list.push(nb)
+      map.set(nb.folder_id, list)
+    }
+    return map
+  }, [allNotebooks])
+
+  const rootQuestionTotal = useMemo(
+    () => rootNotebooks.reduce((sum, nb) => sum + nb.question_count, 0),
+    [rootNotebooks]
+  )
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -61,6 +84,10 @@ export default function MateriaQuestoesPage() {
       reload(user.id)
     })
   }, [subjectId, router])
+
+  function toggleFolder(folderId: string) {
+    setExpandedFolders((prev) => ({ ...prev, [folderId]: !prev[folderId] }))
+  }
 
   async function createFolder() {
     if (!userId || !newFolderName.trim()) return
@@ -84,15 +111,10 @@ export default function MateriaQuestoesPage() {
     )
       return
     await fetch(`/api/notebooks/folders?id=${id}`, { method: "DELETE" })
-    reload(userId)
-  }
-
-  async function moveNotebook(notebookId: string, folderId: string | null) {
-    if (!userId) return
-    await fetch(`/api/notebooks/${notebookId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder_id: folderId }),
+    setExpandedFolders((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
     })
     reload(userId)
   }
@@ -145,88 +167,104 @@ export default function MateriaQuestoesPage() {
             Criar
           </button>
         </div>
-        {folders.map((f) => (
-          <div
-            key={f.id}
-            className="mb-2 flex items-center justify-between rounded-lg border bg-white px-4 py-3"
-          >
-            <Link
-              href={`/questoes/materia/${subjectId}/pastas/${f.id}`}
-              className="flex flex-1 items-center gap-2 hover:text-blue-700"
-            >
-              <Folder className="h-5 w-5 text-slate-400" />
-              <span className="font-medium">{f.name}</span>
-              <span className="text-sm text-slate-500">{f.notebook_count} cadernos</span>
-              <ChevronRight className="ml-auto h-4 w-4 text-slate-400" />
-            </Link>
-            <button
-              type="button"
-              onClick={() => deleteFolder(f.id)}
-              className="ml-2 text-red-600 text-sm"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
+        {folders.map((f) => {
+          const expanded = expandedFolders[f.id] ?? false
+          const folderNotebooks = notebooksByFolder.get(f.id) ?? []
+          const notebookCount = folderNotebooks.length || f.notebook_count
+          const questionTotal =
+            folderNotebooks.reduce((sum, nb) => sum + nb.question_count, 0) ||
+            f.question_total ||
+            0
+
+          return (
+            <div key={f.id} className="mb-2">
+              <div className="flex items-center justify-between rounded-lg border bg-white px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => toggleFolder(f.id)}
+                  className="flex flex-1 items-center gap-2 text-left hover:text-blue-700"
+                  aria-expanded={expanded}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${
+                      expanded ? "" : "-rotate-90"
+                    }`}
+                  />
+                  <Folder className="h-5 w-5 shrink-0 text-slate-400" />
+                  <span className="font-medium">{f.name}</span>
+                  <span className="text-sm text-slate-500">
+                    {folderStatsLabel(notebookCount, questionTotal)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteFolder(f.id)}
+                  className="ml-2 text-red-600 text-sm"
+                  title="Excluir subpasta"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {expanded && userId && (
+                <div className="mt-2 space-y-0">
+                  <div className="mb-2 ml-6">
+                    <Link
+                      href={`/questoes/importar?subject_id=${subjectId}&folder_id=${f.id}`}
+                      className="inline-flex items-center gap-1 text-xs text-slate-600 underline hover:text-slate-900"
+                    >
+                      <Plus className="h-3 w-3" /> Importar PDF nesta subpasta
+                    </Link>
+                  </div>
+                  {folderNotebooks.map((nb) => (
+                    <MateriaNotebookRow
+                      key={nb.id}
+                      notebook={nb}
+                      userId={userId}
+                      subjectId={subjectId}
+                      folders={allFolders}
+                      onMoved={() => reload(userId)}
+                      onDelete={deleteNotebook}
+                      nested
+                    />
+                  ))}
+                  {folderNotebooks.length === 0 && (
+                    <p className="ml-6 text-sm text-slate-500">Nenhum caderno nesta subpasta.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
         {folders.length === 0 && (
           <p className="text-sm text-slate-500">Nenhuma subpasta ainda.</p>
         )}
       </section>
 
       <section className="mt-8">
-        <h2 className="mb-3 font-semibold text-slate-700">Cadernos na raiz</h2>
-        {notebooks.map((nb) => (
-          <div
-            key={nb.id}
-            className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-4 py-3"
-          >
-            <div>
-              <p className="font-medium text-blue-700">{nb.name}</p>
-              <p className="text-sm text-slate-500">
-                {nb.answered_count}/{nb.question_count} respondidas
-                {nb.completed_at && " · Concluído"}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {allFolders.length > 0 && (
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (!v) return
-                    void moveNotebook(nb.id, v)
-                    e.target.value = ""
-                  }}
-                  className="rounded border px-2 py-1.5 text-xs text-slate-600"
-                  aria-label="Mover para subpasta"
-                >
-                  <option value="">Mover para…</option>
-                  {allFolders.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <Link
-                href={`/questoes/cadernos/${nb.id}`}
-                className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1.5 text-sm text-white"
-              >
-                <Play className="h-4 w-4" /> Resolver
-              </Link>
-              <button
-                type="button"
-                onClick={() => deleteNotebook(nb.id)}
-                className="text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        ))}
-        {notebooks.length === 0 && (
+        <div className="mb-3 flex flex-wrap items-baseline gap-2">
+          <h2 className="font-semibold text-slate-700">Cadernos na raiz</h2>
+          {rootNotebooks.length > 0 && (
+            <span className="text-sm text-slate-500">
+              {folderStatsLabel(rootNotebooks.length, rootQuestionTotal)}
+            </span>
+          )}
+        </div>
+        {userId &&
+          rootNotebooks.map((nb) => (
+            <MateriaNotebookRow
+              key={nb.id}
+              notebook={nb}
+              userId={userId}
+              subjectId={subjectId}
+              folders={allFolders}
+              onMoved={() => reload(userId)}
+              onDelete={deleteNotebook}
+            />
+          ))}
+        {rootNotebooks.length === 0 && (
           <p className="text-sm text-slate-500">
-            Nenhum caderno na raiz — use &quot;Mover para…&quot; ou importe direto na subpasta.
+            Nenhum caderno na raiz — expanda uma subpasta ou importe um PDF.
           </p>
         )}
       </section>

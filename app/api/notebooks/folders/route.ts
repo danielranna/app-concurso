@@ -27,17 +27,19 @@ export async function GET(req: Request) {
   const folders = data ?? []
   const withCounts = await Promise.all(
     folders.map(async (f) => {
-      const { count: nbCount } = await supabaseServer
+      const { data: folderNotebooks } = await supabaseServer
         .from("notebooks")
-        .select("id", { count: "exact", head: true })
+        .select("question_count")
         .eq("folder_id", f.id)
       const { count: subCount } = await supabaseServer
         .from("notebook_folders")
         .select("id", { count: "exact", head: true })
         .eq("parent_id", f.id)
+      const notebookRows = folderNotebooks ?? []
       return {
         ...f,
-        notebook_count: nbCount ?? 0,
+        notebook_count: notebookRows.length,
+        question_total: notebookRows.reduce((sum, nb) => sum + (nb.question_count ?? 0), 0),
         subfolder_count: subCount ?? 0,
       }
     })

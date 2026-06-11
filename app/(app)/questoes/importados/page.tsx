@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, FileStack, Play, Trash2 } from "lucide-react"
 import OrganizeContentModal from "@/components/shared-assets/OrganizeContentModal"
+import MoveNotebookModal from "@/components/questions/MoveNotebookModal"
 
 type Notebook = {
   id: string
@@ -15,14 +16,11 @@ type Notebook = {
   completed_at: string | null
 }
 
-type Subject = { id: string; name: string }
-
 export default function ImportadosPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [assigning, setAssigning] = useState<string | null>(null)
+  const [moveNotebook, setMoveNotebook] = useState<Notebook | null>(null)
   const [organizeNotebook, setOrganizeNotebook] = useState<Notebook | null>(null)
 
   function reload(uid: string) {
@@ -37,9 +35,6 @@ export default function ImportadosPage() {
       }
       setUserId(user.id)
       reload(user.id)
-      fetch(`/api/subjects?user_id=${user.id}`)
-        .then((r) => r.json())
-        .then(setSubjects)
     })
   }, [router])
 
@@ -47,18 +42,6 @@ export default function ImportadosPage() {
     if (!userId || !confirm("Excluir este caderno? As questões permanecem no banco global.")) return
     await fetch(`/api/notebooks/${id}`, { method: "DELETE" })
     reload(userId)
-  }
-
-  async function assignSubject(notebookId: string, subjectId: string) {
-    if (!subjectId) return
-    setAssigning(notebookId)
-    await fetch(`/api/notebooks/${notebookId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject_id: subjectId }),
-    })
-    if (userId) reload(userId)
-    setAssigning(null)
   }
 
   return (
@@ -89,20 +72,13 @@ export default function ImportadosPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                disabled={assigning === nb.id}
-                defaultValue=""
-                onChange={(e) => assignSubject(nb.id, e.target.value)}
-                className="rounded border px-2 py-1.5 text-sm"
-                title="Mover para uma pasta de matéria"
+              <button
+                type="button"
+                onClick={() => setMoveNotebook(nb)}
+                className="rounded border px-2 py-1.5 text-sm hover:bg-slate-50"
               >
-                <option value="">Mover para matéria…</option>
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+                Mover para outra pasta…
+              </button>
               <button
                 type="button"
                 onClick={() => setOrganizeNotebook(nb)}
@@ -136,6 +112,17 @@ export default function ImportadosPage() {
           </p>
         )}
       </div>
+
+      {userId && moveNotebook && (
+        <MoveNotebookModal
+          isOpen
+          onClose={() => setMoveNotebook(null)}
+          userId={userId}
+          notebookId={moveNotebook.id}
+          notebookName={moveNotebook.name}
+          onMoved={() => userId && reload(userId)}
+        />
+      )}
 
       {userId && organizeNotebook && (
         <OrganizeContentModal

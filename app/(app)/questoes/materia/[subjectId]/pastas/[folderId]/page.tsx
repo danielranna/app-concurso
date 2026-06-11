@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Folder, Play, Plus, Trash2 } from "lucide-react"
 import { useNotebookFolders } from "@/components/questions/NotebookFolderSelect"
+import NotebookMoveControls from "@/components/questions/NotebookMoveControls"
 
 type NotebookRow = {
   id: string
@@ -60,16 +61,6 @@ export default function MateriaPastaPage() {
     })
   }, [subjectId, folderId, router])
 
-  async function moveNotebook(notebookId: string, targetFolderId: string | null) {
-    if (!userId) return
-    await fetch(`/api/notebooks/${notebookId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder_id: targetFolderId }),
-    })
-    reload(userId)
-  }
-
   async function deleteNotebook(id: string) {
     if (!userId || !confirm("Excluir caderno?")) return
     await fetch(`/api/notebooks/${id}`, { method: "DELETE" })
@@ -112,27 +103,18 @@ export default function MateriaPastaPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const v = e.target.value
-                  if (!v) return
-                  void moveNotebook(nb.id, v === "__root__" ? null : v)
-                  e.target.value = ""
-                }}
-                className="rounded border px-2 py-1.5 text-xs text-slate-600"
-                aria-label="Mover caderno"
-              >
-                <option value="">Mover para…</option>
-                <option value="__root__">Raiz da matéria</option>
-                {folders
-                  .filter((f) => f.id !== folderId)
-                  .map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-              </select>
+              {userId && (
+                <NotebookMoveControls
+                  userId={userId}
+                  notebookId={nb.id}
+                  notebookName={nb.name}
+                  subjectId={subjectId}
+                  currentFolderId={folderId}
+                  folders={folders}
+                  showSameSubjectRoot
+                  onMoved={() => reload(userId)}
+                />
+              )}
               <Link
                 href={`/questoes/cadernos/${nb.id}`}
                 className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1.5 text-sm text-white"
