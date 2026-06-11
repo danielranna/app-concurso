@@ -83,6 +83,18 @@ export default function ImportSharedContentStep({
       .finally(() => setLoadingLib(false))
   }, [userId])
 
+  const activeAsset = useMemo(() => {
+    if (selectedAsset) return selectedAsset
+    if (library.length === 1) return library[0]
+    return null
+  }, [selectedAsset, library])
+
+  useEffect(() => {
+    if (!loadingLib && library.length === 1 && !selectedAsset) {
+      setSelectedAsset(library[0])
+    }
+  }, [loadingLib, library, selectedAsset])
+
   const ordered = useMemo(
     () => [...questions].sort((a, b) => a.index - b.index),
     [questions]
@@ -144,26 +156,27 @@ export default function ImportSharedContentStep({
   }
 
   function applyLink() {
-    if (!selectedAsset || selectedTecIds.size === 0) {
-      setError("Escolha um conteúdo e pelo menos uma questão.")
+    const asset = activeAsset
+    if (!asset || selectedTecIds.size === 0) {
+      setError(
+        library.length > 1 && !selectedAsset
+          ? "Clique no conteúdo da lista para selecioná-lo antes de vincular."
+          : "Escolha um conteúdo e pelo menos uma questão."
+      )
       return
     }
     setError(null)
+    if (!selectedAsset) setSelectedAsset(asset)
     const tecIds = [...selectedTecIds]
-    const existing = pendingLinks.find((l) => l.assetId === selectedAsset.id)
+    const existing = pendingLinks.find((l) => l.assetId === asset.id)
     let next: ImportPendingSharedLink[]
     if (existing) {
       const merged = new Set([...existing.tecIds, ...tecIds])
       next = pendingLinks.map((l) =>
-        l.assetId === selectedAsset.id
-          ? { ...l, tecIds: [...merged] }
-          : l
+        l.assetId === asset.id ? { ...l, tecIds: [...merged] } : l
       )
     } else {
-      next = [
-        ...pendingLinks,
-        { assetId: selectedAsset.id, asset: selectedAsset, tecIds },
-      ]
+      next = [...pendingLinks, { assetId: asset.id, asset, tecIds }]
     }
     onPendingLinksChange(next)
     setSelectedTecIds(new Set())
@@ -209,9 +222,9 @@ export default function ImportSharedContentStep({
     )
   }
 
-  const previewBlocks = selectedAsset
+  const previewBlocks = activeAsset
     ? resolveSharedBlocksFromLinks([
-        { assetId: selectedAsset.id, sortOrder: 0, asset: selectedAsset },
+        { assetId: activeAsset.id, sortOrder: 0, asset: activeAsset },
       ])
     : []
 
@@ -328,7 +341,7 @@ export default function ImportSharedContentStep({
                       type="button"
                       onClick={() => setSelectedAsset(a)}
                       className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-sm ${
-                        selectedAsset?.id === a.id
+                        activeAsset?.id === a.id
                           ? "border-violet-400 bg-violet-50"
                           : "hover:border-slate-300"
                       }`}
@@ -340,7 +353,10 @@ export default function ImportSharedContentStep({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditingAsset(a)}
+                      onClick={() => {
+                        setSelectedAsset(a)
+                        setEditingAsset(a)
+                      }}
                       className="inline-flex h-[38px] w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
                       title="Editar conteúdo"
                     >
@@ -361,12 +377,17 @@ export default function ImportSharedContentStep({
               <button
                 type="button"
                 onClick={applyLink}
-                disabled={!selectedAsset || selectedTecIds.size === 0}
-                className="w-full rounded-lg bg-violet-700 px-3 py-2 text-sm text-white disabled:opacity-40"
+                disabled={!activeAsset || selectedTecIds.size === 0}
+                className="w-full rounded-lg bg-violet-700 px-3 py-2 text-sm text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Vincular às {selectedTecIds.size > 0 ? `${selectedTecIds.size} ` : ""}questões
                 selecionadas
               </button>
+              {library.length > 1 && !selectedAsset && selectedTecIds.size > 0 && (
+                <p className="text-xs text-amber-700">
+                  Clique no conteúdo acima para selecioná-lo antes de vincular.
+                </p>
+              )}
             </>
           )}
           {error && <p className="text-xs text-red-600">{error}</p>}
