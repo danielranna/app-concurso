@@ -12,12 +12,36 @@ export type WeekdayLimits = {
   }
 }
 
+export type StudyCycleBlockType =
+  | "questions"
+  | "flashcards"
+  | "read"
+  | "error_review"
+
+export type StudyCycleBlock = {
+  id?: string
+  cycle_id?: string
+  day_index: number
+  subject_id: string
+  content_node_id: string | null
+  block_type: StudyCycleBlockType
+  sort_order: number
+  label: string
+  params: {
+    question_count?: number
+    minutes?: number
+    notebook_id?: string
+  }
+  subject_name?: string
+  content_node_name?: string
+}
+
 export type StudyCycleDay = {
   id?: string
   day_index: number
   weekday: number | null
   subject_ids: string[]
-  blocks: unknown[]
+  blocks: StudyCycleBlock[]
   plan_date?: string | null
 }
 
@@ -41,27 +65,17 @@ export type StudyCycle = {
   subjects: StudyCycleSubject[]
   weekday_limits: WeekdayLimits[]
   days: StudyCycleDay[]
+  cycle_blocks: StudyCycleBlock[]
 }
 
-export type CyclePlannerInput = {
-  subject_ids: string[]
-  subjects_per_day: number
-  weekday_limits: WeekdayLimits[]
-  /** subject_id → brain priority score (optional, for weak-subject 2× suggestion) */
-  subject_brain_scores?: Record<string, number>
-}
-
-export type CyclePlannerDay = {
+export type ManualCycleDayInput = {
   day_index: number
-  weekday: number
-  subject_ids: string[]
-  subject_names: string[]
-  estimated_minutes: number
-  daily_limits: WeekdayLimits["daily_limits"]
+  weekday: number | null
+  blocks: Omit<StudyCycleBlock, "id" | "cycle_id">[]
 }
 
-export type CyclePlannerResult = {
-  total_days: number
-  days: CyclePlannerDay[]
-  subjects_doubled: string[]
+export type ManualCycleSaveInput = {
+  name?: string
+  weekday_limits?: WeekdayLimits[]
+  days: ManualCycleDayInput[]
 }

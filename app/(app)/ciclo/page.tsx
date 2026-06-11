@@ -156,20 +156,38 @@ export default function CicloOverviewPage() {
       ) : (
         <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-6 text-center">
           <p className="text-sm text-slate-600">
-            Você ainda não montou um ciclo. Comece pelo planejador — o app sugere
-            a grade e você ajusta.
+            Monte seu ciclo manualmente: organize o índice em Conteúdo, depois
+            adicione dias e blocos em Planejar.
           </p>
-          <Link
-            href="/ciclo/planejar"
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-          >
-            <PenLine className="h-4 w-4" />
-            Planejar ciclo
-          </Link>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Link
+              href="/ciclo/conteudo"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              Conteúdo
+            </Link>
+            <Link
+              href="/ciclo/planejar"
+              className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              <PenLine className="h-4 w-4" />
+              Planejar ciclo
+            </Link>
+          </div>
         </section>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Link
+          href="/ciclo/conteudo"
+          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
+        >
+          <PenLine className="h-5 w-5 text-teal-600" />
+          <div>
+            <p className="text-sm font-medium text-slate-900">Conteúdo</p>
+            <p className="text-xs text-slate-500">Índice e hierarquia</p>
+          </div>
+        </Link>
         <Link
           href="/ciclo/planejar"
           className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"

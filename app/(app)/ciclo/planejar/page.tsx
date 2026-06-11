@@ -1,116 +1,184 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, Sparkles, Save, Play } from "lucide-react"
-import type { CyclePlannerResult, WeekdayLimits } from "@/lib/study-cycle-types"
-import { defaultWeekdayLimits, WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
-import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
-import type { PrioritySource } from "@/lib/priority-source"
+import {
+  ArrowLeft,
+  Loader2,
+  Plus,
+  Save,
+  Play,
+  Trash2,
+} from "lucide-react"
+import type { StudyCycleBlock, StudyCycleBlockType } from "@/lib/study-cycle-types"
+import type { SubjectContentNode } from "@/lib/content-index-types"
 
 type Subject = { id: string; name: string }
+
+type DayDraft = {
+  day_index: number
+  weekday: number | null
+  blocks: StudyCycleBlock[]
+}
+
+const BLOCK_TYPES: { value: StudyCycleBlockType; label: string }[] = [
+  { value: "questions", label: "Questões" },
+  { value: "flashcards", label: "Flashcards" },
+  { value: "read", label: "Leitura" },
+  { value: "error_review", label: "Revisão de erros" },
+]
+
+function emptyBlock(dayIndex: number, sortOrder: number): StudyCycleBlock {
+  return {
+    day_index: dayIndex,
+    subject_id: "",
+    content_node_id: null,
+    block_type: "questions",
+    sort_order: sortOrder,
+    label: "",
+    params: { question_count: 20, minutes: 30 },
+  }
+}
 
 export default function CicloPlanejarPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [subjectsPerDay, setSubjectsPerDay] = useState(2)
-  const [weekdayLimits, setWeekdayLimits] = useState<WeekdayLimits[]>(
-    defaultWeekdayLimits()
-  )
-  const [plan, setPlan] = useState<CyclePlannerResult | null>(null)
-  const [prioritySource, setPrioritySource] = useState<PrioritySource>("brain")
+  const [days, setDays] = useState<DayDraft[]>([{ day_index: 0, weekday: null, blocks: [] }])
+  const [contentBySubject, setContentBySubject] = useState<
+    Record<string, SubjectContentNode[]>
+  >({})
   const [loading, setLoading] = useState(true)
-  const [previewing, setPreviewing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const loadSubjects = useCallback(async (uid: string) => {
-    const [subRes, cicloRes] = await Promise.all([
-      fetch(`/api/subjects?user_id=${uid}`).then((r) => r.json()),
-      fetch(`/api/ciclo?user_id=${uid}`).then((r) => r.json()),
-    ])
-    setSubjects(Array.isArray(subRes) ? subRes : [])
-    setPrioritySource(cicloRes.priority_source ?? "brain")
-
-    const defaultIds: string[] = cicloRes.default_subject_ids ?? []
-    const cycle = cicloRes.cycle
-    if (cycle?.subjects?.length) {
-      setSelected(new Set(cycle.subjects.map((s: { subject_id: string }) => s.subject_id)))
-      setSubjectsPerDay(cycle.subjects_per_day ?? 2)
-      if (cycle.weekday_limits?.length) {
-        setWeekdayLimits(cycle.weekday_limits)
+  const loadContentNodes = useCallback(async (uid: string, sid: string) => {
+    const r = await fetch(`/api/ciclo/content?user_id=${uid}&subject_id=${sid}`)
+    const d = await r.json()
+    const flat: SubjectContentNode[] = []
+    function walk(nodes: SubjectContentNode[]) {
+      for (const n of nodes) {
+        flat.push(n)
+        if (n.children) walk(n.children)
       }
-    } else if (defaultIds.length) {
-      setSelected(new Set(defaultIds))
-    } else if (Array.isArray(subRes) && subRes.length) {
-      setSelected(new Set(subRes.map((s: Subject) => s.id)))
     }
+    walk(d.nodes ?? [])
+    for (const u of d.ungrouped ?? []) flat.push(u)
+    return flat
   }, [])
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) {
         router.push("/login")
         return
       }
       setUserId(user.id)
-      loadSubjects(user.id).finally(() => setLoading(false))
-    })
-  }, [router, loadSubjects])
+      const [subList, ciclo] = await Promise.all([
+        fetch(`/api/subjects?user_id=${user.id}`).then((r) => r.json()),
+        fetch(`/api/ciclo?user_id=${user.id}`).then((r) => r.json()),
+      ])
+      const subs: Subject[] = Array.isArray(subList) ? subList : []
+      setSubjects(subs)
 
-  const selectedList = useMemo(() => [...selected], [selected])
+      if (ciclo.cycle?.days?.length) {
+        setDays(
+          ciclo.cycle.days.map(
+            (d: { day_index: number; weekday: number | null; blocks: StudyCycleBlock[] }) => ({
+              day_index: d.day_index,
+              weekday: d.weekday,
+              blocks: d.blocks?.length ? d.blocks : [],
+            })
+          )
+        )
+      }
 
-  function toggleSubject(id: string) {
-    setSelected((prev) => {
-      const n = new Set(prev)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
+      const map: Record<string, SubjectContentNode[]> = {}
+      for (const s of subs) {
+        map[s.id] = await loadContentNodes(user.id, s.id)
+      }
+      setContentBySubject(map)
+      setLoading(false)
     })
-    setPlan(null)
+  }, [router, loadContentNodes])
+
+  function addDay() {
+    setDays((prev) => [
+      ...prev,
+      { day_index: prev.length, weekday: null, blocks: [] },
+    ])
   }
 
-  function updateWeekday(weekday: number, patch: Partial<WeekdayLimits>) {
-    setWeekdayLimits((prev) =>
-      prev.map((w) => (w.weekday === weekday ? { ...w, ...patch } : w))
+  function removeDay(idx: number) {
+    setDays((prev) =>
+      prev
+        .filter((_, i) => i !== idx)
+        .map((d, i) => ({ ...d, day_index: i }))
     )
-    setPlan(null)
   }
 
-  async function handlePreview() {
-    if (!userId || selectedList.length === 0) {
-      alert("Selecione ao menos uma matéria")
-      return
-    }
-    setPreviewing(true)
-    try {
-      const res = await fetch("/api/ciclo/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          action: "preview",
-          subject_ids: selectedList,
-          subjects_per_day: subjectsPerDay,
-          weekday_limits: weekdayLimits,
-        }),
-      })
-      const data = await res.json()
-      if (data.error) alert(data.error)
-      else setPlan(data.plan)
-    } finally {
-      setPreviewing(false)
-    }
+  function addBlock(dayIdx: number) {
+    setDays((prev) =>
+      prev.map((d, i) =>
+        i === dayIdx
+          ? {
+              ...d,
+              blocks: [...d.blocks, emptyBlock(d.day_index, d.blocks.length)],
+            }
+          : d
+      )
+    )
   }
 
-  async function handleSave(activate: boolean) {
-    if (!userId || !plan?.days?.length) {
-      alert("Gere a sugestão antes de salvar")
+  function updateBlock(
+    dayIdx: number,
+    blockIdx: number,
+    patch: Partial<StudyCycleBlock>
+  ) {
+    setDays((prev) =>
+      prev.map((d, i) =>
+        i === dayIdx
+          ? {
+              ...d,
+              blocks: d.blocks.map((b, j) =>
+                j === blockIdx ? { ...b, ...patch } : b
+              ),
+            }
+          : d
+      )
+    )
+  }
+
+  function removeBlock(dayIdx: number, blockIdx: number) {
+    setDays((prev) =>
+      prev.map((d, i) =>
+        i === dayIdx
+          ? {
+              ...d,
+              blocks: d.blocks.filter((_, j) => j !== blockIdx),
+            }
+          : d
+      )
+    )
+  }
+
+  async function save(activate: boolean) {
+    if (!userId) return
+    const hasBlocks = days.some((d) => d.blocks.length > 0)
+    if (!hasBlocks) {
+      alert("Adicione ao menos um bloco em algum dia")
       return
     }
+    for (const d of days) {
+      for (const b of d.blocks) {
+        if (!b.subject_id) {
+          alert("Selecione a matéria em todos os blocos")
+          return
+        }
+      }
+    }
+
     setSaving(true)
     try {
       const res = await fetch("/api/ciclo/plan", {
@@ -119,12 +187,21 @@ export default function CicloPlanejarPage() {
         body: JSON.stringify({
           user_id: userId,
           action: activate ? "save_and_activate" : "save",
-          subject_ids: selectedList,
-          subjects_per_day: subjectsPerDay,
-          weekday_limits: weekdayLimits,
-          plan,
-          subjects_doubled: plan.subjects_doubled,
           name: "Meu ciclo",
+          days: days.map((d) => ({
+            day_index: d.day_index,
+            weekday: d.weekday,
+            blocks: d.blocks.map((b, sort_order) => ({
+              ...b,
+              sort_order,
+              label:
+                b.label ||
+                contentBySubject[b.subject_id]?.find(
+                  (n) => n.id === b.content_node_id
+                )?.name ||
+                "",
+            })),
+          })),
         }),
       })
       const data = await res.json()
@@ -156,168 +233,179 @@ export default function CicloPlanejarPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Planejar ciclo</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Selecione matérias e horas por dia. O app sugere a grade — você confirma
-          ou ajusta.
+          Monte cada dia manualmente: matérias e blocos de conteúdo. Organize o
+          índice em{" "}
+          <Link href="/ciclo/conteudo" className="text-teal-700 underline">
+            Conteúdo
+          </Link>{" "}
+          antes.
         </p>
       </div>
 
-      <PrioritySourceBanner source={prioritySource} studyMode="pre_edital" />
+      {days.map((day, dayIdx) => (
+        <section
+          key={day.day_index}
+          className="rounded-xl border border-slate-200 bg-white p-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-slate-900">Dia {day.day_index + 1}</h2>
+            {days.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeDay(dayIdx)}
+                className="text-sm text-red-600 hover:underline"
+              >
+                Remover dia
+              </button>
+            )}
+          </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Matérias no ciclo</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          {selected.size} selecionada(s) · {subjects.length} no total
-        </p>
-        <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-100">
-          {subjects.map((s) => (
-            <label
-              key={s.id}
-              className="flex cursor-pointer items-center gap-3 border-b border-slate-50 px-3 py-2 last:border-0 hover:bg-slate-50"
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(s.id)}
-                onChange={() => toggleSubject(s.id)}
-                className="rounded border-slate-300 text-teal-600"
-              />
-              <span className="text-sm text-slate-800">{s.name}</span>
-            </label>
-          ))}
-        </div>
-        <div className="mt-4">
-          <label className="text-xs font-medium text-slate-600">
-            Matérias por dia do ciclo
-          </label>
-          <select
-            value={subjectsPerDay}
-            onChange={(e) => {
-              setSubjectsPerDay(Number(e.target.value))
-              setPlan(null)
-            }}
-            className="mt-1 block w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          <div className="mt-3 space-y-3">
+            {day.blocks.map((block, blockIdx) => (
+              <div
+                key={blockIdx}
+                className="rounded-lg border border-slate-100 bg-slate-50/50 p-3"
+              >
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="text-xs text-slate-600">
+                    Matéria
+                    <select
+                      value={block.subject_id}
+                      onChange={(e) =>
+                        updateBlock(dayIdx, blockIdx, {
+                          subject_id: e.target.value,
+                          content_node_id: null,
+                        })
+                      }
+                      className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Selecione</option>
+                      {subjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Tópico / grupo
+                    <select
+                      value={block.content_node_id ?? ""}
+                      disabled={!block.subject_id}
+                      onChange={(e) =>
+                        updateBlock(dayIdx, blockIdx, {
+                          content_node_id: e.target.value || null,
+                        })
+                      }
+                      className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-50"
+                    >
+                      <option value="">Geral da matéria</option>
+                      {(contentBySubject[block.subject_id] ?? []).map((n) => (
+                        <option key={n.id} value={n.id}>
+                          {n.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Tipo
+                    <select
+                      value={block.block_type}
+                      onChange={(e) =>
+                        updateBlock(dayIdx, blockIdx, {
+                          block_type: e.target.value as StudyCycleBlockType,
+                        })
+                      }
+                      className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                    >
+                      {BLOCK_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-xs text-slate-600">
+                    Questões / meta
+                    <input
+                      type="number"
+                      min={1}
+                      value={block.params.question_count ?? 20}
+                      onChange={(e) =>
+                        updateBlock(dayIdx, blockIdx, {
+                          params: {
+                            ...block.params,
+                            question_count: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="text-xs text-slate-600 sm:col-span-2">
+                    Rótulo (opcional)
+                    <input
+                      type="text"
+                      value={block.label}
+                      onChange={(e) =>
+                        updateBlock(dayIdx, blockIdx, { label: e.target.value })
+                      }
+                      className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeBlock(dayIdx, blockIdx)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-red-600"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remover bloco
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => addBlock(dayIdx)}
+            className="mt-3 inline-flex items-center gap-1 text-sm text-teal-700 hover:underline"
           >
-            <option value={1}>1 matéria</option>
-            <option value={2}>2 matérias</option>
-            <option value={3}>3 matérias</option>
-          </select>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">
-          Horas por dia da semana
-        </h2>
-        <div className="mt-3 space-y-2">
-          {weekdayLimits.map((w) => (
-            <div
-              key={w.weekday}
-              className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 px-3 py-2"
-            >
-              <label className="flex w-24 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={w.active}
-                  onChange={(e) =>
-                    updateWeekday(w.weekday, {
-                      active: e.target.checked,
-                      minutes: e.target.checked ? Math.max(w.minutes, 60) : 0,
-                    })
-                  }
-                  className="rounded border-slate-300 text-teal-600"
-                />
-                {WEEKDAY_LABELS[w.weekday]}
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={720}
-                step={30}
-                disabled={!w.active}
-                value={w.minutes}
-                onChange={(e) =>
-                  updateWeekday(w.weekday, { minutes: Number(e.target.value) })
-                }
-                className="w-20 rounded border border-slate-200 px-2 py-1 text-sm disabled:opacity-40"
-              />
-              <span className="text-xs text-slate-500">min</span>
-            </div>
-          ))}
-        </div>
-      </section>
+            <Plus className="h-4 w-4" />
+            Adicionar bloco
+          </button>
+        </section>
+      ))}
 
       <button
         type="button"
-        onClick={handlePreview}
-        disabled={previewing || selected.size === 0}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-3 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50 sm:w-auto"
+        onClick={addDay}
+        className="inline-flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
       >
-        {previewing ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Sparkles className="h-4 w-4" />
-        )}
-        Gerar sugestão de ciclo
+        <Plus className="h-4 w-4" />
+        Adicionar dia
       </button>
 
-      {plan && plan.days.length > 0 && (
-        <section className="rounded-xl border border-teal-200 bg-teal-50/30 p-4">
-          <h2 className="text-sm font-semibold text-teal-900">
-            Sugestão — {plan.total_days} dias de ciclo
-          </h2>
-          {plan.subjects_doubled.length > 0 && (
-            <p className="mt-1 text-xs text-teal-800/80">
-              Matérias mais fracas aparecem 2×:{" "}
-              {plan.subjects_doubled.length} matéria(s)
-            </p>
-          )}
-          <ul className="mt-4 divide-y divide-teal-100 rounded-lg border border-teal-100 bg-white">
-            {plan.days.map((day) => (
-              <li
-                key={day.day_index}
-                className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
-              >
-                <span className="font-medium text-slate-700">
-                  Dia {day.day_index + 1} · {WEEKDAY_LABELS[day.weekday]}
-                </span>
-                <span className="text-slate-900">
-                  {day.subject_names.join(" · ")}
-                </span>
-                <span className="text-xs text-slate-500">
-                  ~{day.estimated_minutes} min · {day.daily_limits.questions} questões
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSave(false)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              Salvar rascunho
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSave(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              Salvar e ativar ciclo
-            </button>
-          </div>
-        </section>
-      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => save(false)}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Salvar rascunho
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => save(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          Salvar e ativar
+        </button>
+      </div>
     </div>
   )
 }

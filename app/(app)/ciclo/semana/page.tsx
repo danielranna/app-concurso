@@ -4,9 +4,15 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, ExternalLink } from "lucide-react"
+import { ArrowLeft, ExternalLink, Loader2, PenLine } from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
-import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
+
+const BLOCK_TYPE_LABELS: Record<string, string> = {
+  questions: "Questões",
+  flashcards: "Flashcards",
+  read: "Leitura",
+  error_review: "Erros",
+}
 
 export default function CicloSemanaPage() {
   const router = useRouter()
@@ -53,14 +59,11 @@ export default function CicloSemanaPage() {
           href="/ciclo/planejar"
           className="inline-block text-teal-700 underline"
         >
-          Planejar ciclo
+          Planejar ciclo manualmente
         </Link>
       </div>
     )
   }
-
-  const subjectName = (id: string) =>
-    cycle.subjects.find((s) => s.subject_id === id)?.subject_name ?? id
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -76,58 +79,88 @@ export default function CicloSemanaPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Grade do ciclo</h1>
           <p className="mt-1 text-sm text-slate-600">
-            {cycle.total_days} dias · dia atual{" "}
-            {cycle.current_day_index + 1}
-            {cycleEnabled ? " · ciclo ativo" : " · pausado (consultoria)"}
+            {cycle.total_days} dias · dia atual {cycle.current_day_index + 1}
+            {cycleEnabled ? " · ciclo ativo" : " · pausado"}
           </p>
         </div>
-        {cycleEnabled && (
+        <div className="flex gap-2">
           <Link
-            href="/coach/hoje"
-            className="inline-flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            href="/ciclo/planejar"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
           >
-            Plano de hoje
-            <ExternalLink className="h-3.5 w-3.5" />
+            <PenLine className="h-3.5 w-3.5" />
+            Editar
           </Link>
-        )}
+          {cycleEnabled && (
+            <Link
+              href="/coach/hoje"
+              className="inline-flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              Plano de hoje
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          )}
+        </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Dia</th>
-              <th className="px-4 py-3">Semana</th>
-              <th className="px-4 py-3">Matérias</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {cycle.days.map((day) => {
-              const isCurrent = day.day_index === cycle.current_day_index
-              return (
-                <tr
-                  key={day.day_index}
-                  className={isCurrent ? "bg-teal-50/60" : undefined}
-                >
-                  <td className="px-4 py-3 font-medium text-slate-800">
-                    {day.day_index + 1}
-                    {isCurrent && (
-                      <span className="ml-2 rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
-                        Hoje
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {day.weekday != null ? WEEKDAY_LABELS[day.weekday] : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-800">
-                    {day.subject_ids.map(subjectName).join(" · ")}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <div className="space-y-4">
+        {cycle.days.map((day) => {
+          const isCurrent = day.day_index === cycle.current_day_index
+          const blocks = day.blocks?.length
+            ? day.blocks
+            : cycle.cycle_blocks.filter((b) => b.day_index === day.day_index)
+
+          return (
+            <section
+              key={day.day_index}
+              className={`rounded-xl border p-4 ${
+                isCurrent
+                  ? "border-teal-300 bg-teal-50/40"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-slate-900">
+                  Dia {day.day_index + 1}
+                </h2>
+                {isCurrent && (
+                  <span className="rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
+                    Hoje
+                  </span>
+                )}
+              </div>
+
+              {blocks.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">Sem blocos</p>
+              ) : (
+                <ol className="mt-3 space-y-2">
+                  {blocks
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((b, i) => (
+                      <li
+                        key={b.id ?? i}
+                        className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm border border-slate-100"
+                      >
+                        <span className="font-medium text-slate-800">
+                          {b.label ||
+                            b.content_node_name ||
+                            b.subject_name ||
+                            "Bloco"}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {BLOCK_TYPE_LABELS[b.block_type] ?? b.block_type}
+                          {b.params.question_count
+                            ? ` · ${b.params.question_count} questões`
+                            : ""}
+                          {b.subject_name ? ` · ${b.subject_name}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                </ol>
+              )}
+            </section>
+          )
+        })}
       </div>
     </div>
   )

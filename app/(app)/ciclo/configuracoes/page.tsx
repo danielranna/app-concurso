@@ -135,20 +135,21 @@ export default function CicloConfiguracoesPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <label className="text-sm font-medium text-slate-900">
-          Matérias por dia do ciclo
+          Referência: matérias por dia (opcional)
         </label>
-        <select
+        <p className="mt-1 text-xs text-slate-500">
+          No planejamento manual você define quantas matérias quiser por dia.
+        </p>
+        <input
+          type="number"
+          min={1}
           value={subjectsPerDay}
           onChange={(e) => {
             setSubjectsPerDay(Number(e.target.value))
             setSaved(false)
           }}
           className="mt-2 block w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm"
-        >
-          <option value={1}>1</option>
-          <option value={2}>2</option>
-          <option value={3}>3</option>
-        </select>
+        />
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">

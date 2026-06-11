@@ -74,7 +74,7 @@ export function suggestCyclePlan(
     if (doubled.has(sid)) expanded.push(sid)
   }
 
-  const perDay = Math.max(1, Math.min(3, input.subjects_per_day))
+  const perDay = Math.max(1, input.subjects_per_day)
   const days: CyclePlannerDay[] = []
   let subjectPtr = 0
 

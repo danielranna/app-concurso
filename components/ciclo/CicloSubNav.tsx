@@ -5,6 +5,7 @@ import ScrollableSubNav from "@/components/ScrollableSubNav"
 
 const links = [
   { href: "/ciclo", label: "Visão geral", exact: true },
+  { href: "/ciclo/conteudo", label: "Conteúdo" },
   { href: "/ciclo/planejar", label: "Planejar" },
   { href: "/ciclo/semana", label: "Semana" },
   { href: "/ciclo/configuracoes", label: "Configurações" },

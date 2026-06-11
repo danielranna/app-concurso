@@ -1,3 +1,4 @@
+import { syncNotebookToContentIndex } from "./content-index-sync"
 import { supabaseServer } from "./supabase-server"
 import { bulkLinkAssetToQuestions } from "./shared-assets-server"
 import type {
@@ -249,6 +250,14 @@ export async function importNotebookFromParsed(
     if (error) {
       if (error.code === "23505") skipped_in_notebook++
       else throw new Error(error.message)
+    }
+  }
+
+  if (opts.subject_id) {
+    try {
+      await syncNotebookToContentIndex(userId, notebook.id, opts.subject_id)
+    } catch {
+      /* índice opcional — não falha import */
     }
   }
 

@@ -1,9 +1,9 @@
 import { supabaseServer } from "./supabase-server"
-import { suggestCyclePlan, defaultWeekdayLimits } from "./study-cycle-planner"
+import { defaultWeekdayLimits } from "./study-cycle-planner"
 import type {
-  CyclePlannerInput,
-  CyclePlannerResult,
+  ManualCycleSaveInput,
   StudyCycle,
+  StudyCycleBlock,
   StudyCycleDay,
   StudyCycleSubject,
   WeekdayLimits,
@@ -56,12 +56,70 @@ export async function setCycleEnabled(
   await supabaseServer.from("coach_study_preferences").upsert(patch)
 }
 
-async function loadCycleRelations(cycleId: string): Promise<{
+async function loadCycleBlocks(cycleId: string): Promise<StudyCycleBlock[]> {
+  const { data: rows } = await supabaseServer
+    .from("study_cycle_blocks")
+    .select(
+      "*, subjects(name), subject_content_nodes(name, notebook_id)"
+    )
+    .eq("cycle_id", cycleId)
+    .order("sort_order")
+
+  const sorted = (rows ?? []).sort(
+    (a, b) => a.day_index - b.day_index || a.sort_order - b.sort_order
+  )
+
+  return sorted.map((r) => {
+    const sub = r.subjects as { name?: string } | { name?: string }[] | null
+    const node = r.subject_content_nodes as
+      | { name?: string; notebook_id?: string }
+      | { name?: string; notebook_id?: string }[]
+      | null
+    const subName = Array.isArray(sub) ? sub[0]?.name : sub?.name
+    const nodeObj = Array.isArray(node) ? node[0] : node
+    return {
+      id: r.id,
+      cycle_id: r.cycle_id,
+      day_index: r.day_index,
+      subject_id: r.subject_id,
+      content_node_id: r.content_node_id,
+      block_type: r.block_type as StudyCycleBlock["block_type"],
+      sort_order: r.sort_order,
+      label: r.label ?? "",
+      params: (r.params ?? {}) as StudyCycleBlock["params"],
+      subject_name: subName,
+      content_node_name: nodeObj?.name,
+    }
+  })
+}
+
+function blocksToDays(
+  blocks: StudyCycleBlock[],
+  totalDays: number
+): StudyCycleDay[] {
+  const days: StudyCycleDay[] = []
+  for (let i = 0; i < totalDays; i++) {
+    const dayBlocks = blocks
+      .filter((b) => b.day_index === i)
+      .sort((a, b) => a.sort_order - b.sort_order)
+    const subject_ids = [...new Set(dayBlocks.map((b) => b.subject_id))]
+    days.push({
+      day_index: i,
+      weekday: null,
+      subject_ids,
+      blocks: dayBlocks,
+    })
+  }
+  return days
+}
+
+async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
   subjects: StudyCycleSubject[]
   weekday_limits: WeekdayLimits[]
   days: StudyCycleDay[]
+  cycle_blocks: StudyCycleBlock[]
 }> {
-  const [{ data: subRows }, { data: wdRows }, { data: dayRows }] =
+  const [{ data: subRows }, { data: wdRows }, { data: dayRows }, cycle_blocks] =
     await Promise.all([
       supabaseServer
         .from("study_cycle_subjects")
@@ -78,6 +136,7 @@ async function loadCycleRelations(cycleId: string): Promise<{
         .select("*")
         .eq("cycle_id", cycleId)
         .order("day_index"),
+      loadCycleBlocks(cycleId),
     ])
 
   const subjects: StudyCycleSubject[] = (subRows ?? []).map((r) => {
@@ -98,19 +157,35 @@ async function loadCycleRelations(cycleId: string): Promise<{
     daily_limits: r.daily_limits as WeekdayLimits["daily_limits"],
   }))
 
-  const days: StudyCycleDay[] = (dayRows ?? []).map((r) => ({
-    id: r.id,
-    day_index: r.day_index,
-    weekday: r.weekday,
-    subject_ids: r.subject_ids ?? [],
-    blocks: r.blocks ?? [],
-    plan_date: r.plan_date,
-  }))
+  let days: StudyCycleDay[]
+  if (cycle_blocks.length > 0) {
+    days = blocksToDays(cycle_blocks, totalDays)
+    for (const dr of dayRows ?? []) {
+      const d = days.find((x) => x.day_index === dr.day_index)
+      if (d) {
+        d.weekday = dr.weekday
+        d.id = dr.id
+        d.plan_date = dr.plan_date
+      }
+    }
+  } else {
+    days = (dayRows ?? []).map((r) => ({
+      id: r.id,
+      day_index: r.day_index,
+      weekday: r.weekday,
+      subject_ids: r.subject_ids ?? [],
+      blocks: [],
+      plan_date: r.plan_date,
+    }))
+  }
 
-  return { subjects, weekday_limits, days }
+  return { subjects, weekday_limits, days, cycle_blocks }
 }
 
-function rowToCycle(row: CycleRow, rel: Awaited<ReturnType<typeof loadCycleRelations>>): StudyCycle {
+function rowToCycle(
+  row: CycleRow,
+  rel: Awaited<ReturnType<typeof loadCycleRelations>>
+): StudyCycle {
   return {
     id: row.id,
     user_id: row.user_id,
@@ -121,7 +196,10 @@ function rowToCycle(row: CycleRow, rel: Awaited<ReturnType<typeof loadCycleRelat
     paused_at: row.paused_at,
     current_day_index: row.current_day_index,
     total_days: row.total_days,
-    ...rel,
+    subjects: rel.subjects,
+    weekday_limits: rel.weekday_limits,
+    days: rel.days,
+    cycle_blocks: rel.cycle_blocks,
   }
 }
 
@@ -138,7 +216,7 @@ export async function getActiveOrDraftCycle(
     .maybeSingle()
 
   if (!row) return null
-  const rel = await loadCycleRelations(row.id)
+  const rel = await loadCycleRelations(row.id, row.total_days ?? 0)
   return rowToCycle(row as CycleRow, rel)
 }
 
@@ -154,7 +232,22 @@ export async function getTodayCycleDay(
   return { cycle, day }
 }
 
-export async function advanceCycleDayIndex(cycleId: string, totalDays: number): Promise<void> {
+export async function getTodayCycleBlocks(
+  userId: string
+): Promise<{ cycle: StudyCycle; day: StudyCycleDay; blocks: StudyCycleBlock[] } | null> {
+  const ctx = await getTodayCycleDay(userId)
+  if (!ctx) return null
+  const blocks =
+    ctx.day.blocks.length > 0
+      ? ctx.day.blocks
+      : ctx.cycle.cycle_blocks.filter((b) => b.day_index === ctx.day.day_index)
+  return { ...ctx, blocks }
+}
+
+export async function advanceCycleDayIndex(
+  cycleId: string,
+  totalDays: number
+): Promise<void> {
   const { data: row } = await supabaseServer
     .from("study_cycles")
     .select("current_day_index")
@@ -171,18 +264,17 @@ export async function advanceCycleDayIndex(cycleId: string, totalDays: number): 
     .eq("id", cycleId)
 }
 
-export async function saveCycleDraft(
+export async function saveManualCycle(
   userId: string,
-  input: {
-    name?: string
-    subjects_per_day: number
-    subject_ids: string[]
-    weekday_limits: WeekdayLimits[]
-    plan: CyclePlannerResult
-    subjects_doubled?: string[]
-  }
+  input: ManualCycleSaveInput
 ): Promise<StudyCycle> {
-  const doubled = new Set(input.subjects_doubled ?? [])
+  if (!input.days.length) {
+    throw new Error("Adicione ao menos um dia ao ciclo")
+  }
+
+  const allSubjectIds = [
+    ...new Set(input.days.flatMap((d) => d.blocks.map((b) => b.subject_id))),
+  ]
 
   const { data: existing } = await supabaseServer
     .from("study_cycles")
@@ -194,14 +286,21 @@ export async function saveCycleDraft(
     .maybeSingle()
 
   let cycleId = existing?.id
+  const total_days = input.days.length
+  const weekday_limits = input.weekday_limits ?? defaultWeekdayLimits()
+
+  const maxSubjectsPerDay = Math.max(
+    ...input.days.map((d) => new Set(d.blocks.map((b) => b.subject_id)).size),
+    1
+  )
 
   if (cycleId) {
     await supabaseServer
       .from("study_cycles")
       .update({
         name: input.name ?? "Meu ciclo",
-        subjects_per_day: input.subjects_per_day,
-        total_days: input.plan.total_days,
+        subjects_per_day: maxSubjectsPerDay,
+        total_days,
         updated_at: new Date().toISOString(),
       })
       .eq("id", cycleId)
@@ -210,6 +309,7 @@ export async function saveCycleDraft(
       supabaseServer.from("study_cycle_subjects").delete().eq("cycle_id", cycleId),
       supabaseServer.from("study_cycle_weekday_limits").delete().eq("cycle_id", cycleId),
       supabaseServer.from("study_cycle_days").delete().eq("cycle_id", cycleId),
+      supabaseServer.from("study_cycle_blocks").delete().eq("cycle_id", cycleId),
     ])
   } else {
     const { data: created, error } = await supabaseServer
@@ -218,8 +318,8 @@ export async function saveCycleDraft(
         user_id: userId,
         status: "draft",
         name: input.name ?? "Meu ciclo",
-        subjects_per_day: input.subjects_per_day,
-        total_days: input.plan.total_days,
+        subjects_per_day: maxSubjectsPerDay,
+        total_days,
       })
       .select("id")
       .single()
@@ -227,36 +327,54 @@ export async function saveCycleDraft(
     cycleId = created.id
   }
 
-  const subjectRows = input.subject_ids.map((sid, i) => ({
-    cycle_id: cycleId,
-    subject_id: sid,
-    sort_order: i,
-    times_in_cycle: doubled.has(sid) ? 2 : 1,
-  }))
-  if (subjectRows.length) {
-    await supabaseServer.from("study_cycle_subjects").insert(subjectRows)
+  if (allSubjectIds.length) {
+    await supabaseServer.from("study_cycle_subjects").insert(
+      allSubjectIds.map((sid, i) => ({
+        cycle_id: cycleId,
+        subject_id: sid,
+        sort_order: i,
+        times_in_cycle: 1,
+      }))
+    )
   }
 
-  const wdRows = input.weekday_limits.map((w) => ({
-    cycle_id: cycleId,
-    weekday: w.weekday,
-    minutes: w.minutes,
-    active: w.active,
-    daily_limits: w.daily_limits,
-  }))
-  if (wdRows.length) {
-    await supabaseServer.from("study_cycle_weekday_limits").insert(wdRows)
+  if (weekday_limits.length) {
+    await supabaseServer.from("study_cycle_weekday_limits").insert(
+      weekday_limits.map((w) => ({
+        cycle_id: cycleId,
+        weekday: w.weekday,
+        minutes: w.minutes,
+        active: w.active,
+        daily_limits: w.daily_limits,
+      }))
+    )
   }
 
-  const dayRows = input.plan.days.map((d) => ({
+  const dayRows = input.days.map((d) => ({
     cycle_id: cycleId,
     day_index: d.day_index,
     weekday: d.weekday,
-    subject_ids: d.subject_ids,
+    subject_ids: [...new Set(d.blocks.map((b) => b.subject_id))],
     blocks: [],
   }))
   if (dayRows.length) {
     await supabaseServer.from("study_cycle_days").insert(dayRows)
+  }
+
+  const blockRows = input.days.flatMap((d) =>
+    d.blocks.map((b, sort_order) => ({
+      cycle_id: cycleId,
+      day_index: d.day_index,
+      subject_id: b.subject_id,
+      content_node_id: b.content_node_id,
+      block_type: b.block_type,
+      sort_order,
+      label: b.label,
+      params: b.params ?? {},
+    }))
+  )
+  if (blockRows.length) {
+    await supabaseServer.from("study_cycle_blocks").insert(blockRows)
   }
 
   const cycle = await getActiveOrDraftCycle(userId)
@@ -264,7 +382,10 @@ export async function saveCycleDraft(
   return cycle
 }
 
-export async function activateCycle(userId: string, cycleId: string): Promise<StudyCycle> {
+export async function activateCycle(
+  userId: string,
+  cycleId: string
+): Promise<StudyCycle> {
   await supabaseServer
     .from("study_cycles")
     .update({ status: "completed", updated_at: new Date().toISOString() })
@@ -284,7 +405,6 @@ export async function activateCycle(userId: string, cycleId: string): Promise<St
     .eq("user_id", userId)
 
   if (error) throw new Error(error.message)
-
   await setCycleEnabled(userId, true)
 
   const cycle = await getActiveOrDraftCycle(userId)
@@ -327,30 +447,6 @@ export async function resumeCycle(userId: string): Promise<StudyCycle | null> {
   return getActiveOrDraftCycle(userId)
 }
 
-export async function previewCyclePlan(
-  userId: string,
-  input: Omit<CyclePlannerInput, "weekday_limits"> & {
-    weekday_limits?: WeekdayLimits[]
-  }
-): Promise<CyclePlannerResult> {
-  const { data: subjects } = await supabaseServer
-    .from("subjects")
-    .select("id, name")
-    .eq("user_id", userId)
-
-  const subjectNames = new Map((subjects ?? []).map((s) => [s.id, s.name]))
-
-  const weekday_limits = input.weekday_limits ?? defaultWeekdayLimits()
-
-  return suggestCyclePlan(
-    {
-      ...input,
-      weekday_limits,
-    },
-    subjectNames
-  )
-}
-
 export async function getSubjectIdsWithNotebooks(
   userId: string
 ): Promise<string[]> {
@@ -361,34 +457,4 @@ export async function getSubjectIdsWithNotebooks(
     .not("subject_id", "is", null)
 
   return [...new Set((data ?? []).map((n) => n.subject_id).filter(Boolean) as string[])]
-}
-
-export async function getSubjectBrainScores(
-  userId: string,
-  subjectIds: string[]
-): Promise<Record<string, number>> {
-  if (!subjectIds.length) return {}
-
-  const { data: queue } = await supabaseServer
-    .from("strategic_queue_items")
-    .select("subject_id, priority_score, subject_priority")
-    .eq("user_id", userId)
-    .in("subject_id", subjectIds)
-    .eq("priority_source", "brain")
-
-  const scores: Record<string, number> = {}
-  for (const sid of subjectIds) {
-    const rows = (queue ?? []).filter((q) => q.subject_id === sid)
-    if (rows.length) {
-      const top = rows
-        .map((r) => Number(r.priority_score))
-        .sort((a, b) => b - a)
-        .slice(0, 3)
-      scores[sid] = top.reduce((a, b) => a + b, 0) / top.length
-    } else {
-      const withSp = rows.find((r) => r.subject_priority != null)
-      scores[sid] = Number(withSp?.subject_priority ?? 0)
-    }
-  }
-  return scores
 }
