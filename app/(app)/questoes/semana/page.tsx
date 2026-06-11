@@ -40,9 +40,6 @@ export default function SemanaPage() {
   const [shuffle, setShuffle] = useState(true)
   const [search, setSearch] = useState("")
   const [showCompleted, setShowCompleted] = useState(false)
-  const [files, setFiles] = useState<FileList | null>(null)
-  const [batchLoading, setBatchLoading] = useState(false)
-
   function reload(uid: string) {
     const nbUrl = showCompleted
       ? `/api/notebooks?user_id=${uid}`
@@ -74,19 +71,6 @@ export default function SemanaPage() {
       else n.add(id)
       return n
     })
-  }
-
-  async function batchImport() {
-    if (!userId || !files?.length) return
-    setBatchLoading(true)
-    const fd = new FormData()
-    fd.append("user_id", userId)
-    for (let i = 0; i < files.length; i++) {
-      fd.append("files", files[i])
-    }
-    await fetch("/api/questions/import/batch", { method: "POST", body: fd })
-    reload(userId)
-    setBatchLoading(false)
   }
 
   async function startCombined() {
@@ -197,24 +181,15 @@ export default function SemanaPage() {
       <section className="mt-8 rounded-xl border bg-white p-4">
         <h2 className="font-semibold">Importar vários PDFs</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Cadernos vão para{" "}
-          <Link href="/questoes/importados" className="text-blue-600 underline">
-            Importados
-          </Link>
-          .
+          Use a fila com barra de progresso — um PDF por vez, mesmo parser do wizard.
         </p>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <input type="file" accept=".pdf" multiple onChange={(e) => setFiles(e.target.files)} />
-          <button
-            type="button"
-            onClick={batchImport}
-            disabled={batchLoading || !files?.length}
-            className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            <Upload className="h-4 w-4" />
-            {batchLoading ? "Importando..." : "Importar todos"}
-          </button>
-        </div>
+        <Link
+          href="/questoes/importar?mode=bulk"
+          className="mt-3 inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white"
+        >
+          <Upload className="h-4 w-4" />
+          Abrir importação em lote
+        </Link>
       </section>
 
       <section className="mt-8 rounded-xl border bg-white p-4">

@@ -143,6 +143,12 @@ export default function MateriaQuestoesPage() {
           <Plus className="h-4 w-4" /> Importar PDF aqui
         </Link>
         <Link
+          href={`/questoes/importar?mode=bulk&subject_id=${subjectId}`}
+          className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900"
+        >
+          <Plus className="h-4 w-4" /> Importar vários PDFs
+        </Link>
+        <Link
           href="/questoes/importar"
           className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm"
         >

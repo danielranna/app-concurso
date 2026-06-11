@@ -13,6 +13,7 @@ import ImportSharedContentStep, {
 import NotebookFolderSelect, {
   useNotebookFolders,
 } from "@/components/questions/NotebookFolderSelect"
+import BulkImportPanel from "@/components/questions/BulkImportPanel"
 import type { ParsedTecQuestion } from "@/lib/question-types"
 import type {
   ImportNotebookParseResult,
@@ -21,6 +22,7 @@ import type {
 
 type Subject = { id: string; name: string }
 type WizardStep = 1 | 2 | 3 | 4
+type ImportMode = "single" | "bulk"
 
 const PAGE_SIZE = 10
 const LLM_ENABLED =
@@ -32,7 +34,9 @@ function ImportarContent() {
   const searchParams = useSearchParams()
   const presetSubject = searchParams.get("subject_id")
   const presetFolder = searchParams.get("folder_id")
+  const presetMode = searchParams.get("mode") === "bulk" ? "bulk" : "single"
 
+  const [importMode, setImportMode] = useState<ImportMode>(presetMode)
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subjectId, setSubjectId] = useState(presetSubject ?? "")
@@ -253,16 +257,59 @@ function ImportarContent() {
   ]
 
   return (
-    <div className={`mx-auto p-6 ${step === 3 ? "max-w-6xl" : "max-w-3xl"}`}>
+    <div
+      className={`mx-auto p-6 ${
+        importMode === "bulk" ? "max-w-3xl" : step === 3 ? "max-w-6xl" : "max-w-3xl"
+      }`}
+    >
       <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
       <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
       <p className="mt-2 text-sm text-slate-600">
-        Analise o PDF, revise as questões e, se quiser, vincule textos compartilhados antes de
-        salvar.
+        {importMode === "bulk"
+          ? "Envie vários PDFs de uma vez — processados em fila, um por vez."
+          : "Analise o PDF, revise as questões e, se quiser, vincule textos compartilhados antes de salvar."}
       </p>
 
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setImportMode("single")}
+          className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+            importMode === "single"
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-600"
+          }`}
+        >
+          Um PDF
+        </button>
+        <button
+          type="button"
+          onClick={() => setImportMode("bulk")}
+          className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+            importMode === "bulk"
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-600"
+          }`}
+        >
+          Vários PDFs
+        </button>
+      </div>
+
+      {importMode === "bulk" && userId && (
+        <BulkImportPanel
+          userId={userId}
+          subjects={subjects}
+          subjectId={subjectId}
+          onSubjectIdChange={setSubjectId}
+          folderId={folderId}
+          onFolderIdChange={setFolderId}
+        />
+      )}
+
+      {importMode === "single" && (
+      <>
       <div className="mt-6 flex gap-2">
         {steps.map(({ n, label }) => {
           const skipped = n === 3 && linkSharedContent === false && step >= 4
@@ -731,6 +778,8 @@ function ImportarContent() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   )
