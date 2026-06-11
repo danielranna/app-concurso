@@ -182,6 +182,10 @@ function ImportarContent() {
         shared_links: pendingSharedLinks.map((l) => ({
           asset_id: l.assetId,
           tec_ids: l.tecIds,
+          overrides: Object.entries(l.overridesByTecId ?? {}).map(([tecId, content]) => ({
+            tec_id: Number(tecId),
+            content_override: content,
+          })),
         })),
       }),
     })
@@ -493,6 +497,7 @@ function ImportarContent() {
           questions={questions}
           pendingLinks={pendingSharedLinks}
           onPendingLinksChange={setPendingSharedLinks}
+          onQuestionChange={updateQuestion}
           onBack={() => setStep(2)}
           onContinue={() => setStep(4)}
         />

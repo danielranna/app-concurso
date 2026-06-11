@@ -9,6 +9,7 @@ import type {
 export type ImportSharedLinkInput = {
   asset_id: string
   tec_ids: number[]
+  overrides?: { tec_id: number; content_override: string }[]
 }
 
 export type ImportQuestionResult = {
@@ -239,6 +240,19 @@ export async function importNotebookFromParsed(
       .filter((id): id is string => Boolean(id))
     if (!ids.length) continue
     linked_questions += await bulkLinkAssetToQuestions(link.asset_id, userId, ids)
+
+    for (const ov of link.overrides ?? []) {
+      const questionId = tecToQuestionId.get(ov.tec_id)
+      const override = ov.content_override?.trim()
+      if (!questionId || !override) continue
+      const { error } = await supabaseServer
+        .from("user_question_asset_links")
+        .update({ content_override: override })
+        .eq("user_id", userId)
+        .eq("question_id", questionId)
+        .eq("asset_id", link.asset_id)
+      if (error) throw new Error(error.message)
+    }
   }
 
   return {

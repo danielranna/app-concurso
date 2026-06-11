@@ -1,9 +1,20 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ChevronLeft, ChevronRight, Loader2, Plus } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Highlighter,
+  Loader2,
+  Pencil,
+  Plus,
+} from "lucide-react"
 import SharedAssetEditor from "@/components/shared-assets/SharedAssetEditor"
+import ImportQuestionStatementModal from "@/components/shared-assets/ImportQuestionStatementModal"
+import ImportSharedTextOverrideModal from "@/components/shared-assets/ImportSharedTextOverrideModal"
 import { SharedContentBlockList } from "@/components/questions/QuestionContentDisplay"
+import type { ParsedTecQuestion } from "@/lib/question-types"
 import type { ImportQuestionParseResult } from "@/lib/tec-pdf-parse-pipeline"
 import { resolveSharedBlocksFromLinks, type SharedAsset } from "@/lib/shared-assets"
 
@@ -11,6 +22,7 @@ export type ImportPendingSharedLink = {
   assetId: string
   asset: SharedAsset
   tecIds: number[]
+  overridesByTecId?: Record<number, string>
 }
 
 type Props = {
@@ -18,8 +30,15 @@ type Props = {
   questions: ImportQuestionParseResult[]
   pendingLinks: ImportPendingSharedLink[]
   onPendingLinksChange: (links: ImportPendingSharedLink[]) => void
+  onQuestionChange: (tecId: number, merged: ParsedTecQuestion) => void
   onBack: () => void
   onContinue: () => void
+}
+
+function tecQuestionUrl(q: ParsedTecQuestion): string {
+  const url = q.tec_url?.trim()
+  if (url?.startsWith("http")) return url
+  return `https://www.tecconcursos.com.br/questoes/${q.tec_id}`
 }
 
 function statementPrefix(statement: string): string {
@@ -39,6 +58,7 @@ export default function ImportSharedContentStep({
   questions,
   pendingLinks,
   onPendingLinksChange,
+  onQuestionChange,
   onBack,
   onContinue,
 }: Props) {
@@ -48,6 +68,11 @@ export default function ImportSharedContentStep({
   const [selectedTecIds, setSelectedTecIds] = useState<Set<number>>(new Set())
   const [showCreate, setShowCreate] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingQuestion, setEditingQuestion] = useState<ImportQuestionParseResult | null>(null)
+  const [editingOverride, setEditingOverride] = useState<{
+    question: ImportQuestionParseResult
+    link: ImportPendingSharedLink
+  } | null>(null)
 
   useEffect(() => {
     fetch(`/api/shared-assets?user_id=${encodeURIComponent(userId)}`)
@@ -123,6 +148,25 @@ export default function ImportSharedContentStep({
 
   function removeLink(assetId: string) {
     onPendingLinksChange(pendingLinks.filter((l) => l.assetId !== assetId))
+  }
+
+  function getOverride(link: ImportPendingSharedLink, tecId: number): string | null {
+    return link.overridesByTecId?.[tecId] ?? null
+  }
+
+  function saveOverride(assetId: string, tecId: number, contentOverride: string | null) {
+    onPendingLinksChange(
+      pendingLinks.map((l) => {
+        if (l.assetId !== assetId) return l
+        const next = { ...(l.overridesByTecId ?? {}) }
+        if (contentOverride) next[tecId] = contentOverride
+        else delete next[tecId]
+        return {
+          ...l,
+          overridesByTecId: Object.keys(next).length ? next : undefined,
+        }
+      })
+    )
   }
 
   const previewBlocks = selectedAsset
@@ -295,18 +339,21 @@ export default function ImportSharedContentStep({
               {ordered.map((q) => {
                 const linked = linkByTecId.get(q.tec_id)
                 const checked = selectedTecIds.has(q.tec_id)
+                const hasOverride = linked && Boolean(getOverride(linked, q.tec_id))
                 return (
-                  <li key={q.tec_id}>
-                    <label
-                      className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2 ${
-                        checked ? "border-violet-300 bg-violet-50/50" : "hover:bg-slate-50"
-                      }`}
-                    >
+                  <li
+                    key={q.tec_id}
+                    className={`rounded-lg border ${
+                      checked ? "border-violet-300 bg-violet-50/50" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex gap-2 px-3 py-2">
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleTecId(q.tec_id)}
-                        className="mt-1"
+                        className="mt-1 shrink-0"
+                        aria-label={`Selecionar questão ${q.index}`}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-medium text-slate-500">
@@ -315,6 +362,7 @@ export default function ImportSharedContentStep({
                           {linked && (
                             <span className="ml-2 rounded bg-green-100 px-1.5 py-0.5 text-green-800">
                               {linked.asset.label}
+                              {hasOverride ? " · personalizado" : ""}
                             </span>
                           )}
                         </p>
@@ -322,7 +370,37 @@ export default function ImportSharedContentStep({
                           {statementPreview(q.merged.statement)}
                         </p>
                       </div>
-                    </label>
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <a
+                          href={tecQuestionUrl(q.merged)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          title="Abrir no TEC"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setEditingQuestion(q)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          title="Editar enunciado"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        {linked?.asset.kind === "text" && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingOverride({ question: q, link: linked })}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-violet-200 text-violet-700 hover:bg-violet-50"
+                            title="Personalizar texto associado"
+                          >
+                            <Highlighter className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </li>
                 )
               })}
@@ -352,6 +430,35 @@ export default function ImportSharedContentStep({
           </span>
         )}
       </div>
+
+      {editingQuestion && (
+        <ImportQuestionStatementModal
+          question={editingQuestion.merged}
+          onClose={() => setEditingQuestion(null)}
+          onSave={(merged) => {
+            onQuestionChange(editingQuestion.tec_id, merged)
+            setEditingQuestion(null)
+          }}
+        />
+      )}
+
+      {editingOverride && (
+        <ImportSharedTextOverrideModal
+          tecId={editingOverride.question.tec_id}
+          questionIndex={editingOverride.question.index}
+          asset={editingOverride.link.asset}
+          contentOverride={getOverride(editingOverride.link, editingOverride.question.tec_id)}
+          onClose={() => setEditingOverride(null)}
+          onSave={(contentOverride) => {
+            saveOverride(
+              editingOverride.link.assetId,
+              editingOverride.question.tec_id,
+              contentOverride
+            )
+            setEditingOverride(null)
+          }}
+        />
+      )}
     </div>
   )
 }
