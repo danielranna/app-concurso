@@ -179,6 +179,7 @@ export async function importNotebookFromParsed(
   reused_questions: number
   updated_questions: number
   skipped_in_notebook: number
+  linked_questions: number
   warnings: string[]
 }> {
   let created_questions = 0
