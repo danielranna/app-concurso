@@ -8,6 +8,7 @@ import {
   Highlighter,
   Loader2,
   Pencil,
+  PencilLine,
   Plus,
 } from "lucide-react"
 import SharedAssetEditor from "@/components/shared-assets/SharedAssetEditor"
@@ -67,6 +68,7 @@ export default function ImportSharedContentStep({
   const [selectedAsset, setSelectedAsset] = useState<SharedAsset | null>(null)
   const [selectedTecIds, setSelectedTecIds] = useState<Set<number>>(new Set())
   const [showCreate, setShowCreate] = useState(false)
+  const [editingAsset, setEditingAsset] = useState<SharedAsset | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editingQuestion, setEditingQuestion] = useState<ImportQuestionParseResult | null>(null)
   const [editingOverride, setEditingOverride] = useState<{
@@ -171,6 +173,23 @@ export default function ImportSharedContentStep({
     onPendingLinksChange(pendingLinks.filter((l) => l.assetId !== assetId))
   }
 
+  function handleAssetSaved(asset: SharedAsset) {
+    const isNew = !library.some((a) => a.id === asset.id)
+    setLibrary((prev) => {
+      const idx = prev.findIndex((a) => a.id === asset.id)
+      if (idx < 0) return [asset, ...prev]
+      const next = [...prev]
+      next[idx] = asset
+      return next
+    })
+    onPendingLinksChange(
+      pendingLinks.map((l) => (l.assetId === asset.id ? { ...l, asset } : l))
+    )
+    if (isNew || selectedAsset?.id === asset.id) setSelectedAsset(asset)
+    setShowCreate(false)
+    setEditingAsset(null)
+  }
+
   function getOverride(link: ImportPendingSharedLink, tecId: number): string | null {
     return link.overridesByTecId?.[tecId] ?? null
   }
@@ -261,16 +280,16 @@ export default function ImportSharedContentStep({
     )
   }
 
-  if (showCreate) {
+  if (showCreate || editingAsset) {
     return (
       <SharedAssetEditor
         userId={userId}
-        onClose={() => setShowCreate(false)}
-        onSaved={(asset) => {
-          setLibrary((prev) => [asset, ...prev])
-          setSelectedAsset(asset)
+        asset={editingAsset}
+        onClose={() => {
           setShowCreate(false)
+          setEditingAsset(null)
         }}
+        onSaved={handleAssetSaved}
       />
     )
   }
@@ -304,11 +323,11 @@ export default function ImportSharedContentStep({
               </div>
               <ul className="max-h-48 space-y-1 overflow-y-auto">
                 {library.map((a) => (
-                  <li key={a.id}>
+                  <li key={a.id} className="flex gap-1">
                     <button
                       type="button"
                       onClick={() => setSelectedAsset(a)}
-                      className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
+                      className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-sm ${
                         selectedAsset?.id === a.id
                           ? "border-violet-400 bg-violet-50"
                           : "hover:border-slate-300"
@@ -318,6 +337,14 @@ export default function ImportSharedContentStep({
                       <span className="ml-2 text-xs text-slate-400">
                         {a.kind === "image" ? "Imagem" : "Texto"}
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAsset(a)}
+                      className="inline-flex h-[38px] w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      title="Editar conteúdo"
+                    >
+                      <PencilLine className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 ))}
