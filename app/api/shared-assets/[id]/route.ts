@@ -33,10 +33,11 @@ export async function PATCH(
 ) {
   const { id } = await params
   const body = await req.json()
-  const { user_id, kind, title, label, content, width_pct } = body as {
+  const { user_id, kind, title, fonte, label, content, width_pct } = body as {
     user_id: string
     kind?: "text" | "image"
     title?: string | null
+    fonte?: string | null
     label?: string
     content?: string
     width_pct?: number | null
@@ -51,6 +52,7 @@ export async function PATCH(
   }
   if (kind != null) patch.kind = kind
   if (title !== undefined) patch.title = title?.trim() || null
+  if (fonte !== undefined) patch.fonte = fonte?.trim() || null
   if (label != null) patch.label = label.trim() || "Sem rótulo"
   if (content != null) patch.content = content.trim()
   if (width_pct !== undefined) {

@@ -34,6 +34,7 @@ export default function SharedAssetEditor({
   const [kind, setKind] = useState<SharedAssetKind>(asset?.kind ?? defaultKind)
   const [label, setLabel] = useState(asset?.label ?? "")
   const [title, setTitle] = useState(asset?.title ?? "")
+  const [fonte, setFonte] = useState(asset?.fonte ?? "")
   const [content, setContent] = useState(asset?.content ?? "")
   const [widthPct, setWidthPct] = useState(asset?.widthPct ?? 100)
   const [saving, setSaving] = useState(false)
@@ -45,6 +46,7 @@ export default function SharedAssetEditor({
     setKind(asset.kind)
     setLabel(asset.label)
     setTitle(asset.title ?? "")
+    setFonte(asset.fonte ?? "")
     setContent(asset.content)
     setWidthPct(asset.widthPct ?? 100)
   }, [asset])
@@ -75,6 +77,7 @@ export default function SharedAssetEditor({
       kind,
       label: label.trim(),
       title: kind === "text" ? title.trim() || null : null,
+      fonte: kind === "text" ? fonte.trim() || null : null,
       content: content.trim(),
       width_pct: kind === "image" ? widthPct : null,
     }
@@ -146,16 +149,28 @@ export default function SharedAssetEditor({
           </label>
 
           {kind === "text" && (
-            <label className="block text-sm">
-              <span className="font-medium">Título (opcional)</span>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex.: Texto 1"
-                className="mt-1 w-full rounded-lg border px-3 py-2"
-              />
-            </label>
+            <>
+              <label className="block text-sm">
+                <span className="font-medium">Título (opcional)</span>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Ex.: Texto 1"
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium">Fonte (opcional)</span>
+                <textarea
+                  value={fonte}
+                  onChange={(e) => setFonte(e.target.value)}
+                  rows={2}
+                  placeholder="Ex.: Adaptado de Fulano (2019). Disponível em: …"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                />
+              </label>
+            </>
           )}
 
           {kind === "text" ? (

@@ -22,10 +22,11 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, kind, title, label, content, width_pct } = body as {
+  const { user_id, kind, title, fonte, label, content, width_pct } = body as {
     user_id: string
     kind: "text" | "image"
     title?: string | null
+    fonte?: string | null
     label?: string
     content: string
     width_pct?: number | null
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
       user_id,
       kind,
       title: title?.trim() || null,
+      fonte: fonte?.trim() || null,
       label: label?.trim() || "Sem rótulo",
       content: content.trim(),
       width_pct:

@@ -4,6 +4,7 @@ export type SharedAsset = {
   id: string
   kind: SharedAssetKind
   title?: string | null
+  fonte?: string | null
   label: string
   content: string
   widthPct?: number | null
@@ -27,6 +28,7 @@ export type ResolvedSharedBlock = {
   kind: SharedAssetKind
   content: string
   title?: string | null
+  fonte?: string | null
   widthPct?: number
   isPersonalized: boolean
   assetId: string
@@ -38,6 +40,7 @@ export type DbAsset = {
   user_id: string
   kind: string
   title: string | null
+  fonte: string | null
   label: string
   content: string
   width_pct: number | null
@@ -59,6 +62,7 @@ export function mapDbAsset(row: DbAsset, questionCount?: number): SharedAsset {
     id: row.id,
     kind: row.kind === "image" ? "image" : "text",
     title: row.title,
+    fonte: row.fonte ?? null,
     label: row.label ?? "",
     content: row.content,
     widthPct: row.width_pct ?? undefined,
@@ -83,6 +87,7 @@ export function resolveSharedBlocksFromLinks(
         kind: link.asset.kind,
         content,
         title: link.asset.title,
+        fonte: link.asset.fonte,
         widthPct: link.asset.widthPct ?? undefined,
         isPersonalized: Boolean(override),
         label: link.asset.label,

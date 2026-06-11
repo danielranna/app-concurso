@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, ImageIcon, Pencil, Plus, Trash2, Type } from "lucide-react"
 import SharedAssetEditor from "@/components/shared-assets/SharedAssetEditor"
-import { SharedContentBlockList } from "@/components/questions/QuestionContentDisplay"
+import { SharedContentPreview } from "@/components/questions/QuestionContentDisplay"
 import { resolveSharedBlocksFromLinks, type SharedAsset } from "@/lib/shared-assets"
 
 export default function ConteudosPage() {
@@ -149,7 +149,7 @@ export default function ConteudosPage() {
                 </div>
                 {expanded && (
                   <div className="mt-4 border-t pt-4">
-                    <SharedContentBlockList blocks={preview} />
+                    <SharedContentPreview blocks={preview} maxHeightClass="max-h-48" />
                   </div>
                 )}
               </li>

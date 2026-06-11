@@ -36,6 +36,7 @@ export async function loadQuestionAssetLinks(
         user_id,
         kind,
         title,
+        fonte,
         label,
         content,
         width_pct,

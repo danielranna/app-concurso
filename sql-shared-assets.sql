@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS user_shared_assets (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('text', 'image')),
   title TEXT,
+  fonte TEXT,
   label TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL,
   width_pct INTEGER CHECK (width_pct IS NULL OR (width_pct >= 15 AND width_pct <= 100)),

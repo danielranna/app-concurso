@@ -73,6 +73,31 @@ function SharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
       ) : (
         <div className="whitespace-pre-wrap text-slate-700">{block.content}</div>
       )}
+      {block.fonte?.trim() && (
+        <p className="mt-3 border-t border-slate-200 pt-2 text-xs italic text-slate-500">
+          {block.fonte.trim()}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Pré-visualização compacta com altura fixa e scroll. */
+export function SharedContentPreview({
+  blocks,
+  className = "",
+  maxHeightClass = "max-h-36",
+}: {
+  blocks: ResolvedSharedBlock[]
+  className?: string
+  maxHeightClass?: string
+}) {
+  if (!blocks.length) return null
+  return (
+    <div
+      className={`overflow-y-auto rounded border border-slate-100 bg-slate-50/80 p-2 ${maxHeightClass} ${className}`}
+    >
+      <SharedContentBlockList blocks={blocks} />
     </div>
   )
 }

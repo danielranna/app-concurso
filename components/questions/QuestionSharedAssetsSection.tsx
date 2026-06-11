@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { ChevronDown, Loader2, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react"
 import RichTextEditor from "@/components/RichTextEditor"
 import SharedAssetEditor from "@/components/shared-assets/SharedAssetEditor"
-import { SharedContentBlockList } from "@/components/questions/QuestionContentDisplay"
+import { SharedContentPreview } from "@/components/questions/QuestionContentDisplay"
 import {
   resolveSharedBlocksFromLinks,
   type QuestionAssetLinkWithAsset,
@@ -269,7 +269,7 @@ export default function QuestionSharedAssetsSection({
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
             Pré-visualização
           </p>
-          <SharedContentBlockList blocks={previewBlocks} />
+          <SharedContentPreview blocks={previewBlocks} maxHeightClass="max-h-40" />
         </div>
       )}
 
