@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { bulkLinkAssetToQuestions } from "@/lib/shared-assets"
+import { bulkLinkAssetToQuestions } from "@/lib/shared-assets-server"
 
 export async function POST(req: Request) {
   const body = await req.json()

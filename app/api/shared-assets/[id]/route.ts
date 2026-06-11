@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { getSharedAsset, mapDbAsset } from "@/lib/shared-assets"
+import { mapDbAsset } from "@/lib/shared-assets-types"
+import { getSharedAsset } from "@/lib/shared-assets-server"
 
 export async function GET(
   req: Request,

@@ -1,5 +1,5 @@
 import { supabaseServer } from "./supabase-server"
-import { bulkLinkAssetToQuestions } from "./shared-assets"
+import { bulkLinkAssetToQuestions } from "./shared-assets-server"
 import type {
   BankQuestionSnapshot,
   ImportQuestionInput,

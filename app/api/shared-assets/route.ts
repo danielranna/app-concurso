@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import { listUserSharedAssets, mapDbAsset } from "@/lib/shared-assets"
+import { mapDbAsset } from "@/lib/shared-assets-types"
+import { listUserSharedAssets } from "@/lib/shared-assets-server"
 
 export async function GET(req: Request) {
   const userId = new URL(req.url).searchParams.get("user_id")

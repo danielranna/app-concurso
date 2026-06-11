@@ -1,6 +1,6 @@
 import { supabaseServer } from "./supabase-server"
-import { loadSharedBlocksForQuestion } from "./shared-assets"
-import type { ResolvedSharedBlock } from "./shared-assets"
+import { loadSharedBlocksForQuestion } from "./shared-assets-server"
+import type { ResolvedSharedBlock } from "./shared-assets-types"
 import type {
   ConfidenceLevel,
   OutcomeCategory,

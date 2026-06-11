@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server"
+import type { QuestionAssetLink } from "@/lib/shared-assets-types"
 import {
   loadQuestionAssetLinks,
   saveQuestionAssetLinks,
-  type QuestionAssetLink,
-} from "@/lib/shared-assets"
+} from "@/lib/shared-assets-server"
 
 export async function GET(
   req: Request,
