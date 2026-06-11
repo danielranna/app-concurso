@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { Loader2, X } from "lucide-react"
+import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
 
 type Subject = { id: string; name: string }
-type Folder = { id: string; name: string }
 
 type Props = {
   isOpen: boolean
@@ -29,7 +29,6 @@ export default function SaveNotebookModal({
   const [subjectId, setSubjectId] = useState(initialSubjectId ?? "")
   const [folderId, setFolderId] = useState("")
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [folders, setFolders] = useState<Folder[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,17 +42,6 @@ export default function SaveNotebookModal({
       .then((r) => r.json())
       .then((d) => setSubjects(Array.isArray(d) ? d : []))
   }, [isOpen, initialName, initialSubjectId, userId])
-
-  useEffect(() => {
-    if (!subjectId) {
-      setFolders([])
-      setFolderId("")
-      return
-    }
-    fetch(`/api/notebooks/folders?user_id=${userId}&subject_id=${subjectId}&root_only=1`)
-      .then((r) => r.json())
-      .then((d) => setFolders(Array.isArray(d) ? d : []))
-  }, [subjectId, userId])
 
   if (!isOpen) return null
 
@@ -120,22 +108,15 @@ export default function SaveNotebookModal({
             ))}
           </select>
         </label>
-        {folders.length > 0 && (
-          <label className="mb-3 block text-sm">
-            <span className="font-medium text-slate-700">Pasta (opcional)</span>
-            <select
-              value={folderId}
-              onChange={(e) => setFolderId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-            >
-              <option value="">Raiz da matéria</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        {subjectId && (
+          <NotebookFolderSelect
+            userId={userId}
+            subjectId={subjectId}
+            value={folderId}
+            onChange={setFolderId}
+            className="mb-3 block text-sm"
+            selectClassName="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+          />
         )}
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2">

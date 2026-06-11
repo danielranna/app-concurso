@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft } from "lucide-react"
+import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
 
 type TecGroup = { tec_subject: string; topics: string[] }
 
@@ -39,6 +40,7 @@ export default function BancoPage() {
   const [total, setTotal] = useState(0)
   const [cadernoName, setCadernoName] = useState("")
   const [subjectId, setSubjectId] = useState("")
+  const [folderId, setFolderId] = useState("")
 
   const loadCount = useCallback(async () => {
     if (!userId) return
@@ -121,6 +123,7 @@ export default function BancoPage() {
         user_id: userId,
         name: cadernoName,
         subject_id: subjectId,
+        folder_id: folderId || null,
         filters,
         limit: 200,
       }),
@@ -234,7 +237,10 @@ export default function BancoPage() {
             />
             <select
               value={subjectId}
-              onChange={(e) => setSubjectId(e.target.value)}
+              onChange={(e) => {
+                setSubjectId(e.target.value)
+                setFolderId("")
+              }}
               className="w-full rounded border px-2 py-1 text-sm"
             >
               <option value="">Sua matéria (organização)</option>
@@ -244,6 +250,17 @@ export default function BancoPage() {
                 </option>
               ))}
             </select>
+            {userId && subjectId && (
+              <NotebookFolderSelect
+                userId={userId}
+                subjectId={subjectId}
+                value={folderId}
+                onChange={setFolderId}
+                label="Subpasta (opcional)"
+                className="block text-sm"
+                selectClassName="w-full rounded border px-2 py-1 text-sm"
+              />
+            )}
             <button
               type="button"
               onClick={createFromFilter}

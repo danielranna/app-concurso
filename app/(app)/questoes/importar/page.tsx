@@ -10,6 +10,9 @@ import PdfTextCorrectionsPanel from "@/components/questions/PdfTextCorrectionsPa
 import ImportSharedContentStep, {
   type ImportPendingSharedLink,
 } from "@/components/shared-assets/ImportSharedContentStep"
+import NotebookFolderSelect, {
+  useNotebookFolders,
+} from "@/components/questions/NotebookFolderSelect"
 import type { ParsedTecQuestion } from "@/lib/question-types"
 import type {
   ImportNotebookParseResult,
@@ -28,10 +31,13 @@ function ImportarContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const presetSubject = searchParams.get("subject_id")
+  const presetFolder = searchParams.get("folder_id")
 
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subjectId, setSubjectId] = useState(presetSubject ?? "")
+  const [folderId, setFolderId] = useState(presetFolder ?? "")
+  const notebookFolders = useNotebookFolders(userId, subjectId)
   const [file, setFile] = useState<File | null>(null)
   const [step, setStep] = useState<WizardStep>(1)
   const [parseResult, setParseResult] = useState<ImportNotebookParseResult | null>(null)
@@ -57,13 +63,18 @@ function ImportarContent() {
         return
       }
       setUserId(user.id)
-      if (presetSubject) {
-        fetch(`/api/subjects?user_id=${user.id}`)
-          .then((r) => r.json())
-          .then(setSubjects)
-      }
+      fetch(`/api/subjects?user_id=${user.id}`)
+        .then((r) => r.json())
+        .then(setSubjects)
     })
-  }, [router, presetSubject])
+  }, [router])
+
+  useEffect(() => {
+    if (!presetFolder) return
+    if (notebookFolders.some((f) => f.id === presetFolder)) {
+      setFolderId(presetFolder)
+    }
+  }, [presetFolder, notebookFolders])
 
   const filteredQuestions = useMemo(() => {
     let list = questions
@@ -151,6 +162,7 @@ function ImportarContent() {
     setCommitResult(null)
     setPendingSharedLinks([])
     setLinkSharedContent(null)
+    setFolderId(presetFolder ?? "")
     setError(null)
     setPage(0)
   }
@@ -197,6 +209,7 @@ function ImportarContent() {
       body: JSON.stringify({
         user_id: userId,
         subject_id: subjectId || null,
+        folder_id: subjectId && folderId ? folderId : null,
         notebook: {
           name: parseResult.name,
           share_url: parseResult.share_url,
@@ -294,23 +307,36 @@ function ImportarContent() {
               className="mt-1 block w-full text-sm"
             />
           </div>
-          {presetSubject && subjects.length > 0 && (
-            <div>
-              <label className="text-sm font-medium text-slate-500">
-                Organizar já nesta matéria (opcional)
+          {subjects.length > 0 && (
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="font-medium text-slate-500">
+                  Organizar já nesta matéria (opcional)
+                </span>
+                <select
+                  value={subjectId}
+                  onChange={(e) => {
+                    setSubjectId(e.target.value)
+                    setFolderId("")
+                  }}
+                  className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                >
+                  <option value="">Deixar em Importados</option>
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
               </label>
-              <select
-                value={subjectId}
-                onChange={(e) => setSubjectId(e.target.value)}
-                className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              >
-                <option value="">Deixar em Importados</option>
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              {subjectId && userId && (
+                <NotebookFolderSelect
+                  userId={userId}
+                  subjectId={subjectId}
+                  value={folderId}
+                  onChange={setFolderId}
+                />
+              )}
             </div>
           )}
           <button
@@ -608,7 +634,24 @@ function ImportarContent() {
             {subjectId && subjects.length > 0 && (
               <p className="mt-1 text-slate-600">
                 Matéria: {subjects.find((s) => s.id === subjectId)?.name ?? "—"}
+                {folderId && notebookFolders.length > 0 && (
+                  <>
+                    {" "}
+                    · Subpasta:{" "}
+                    {notebookFolders.find((f) => f.id === folderId)?.name ?? "—"}
+                  </>
+                )}
               </p>
+            )}
+            {subjectId && userId && step === 4 && !commitResult && (
+              <div className="mt-3 border-t pt-3">
+                <NotebookFolderSelect
+                  userId={userId}
+                  subjectId={subjectId}
+                  value={folderId}
+                  onChange={setFolderId}
+                />
+              </div>
             )}
           </div>
 
