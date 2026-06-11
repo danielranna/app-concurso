@@ -13,6 +13,7 @@ import {
   AlignRight,
   List,
   ListOrdered,
+  Highlighter,
   Type
 } from "lucide-react"
 
@@ -140,6 +141,25 @@ export default function RichTextEditor({
     setShowFontFamily(false)
   }
 
+  const applyHighlight = () => {
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange()
+    } else {
+      savedSelectionRef.current = null
+    }
+    editorRef.current?.focus()
+    if (savedSelectionRef.current) {
+      const selection = window.getSelection()
+      if (selection) {
+        selection.removeAllRanges()
+        selection.addRange(savedSelectionRef.current)
+        savedSelectionRef.current = null
+      }
+    }
+    execCommand("hiliteColor", "#fef08a")
+  }
+
   const insertList = (ordered: boolean) => {
     const editor = editorRef.current
     if (!editor) return
@@ -227,6 +247,15 @@ export default function RichTextEditor({
           title="Riscado"
         >
           <Strikethrough className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={applyHighlight}
+          className={toolbarBtn}
+          title="Destacar trecho"
+        >
+          <Highlighter className="h-4 w-4" />
         </button>
 
         <span className="mx-1 w-px h-5 bg-slate-300" aria-hidden />

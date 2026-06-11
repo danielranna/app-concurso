@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
-import { importNotebookFromParsed } from "@/lib/question-import"
-import type { ParsedTecNotebook, ParsedTecQuestion } from "@/lib/question-types"
+import {
+  fetchBankQuestionsByTecIds,
+  importNotebookFromParsed,
+} from "@/lib/question-import"
+import type { ImportQuestionInput, ParsedTecNotebook } from "@/lib/question-types"
 
 export const runtime = "nodejs"
 export const maxDuration = 60
@@ -16,7 +19,7 @@ type CommitBody = {
     ordering: string | null
     warnings?: string[]
   }
-  questions: ParsedTecQuestion[]
+  questions: ImportQuestionInput[]
 }
 
 export async function POST(req: Request) {
@@ -31,7 +34,15 @@ export async function POST(req: Request) {
       )
     }
 
-    const missingAnswer = questions.filter((q) => !q.correct_answer?.trim())
+    const existingByTecId = await fetchBankQuestionsByTecIds(
+      questions.map((q) => q.tec_id)
+    )
+
+    const missingAnswer = questions.filter((q) => {
+      const keepingBank = existingByTecId.has(q.tec_id) && !q.replace_in_bank
+      return !keepingBank && !q.correct_answer?.trim()
+    })
+
     if (missingAnswer.length > 0) {
       return NextResponse.json(
         {
@@ -42,7 +53,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const parsed: ParsedTecNotebook = {
+    const parsed: ParsedTecNotebook & { questions: ImportQuestionInput[] } = {
       name: notebook.name,
       share_url: notebook.share_url ?? null,
       ordering: notebook.ordering ?? null,

@@ -15,8 +15,10 @@ import {
   resolveQuestionContentBlocks,
   type QuestionContentBlocks,
 } from "@/lib/question-content-blocks"
+import type { ResolvedSharedBlock } from "@/lib/shared-assets"
 import type { NavMode } from "@/lib/study-navigation"
-import type { ConfidenceLevel } from "@/lib/question-types"
+import type { ConfidenceLevel, StudySessionNotebookBreakdown } from "@/lib/question-types"
+import CombinedSessionNotebookSummary from "@/components/questions/CombinedSessionNotebookSummary"
 import {
   draftScopeKey,
   getDraft,
@@ -41,6 +43,7 @@ type Question = {
   content_before?: string | null
   content_after?: string | null
   content_blocks?: QuestionContentBlocks | null
+  shared_blocks?: ResolvedSharedBlock[] | null
 }
 
 type Option = { label: string; text: string }
@@ -163,6 +166,10 @@ export default function QuestionSolver({
   const [showPerf, setShowPerf] = useState(false)
   const [showError, setShowError] = useState(false)
   const [timerTick, setTimerTick] = useState(0)
+  const [notebookBreakdown, setNotebookBreakdown] = useState<
+    StudySessionNotebookBreakdown[] | null
+  >(null)
+  const [loadingSummary, setLoadingSummary] = useState(false)
 
   const questionStartedAt = useRef(Date.now())
   const timerWasPaused = useRef(false)
@@ -288,6 +295,36 @@ export default function QuestionSolver({
     if (refreshKey != null && refreshKey > 0) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
+
+  const sessionComplete =
+    !loading && mode === "study" && studySessionId && (!question || !current)
+
+  useEffect(() => {
+    if (!sessionComplete) {
+      setNotebookBreakdown(null)
+      return
+    }
+    let cancelled = false
+    setLoadingSummary(true)
+    fetch(
+      `/api/study-sessions/${studySessionId}/summary?user_id=${encodeURIComponent(userId)}`
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) {
+          setNotebookBreakdown(data.notebook_breakdown ?? [])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNotebookBreakdown([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSummary(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionComplete, studySessionId, userId])
 
   useEffect(() => {
     if (timerPaused && !timerWasPaused.current) {
@@ -488,6 +525,12 @@ export default function QuestionSolver({
         <p className="text-sm text-green-700">
           {stats.correct} acertos · {stats.wrong} erros de {stats.total} questões
         </p>
+        {mode === "study" && loadingSummary && (
+          <p className="text-sm text-green-700">Carregando estatísticas por caderno...</p>
+        )}
+        {mode === "study" && !loadingSummary && notebookBreakdown && (
+          <CombinedSessionNotebookSummary breakdown={notebookBreakdown} />
+        )}
         <div className="flex flex-wrap justify-center gap-3 pt-2">
           {mode === "notebook" && onResetNotebook && (
             <button
@@ -625,6 +668,7 @@ export default function QuestionSolver({
           </p>
           <div className="mt-3">
             <QuestionContentDisplay
+              sharedBlocks={question.shared_blocks ?? []}
               blocks={resolveQuestionContentBlocks({
                 content_blocks: question.content_blocks,
                 content_before: question.content_before,

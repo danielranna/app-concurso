@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { fetchBankQuestionsByTecIds } from "@/lib/question-import"
 import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
 import { parseTecPdfPipeline } from "@/lib/tec-pdf-parse-pipeline"
 
@@ -19,8 +20,22 @@ export async function POST(req: Request) {
     await loadPdfTextCorrectionConfig()
     const buffer = Buffer.from(await file.arrayBuffer())
     const result = await parseTecPdfPipeline(buffer)
+    const existingByTecId = await fetchBankQuestionsByTecIds(
+      result.questions.map((q) => q.tec_id)
+    )
 
-    return NextResponse.json(result)
+    return NextResponse.json({
+      ...result,
+      questions: result.questions.map((q) => ({
+        ...q,
+        existing_in_bank: existingByTecId.get(q.tec_id) ?? null,
+        replace_in_bank: false,
+      })),
+      stats: {
+        ...result.stats,
+        already_in_bank: existingByTecId.size,
+      },
+    })
   } catch (e) {
     const message = e instanceof Error ? e.message : "Erro ao analisar PDF"
     console.error("[import/parse]", message, e)

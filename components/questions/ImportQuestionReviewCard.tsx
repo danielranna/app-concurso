@@ -1,18 +1,51 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Sparkles } from "lucide-react"
-import type { ParsedTecQuestion } from "@/lib/question-types"
+import { Check, Loader2, Sparkles } from "lucide-react"
+import type { BankQuestionSnapshot, ParsedTecQuestion } from "@/lib/question-types"
 import type { QuestionParseResult, ParseSource } from "@/lib/tec-pdf-parse-merge"
+import type { ImportQuestionParseResult } from "@/lib/tec-pdf-parse-pipeline"
 
 const MCQ_LABELS = ["A", "B", "C", "D", "E"]
 const SOURCES: ParseSource[] = ["primary", "lines", "strict"]
 
 type Props = {
-  item: QuestionParseResult
+  item: QuestionParseResult | ImportQuestionParseResult
   userId: string
   llmEnabled: boolean
   onChange: (merged: ParsedTecQuestion) => void
+  replaceInBank?: boolean
+  onReplaceChange?: (replace: boolean) => void
+}
+
+function BankSnapshotPanel({ snapshot }: { snapshot: BankQuestionSnapshot }) {
+  return (
+    <div className="rounded border border-green-200 bg-green-50 p-3 text-sm">
+      <p className="flex items-center gap-1 text-xs font-medium text-green-900">
+        <Check className="h-3.5 w-3.5" />
+        Versão atual no banco
+      </p>
+      <p className="mt-1 text-xs text-green-800">
+        {snapshot.tec_subject}
+        {snapshot.tec_topic ? ` · ${snapshot.tec_topic}` : ""}
+      </p>
+      <p className="mt-1 text-xs text-green-700">
+        Gabarito: <span className="font-medium">{snapshot.correct_answer}</span>
+      </p>
+      <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs text-green-900">
+        {snapshot.statement}
+      </p>
+      {snapshot.options.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs text-green-800">
+          {snapshot.options.map((opt) => (
+            <li key={opt.label}>
+              <span className="font-medium">{opt.label})</span> {opt.text}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 const confidenceStyles = {
@@ -27,16 +60,40 @@ const confidenceLabels = {
   low: "Baixa confiança",
 }
 
+function ImportPreviewPanel({ q }: { q: ParsedTecQuestion }) {
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 p-3 text-sm">
+      <p className="text-xs font-medium text-slate-700">Versão do PDF importado</p>
+      <p className="mt-1 text-xs text-slate-600">
+        {q.tec_subject}
+        {q.tec_topic ? ` · ${q.tec_topic}` : ""}
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        Gabarito: <span className="font-medium">{q.correct_answer || "—"}</span>
+      </p>
+      <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs text-slate-800">
+        {q.statement}
+      </p>
+    </div>
+  )
+}
+
 export default function ImportQuestionReviewCard({
   item,
   userId,
   llmEnabled,
   onChange,
+  replaceInBank = false,
+  onReplaceChange,
 }: Props) {
   const q = item.merged
+  const existingInBank =
+    "existing_in_bank" in item ? item.existing_in_bank : null
+  const keepingBank = Boolean(existingInBank) && !replaceInBank
   const [expanded, setExpanded] = useState(
-    item.needs_review || item.confidence !== "high"
+    item.needs_review || item.confidence !== "high" || replaceInBank
   )
+  const [showImportPreview, setShowImportPreview] = useState(false)
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmSuggestion, setLlmSuggestion] = useState<{
     question: ParsedTecQuestion
@@ -96,6 +153,17 @@ export default function ImportQuestionReviewCard({
           {item.needs_review && (
             <span className="ml-2 rounded border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-900">
               Revisar conteúdo
+            </span>
+          )}
+          {keepingBank && (
+            <span className="ml-2 inline-flex items-center gap-0.5 rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-900">
+              <Check className="h-3 w-3" />
+              Mantendo do banco
+            </span>
+          )}
+          {existingInBank && replaceInBank && (
+            <span className="ml-2 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+              Substituir no banco
             </span>
           )}
         </div>
@@ -166,7 +234,51 @@ export default function ImportQuestionReviewCard({
         </ul>
       )}
 
-      {expanded && (
+      {existingInBank && (
+        <div className="mt-3 space-y-2">
+          {keepingBank ? (
+            <>
+              <BankSnapshotPanel snapshot={existingInBank} />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onReplaceChange?.(true)
+                    setExpanded(true)
+                  }}
+                  className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900"
+                >
+                  Substituir pela importação
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowImportPreview((v) => !v)}
+                  className="text-xs text-slate-600 underline"
+                >
+                  {showImportPreview ? "Ocultar" : "Ver"} versão do PDF
+                </button>
+              </div>
+              {showImportPreview && <ImportPreviewPanel q={q} />}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-amber-800">
+                Esta questão substituirá a versão formatada do banco ao salvar.
+              </p>
+              <button
+                type="button"
+                onClick={() => onReplaceChange?.(false)}
+                className="rounded border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-900"
+              >
+                Manter versão do banco
+              </button>
+              <BankSnapshotPanel snapshot={existingInBank} />
+            </>
+          )}
+        </div>
+      )}
+
+      {expanded && !keepingBank && (
         <div className="mt-4 space-y-3">
           <div>
             <label className="text-xs font-medium text-slate-600">Matéria TEC</label>
@@ -298,8 +410,11 @@ export default function ImportQuestionReviewCard({
         </div>
       )}
 
-      {!expanded && (
+      {!expanded && !keepingBank && (
         <p className="mt-2 line-clamp-2 text-sm text-slate-800">{q.statement}</p>
+      )}
+      {!expanded && keepingBank && existingInBank && (
+        <p className="mt-2 line-clamp-2 text-sm text-green-900">{existingInBank.statement}</p>
       )}
     </div>
   )

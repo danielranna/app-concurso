@@ -2,14 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Pause, Play } from "lucide-react"
-
-function formatElapsed(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":")
-}
+import { formatElapsed } from "@/lib/format-elapsed"
 
 type Props = {
   /** Tempo acumulado já salvo (carregar uma vez no mount do pai). */

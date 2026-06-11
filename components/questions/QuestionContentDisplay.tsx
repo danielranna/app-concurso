@@ -2,6 +2,7 @@
 
 import type { QuestionContentBlock, QuestionContentBlocks } from "@/lib/question-content-blocks"
 import { isImageContent } from "@/lib/question-content-blocks"
+import type { ResolvedSharedBlock } from "@/lib/shared-assets"
 import ResizableQuestionImage from "@/components/questions/ResizableQuestionImage"
 
 function SingleBlock({ block }: { block: QuestionContentBlock }) {
@@ -54,18 +55,60 @@ export function QuestionContentBlockList({
   )
 }
 
+function SharedBlockItem({ block }: { block: ResolvedSharedBlock }) {
+  if (block.kind === "image") {
+    return <ResizableQuestionImage src={block.content} widthPct={block.widthPct} />
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+      {block.title && (
+        <p className="mb-2 text-sm font-semibold text-slate-900">{block.title}</p>
+      )}
+      {block.content.includes("<") ? (
+        <div
+          className="prose prose-sm max-w-none text-slate-800 [&_mark]:rounded [&_mark]:bg-yellow-200 [&_mark]:px-0.5 [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-w-full"
+          dangerouslySetInnerHTML={{ __html: block.content }}
+        />
+      ) : (
+        <div className="whitespace-pre-wrap text-slate-700">{block.content}</div>
+      )}
+    </div>
+  )
+}
+
+export function SharedContentBlockList({
+  blocks,
+  className = "",
+}: {
+  blocks: ResolvedSharedBlock[]
+  className?: string
+}) {
+  if (!blocks.length) return null
+  return (
+    <div className={`space-y-4 ${className}`}>
+      {blocks.map((block) => (
+        <SharedBlockItem key={block.id} block={block} />
+      ))}
+    </div>
+  )
+}
+
 export default function QuestionContentDisplay({
   blocks,
+  sharedBlocks = [],
   statement,
   statementClassName = "mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-800",
 }: {
   blocks: QuestionContentBlocks
+  sharedBlocks?: ResolvedSharedBlock[]
   statement: string
   statementClassName?: string
 }) {
   return (
     <>
-      <QuestionContentBlockList blocks={blocks.before} />
+      <SharedContentBlockList blocks={sharedBlocks} />
+      <QuestionContentBlockList blocks={blocks.before} className={sharedBlocks.length ? "mt-4" : ""} />
       {renderStatement(statement, statementClassName)}
       <QuestionContentBlockList blocks={blocks.after} className="mt-3" />
     </>

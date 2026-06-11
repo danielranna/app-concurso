@@ -40,12 +40,34 @@ export type ParsedTecQuestion = {
   correct_answer: string
 }
 
+/** Questão na importação; `replace_in_bank` só vale se já existir no banco global. */
+export type ImportQuestionInput = ParsedTecQuestion & {
+  replace_in_bank?: boolean
+}
+
 export type ParsedTecNotebook = {
   name: string
   share_url: string | null
   ordering: string | null
   questions: ParsedTecQuestion[]
   warnings: string[]
+}
+
+/** Snapshot de questão já salva no banco global (dedupe por tec_id). */
+export type BankQuestionSnapshot = {
+  id: string
+  tec_id: number
+  type: QuestionType
+  tec_subject: string | null
+  tec_topic: string | null
+  statement: string
+  correct_answer: string
+  banca: string | null
+  cargo: string | null
+  orgao: string | null
+  ano: number | null
+  options: { label: string; text: string }[]
+  imported_at: string
 }
 
 export type NotebookRow = {
@@ -88,6 +110,16 @@ export type StudyQueueItem = {
   tec_id: number
   notebook_id: string
   position: number
+}
+
+export type StudySessionNotebookBreakdown = {
+  notebook_id: string
+  name: string
+  total: number
+  correct: number
+  wrong: number
+  pct: number
+  time_ms: number
 }
 
 export type BankFilters = {

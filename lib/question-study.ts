@@ -1,8 +1,11 @@
 import { supabaseServer } from "./supabase-server"
+import { loadSharedBlocksForQuestion } from "./shared-assets"
+import type { ResolvedSharedBlock } from "./shared-assets"
 import type {
   ConfidenceLevel,
   OutcomeCategory,
   StudyQueueItem,
+  StudySessionNotebookBreakdown,
 } from "./question-types"
 
 export function computeOutcomeCategory(
@@ -225,6 +228,116 @@ export async function getSessionAnsweredQuestionIds(
   return new Set((data ?? []).map((r) => r.question_id))
 }
 
+type SessionAttemptRow = {
+  question_id: string
+  is_correct: boolean
+  duration_ms: number | null
+  created_at: string
+}
+
+/** Última tentativa por questão nesta sessão. */
+export async function getSessionAttemptsByQuestion(
+  studySessionId: string,
+  userId: string
+): Promise<Map<string, { is_correct: boolean; duration_ms: number }>> {
+  const { data, error } = await supabaseServer
+    .from("question_attempts")
+    .select("question_id, is_correct, duration_ms, created_at")
+    .eq("study_session_id", studySessionId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+
+  if (error) throw new Error(error.message)
+
+  const byQuestion = new Map<string, { is_correct: boolean; duration_ms: number }>()
+  for (const row of (data ?? []) as SessionAttemptRow[]) {
+    if (byQuestion.has(row.question_id)) continue
+    byQuestion.set(row.question_id, {
+      is_correct: row.is_correct,
+      duration_ms: row.duration_ms ?? 0,
+    })
+  }
+  return byQuestion
+}
+
+export async function getSessionAttemptStats(studySessionId: string, userId: string) {
+  const byQuestion = await getSessionAttemptsByQuestion(studySessionId, userId)
+  let correct = 0
+  let wrong = 0
+  for (const attempt of byQuestion.values()) {
+    if (attempt.is_correct) correct++
+    else wrong++
+  }
+  return {
+    resolved: byQuestion.size,
+    correct,
+    wrong,
+  }
+}
+
+/** Estatísticas por caderno vinculado ao estudo combinado (lista completa de cada caderno). */
+export async function getStudySessionNotebookBreakdown(
+  studySessionId: string,
+  userId: string
+): Promise<StudySessionNotebookBreakdown[]> {
+  const { data: links, error: linksError } = await supabaseServer
+    .from("study_session_notebooks")
+    .select("notebook_id, notebooks(id, name, question_count)")
+    .eq("study_session_id", studySessionId)
+
+  if (linksError) throw new Error(linksError.message)
+  if (!links?.length) return []
+
+  const attemptsByQuestion = await getSessionAttemptsByQuestion(studySessionId, userId)
+  const breakdown: StudySessionNotebookBreakdown[] = []
+
+  for (const link of links) {
+    const nb = link.notebooks as
+      | { id: string; name: string; question_count: number }
+      | { id: string; name: string; question_count: number }[]
+      | null
+    const notebook = Array.isArray(nb) ? nb[0] : nb
+    const notebookId = link.notebook_id as string
+
+    const { data: rows, error: rowsError } = await supabaseServer
+      .from("notebook_questions")
+      .select("question_id")
+      .eq("notebook_id", notebookId)
+
+    if (rowsError) throw new Error(rowsError.message)
+
+    const questionIds = (rows ?? []).map((r) => r.question_id as string)
+    const total =
+      questionIds.length > 0 ? questionIds.length : (notebook?.question_count ?? 0)
+
+    let correct = 0
+    let wrong = 0
+    let time_ms = 0
+
+    for (const qid of questionIds) {
+      const attempt = attemptsByQuestion.get(qid)
+      if (!attempt) continue
+      if (attempt.is_correct) correct++
+      else wrong++
+      time_ms += attempt.duration_ms
+    }
+
+    const pct = total > 0 ? Math.round((correct / total) * 100) : 0
+
+    breakdown.push({
+      notebook_id: notebookId,
+      name: notebook?.name ?? "Caderno",
+      total,
+      correct,
+      wrong,
+      pct,
+      time_ms,
+    })
+  }
+
+  return breakdown
+}
+
 export async function loadQuestionForStudy(questionId: string, userId?: string) {
   const { data: question, error } = await supabaseServer
     .from("questions")
@@ -232,7 +345,7 @@ export async function loadQuestionForStudy(questionId: string, userId?: string) 
     .eq("id", questionId)
     .single()
   if (error || !question) {
-    return { question: null, options: [] as StudyOption[] }
+    return { question: null, options: [] as StudyOption[], shared_blocks: [] as ResolvedSharedBlock[] }
   }
 
   const { data: options } = await supabaseServer
@@ -271,9 +384,19 @@ export async function loadQuestionForStudy(questionId: string, userId?: string) 
     }
   }
 
+  let shared_blocks: ResolvedSharedBlock[] = []
+  if (userId) {
+    try {
+      shared_blocks = await loadSharedBlocksForQuestion(questionId, userId)
+    } catch {
+      shared_blocks = []
+    }
+  }
+
   return {
-    question: merged,
+    question: { ...merged, shared_blocks },
     options: normalizeStudyOptions(merged.type, optsList),
+    shared_blocks,
   }
 }
 

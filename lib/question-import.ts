@@ -1,14 +1,73 @@
 import { supabaseServer } from "./supabase-server"
-import type { ParsedTecQuestion, ParsedTecNotebook } from "./question-types"
+import type {
+  BankQuestionSnapshot,
+  ImportQuestionInput,
+  ParsedTecNotebook,
+} from "./question-types"
 
 export type ImportQuestionResult = {
   question_id: string
   tec_id: number
   created: boolean
+  updated: boolean
+}
+
+export async function fetchBankQuestionsByTecIds(
+  tecIds: number[]
+): Promise<Map<number, BankQuestionSnapshot>> {
+  const unique = [...new Set(tecIds)]
+  if (unique.length === 0) return new Map()
+
+  const { data: rows, error } = await supabaseServer
+    .from("questions")
+    .select(
+      "id, tec_id, type, tec_subject, tec_topic, statement, correct_answer, banca, cargo, orgao, ano, imported_at"
+    )
+    .in("tec_id", unique)
+
+  if (error) throw new Error(error.message)
+  if (!rows?.length) return new Map()
+
+  const questionIds = rows.map((r) => r.id as string)
+  const { data: optionRows, error: optErr } = await supabaseServer
+    .from("question_options")
+    .select("question_id, label, text, sort_order")
+    .in("question_id", questionIds)
+    .order("sort_order")
+
+  if (optErr) throw new Error(optErr.message)
+
+  const optionsByQuestion = new Map<string, { label: string; text: string }[]>()
+  for (const opt of optionRows ?? []) {
+    const list = optionsByQuestion.get(opt.question_id as string) ?? []
+    list.push({ label: opt.label as string, text: opt.text as string })
+    optionsByQuestion.set(opt.question_id as string, list)
+  }
+
+  const map = new Map<number, BankQuestionSnapshot>()
+  for (const row of rows) {
+    map.set(row.tec_id as number, {
+      id: row.id as string,
+      tec_id: row.tec_id as number,
+      type: row.type as BankQuestionSnapshot["type"],
+      tec_subject: (row.tec_subject as string | null) ?? null,
+      tec_topic: (row.tec_topic as string | null) ?? null,
+      statement: row.statement as string,
+      correct_answer: row.correct_answer as string,
+      banca: (row.banca as string | null) ?? null,
+      cargo: (row.cargo as string | null) ?? null,
+      orgao: (row.orgao as string | null) ?? null,
+      ano: (row.ano as number | null) ?? null,
+      options: optionsByQuestion.get(row.id as string) ?? [],
+      imported_at: row.imported_at as string,
+    })
+  }
+
+  return map
 }
 
 export async function upsertGlobalQuestion(
-  q: ParsedTecQuestion
+  q: ImportQuestionInput
 ): Promise<ImportQuestionResult> {
   const { data: existing } = await supabaseServer
     .from("questions")
@@ -17,6 +76,15 @@ export async function upsertGlobalQuestion(
     .maybeSingle()
 
   if (existing) {
+    if (!q.replace_in_bank) {
+      return {
+        question_id: existing.id,
+        tec_id: q.tec_id,
+        created: false,
+        updated: false,
+      }
+    }
+
     await supabaseServer
       .from("questions")
       .update({
@@ -43,7 +111,12 @@ export async function upsertGlobalQuestion(
       )
     }
 
-    return { question_id: existing.id, tec_id: q.tec_id, created: false }
+    return {
+      question_id: existing.id,
+      tec_id: q.tec_id,
+      created: false,
+      updated: true,
+    }
   }
 
   const { data: inserted, error } = await supabaseServer
@@ -77,12 +150,17 @@ export async function upsertGlobalQuestion(
     )
   }
 
-  return { question_id: inserted.id, tec_id: q.tec_id, created: true }
+  return {
+    question_id: inserted.id,
+    tec_id: q.tec_id,
+    created: true,
+    updated: false,
+  }
 }
 
 export async function importNotebookFromParsed(
   userId: string,
-  parsed: ParsedTecNotebook,
+  parsed: Omit<ParsedTecNotebook, "questions"> & { questions: ImportQuestionInput[] },
   opts: {
     subject_id?: string | null
     folder_id?: string | null
@@ -92,19 +170,27 @@ export async function importNotebookFromParsed(
   notebook_id: string
   created_questions: number
   reused_questions: number
+  updated_questions: number
   skipped_in_notebook: number
   warnings: string[]
 }> {
   let created_questions = 0
   let reused_questions = 0
+  let updated_questions = 0
   let skipped_in_notebook = 0
   const questionIds: { question_id: string; position: number }[] = []
+  const existingByTecId = await fetchBankQuestionsByTecIds(
+    parsed.questions.map((q) => q.tec_id)
+  )
 
   for (let i = 0; i < parsed.questions.length; i++) {
     const q = parsed.questions[i]
-    if (!q.correct_answer) continue
+    const keepingBank = existingByTecId.has(q.tec_id) && !q.replace_in_bank
+    if (!keepingBank && !q.correct_answer?.trim()) continue
+
     const result = await upsertGlobalQuestion(q)
     if (result.created) created_questions++
+    else if (result.updated) updated_questions++
     else reused_questions++
     questionIds.push({ question_id: result.question_id, position: i })
   }
@@ -140,6 +226,7 @@ export async function importNotebookFromParsed(
     notebook_id: notebook.id,
     created_questions,
     reused_questions,
+    updated_questions,
     skipped_in_notebook,
     warnings: parsed.warnings,
   }

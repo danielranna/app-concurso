@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { FolderOpen, Filter, Calendar, Link2, Inbox } from "lucide-react"
+import { FolderOpen, Filter, Calendar, Link2, Inbox, FileText } from "lucide-react"
 
 type SubjectRow = {
   id: string
@@ -84,6 +84,12 @@ export default function QuestoesHomePage() {
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
           >
             <Link2 className="h-4 w-4" /> Associar matérias e assuntos
+          </Link>
+          <Link
+            href="/questoes/conteudos"
+            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
+          >
+            <FileText className="h-4 w-4" /> Conteúdos compartilhados
           </Link>
         </div>
       </div>

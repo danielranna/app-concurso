@@ -7,6 +7,7 @@ import QuestionOptions from "@/components/questions/QuestionOptions"
 import ConfidenceToggles from "@/components/questions/ConfidenceToggles"
 import QuestionContentDisplay from "@/components/questions/QuestionContentDisplay"
 import { resolveQuestionContentBlocks } from "@/lib/question-content-blocks"
+import type { ResolvedSharedBlock } from "@/lib/shared-assets"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import { clearDraftScope, draftScopeKey } from "@/lib/question-draft-cache"
 
@@ -148,6 +149,9 @@ export default function HomeWrongQuestion({ userId }: Props) {
 
           <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50 p-4">
             <QuestionContentDisplay
+              sharedBlocks={
+                (question as { shared_blocks?: ResolvedSharedBlock[] }).shared_blocks ?? []
+              }
               blocks={resolveQuestionContentBlocks({
                 content_blocks: question.content_blocks as never,
                 content_before: question.content_before,

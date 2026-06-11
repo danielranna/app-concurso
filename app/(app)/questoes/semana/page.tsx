@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Play, Trash2, Upload } from "lucide-react"
+import { formatElapsed } from "@/lib/format-elapsed"
 
 type Notebook = {
   id: string
@@ -151,15 +152,6 @@ export default function SemanaPage() {
 
   const openSessions = sessions.filter((s) => s.status === "in_progress")
 
-  function formatElapsed(ms?: number) {
-    if (!ms) return "00:00:00"
-    const total = Math.floor(ms / 1000)
-    const h = Math.floor(total / 3600)
-    const m = Math.floor((total % 3600) / 60)
-    const s = total % 60
-    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":")
-  }
-
   return (
     <div className="p-6">
       <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
@@ -185,7 +177,7 @@ export default function SemanaPage() {
                   >
                     {s.name}
                     <span className="ml-2 font-normal text-slate-500">
-                      {done}/{total} · {formatElapsed(s.study_elapsed_ms)}
+                      {done}/{total} · {formatElapsed(s.study_elapsed_ms ?? 0)}
                     </span>
                   </Link>
                   <button

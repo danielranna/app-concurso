@@ -1,7 +1,13 @@
 import { extractPdfText } from "./pdf-extract"
-import type { ParsedTecNotebook } from "./question-types"
+import type { BankQuestionSnapshot, ParsedTecNotebook } from "./question-types"
 import { extractTecPdfStructure } from "./tec-pdf-parser"
 import { parseBlockWithAllVariants, type QuestionParseResult } from "./tec-pdf-parse-merge"
+
+export type ImportQuestionParseResult = QuestionParseResult & {
+  existing_in_bank: BankQuestionSnapshot | null
+  /** Padrão false: mantém a versão do banco. True = sobrescrever com o PDF revisado. */
+  replace_in_bank: boolean
+}
 
 export type NotebookParseResult = {
   name: string
@@ -16,6 +22,11 @@ export type NotebookParseResult = {
     low: number
     needs_review: number
   }
+}
+
+export type ImportNotebookParseResult = Omit<NotebookParseResult, "questions" | "stats"> & {
+  questions: ImportQuestionParseResult[]
+  stats: NotebookParseResult["stats"] & { already_in_bank: number }
 }
 
 export function parseTecPdfTextPipeline(rawText: string): NotebookParseResult {

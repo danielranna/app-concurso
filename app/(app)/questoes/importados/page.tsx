@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Play, Trash2 } from "lucide-react"
+import { ArrowLeft, FileStack, Play, Trash2 } from "lucide-react"
+import OrganizeContentModal from "@/components/shared-assets/OrganizeContentModal"
 
 type Notebook = {
   id: string
@@ -22,6 +23,7 @@ export default function ImportadosPage() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [assigning, setAssigning] = useState<string | null>(null)
+  const [organizeNotebook, setOrganizeNotebook] = useState<Notebook | null>(null)
 
   function reload(uid: string) {
     fetch(`/api/notebooks?user_id=${uid}&unassigned=1`).then((r) => r.json()).then(setNotebooks)
@@ -101,6 +103,13 @@ export default function ImportadosPage() {
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => setOrganizeNotebook(nb)}
+                className="inline-flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm text-violet-800 hover:bg-violet-100"
+              >
+                <FileStack className="h-4 w-4" /> Organizar conteúdos
+              </button>
               <Link
                 href={`/questoes/cadernos/${nb.id}`}
                 className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1.5 text-sm text-white"
@@ -127,6 +136,15 @@ export default function ImportadosPage() {
           </p>
         )}
       </div>
+
+      {userId && organizeNotebook && (
+        <OrganizeContentModal
+          userId={userId}
+          notebookId={organizeNotebook.id}
+          notebookName={organizeNotebook.name}
+          onClose={() => setOrganizeNotebook(null)}
+        />
+      )}
     </div>
   )
 }

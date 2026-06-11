@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react"
 import QuestionContentBlocksEditor from "@/components/questions/QuestionContentBlocksEditor"
+import QuestionSharedAssetsSection from "@/components/questions/QuestionSharedAssetsSection"
 import {
   emptyContentBlocks,
   resolveQuestionContentBlocks,
@@ -168,6 +169,8 @@ export default function EditQuestionModal({
                 <option value="certo_errado">Certo ou Errado</option>
               </select>
             </label>
+
+            <QuestionSharedAssetsSection userId={userId} questionId={questionId} />
 
             <QuestionContentBlocksEditor
               blocks={contentBlocks}

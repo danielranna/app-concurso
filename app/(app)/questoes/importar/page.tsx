@@ -8,8 +8,10 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, Loader2, Upload } from "lu
 import ImportQuestionReviewCard from "@/components/questions/ImportQuestionReviewCard"
 import PdfTextCorrectionsPanel from "@/components/questions/PdfTextCorrectionsPanel"
 import type { ParsedTecQuestion } from "@/lib/question-types"
-import type { QuestionParseResult } from "@/lib/tec-pdf-parse-merge"
-import type { NotebookParseResult } from "@/lib/tec-pdf-parse-pipeline"
+import type {
+  ImportNotebookParseResult,
+  ImportQuestionParseResult,
+} from "@/lib/tec-pdf-parse-pipeline"
 
 type Subject = { id: string; name: string }
 type WizardStep = 1 | 2 | 3
@@ -29,8 +31,8 @@ function ImportarContent() {
   const [subjectId, setSubjectId] = useState(presetSubject ?? "")
   const [file, setFile] = useState<File | null>(null)
   const [step, setStep] = useState<WizardStep>(1)
-  const [parseResult, setParseResult] = useState<NotebookParseResult | null>(null)
-  const [questions, setQuestions] = useState<QuestionParseResult[]>([])
+  const [parseResult, setParseResult] = useState<ImportNotebookParseResult | null>(null)
+  const [questions, setQuestions] = useState<ImportQuestionParseResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<Record<string, unknown> | null>(null)
@@ -38,6 +40,7 @@ function ImportarContent() {
   const [filterNeedsReview, setFilterNeedsReview] = useState(false)
   const [filterLow, setFilterLow] = useState(false)
   const [filterWarnings, setFilterWarnings] = useState(false)
+  const [filterInBank, setFilterInBank] = useState(false)
   const [searchTecId, setSearchTecId] = useState("")
   const [page, setPage] = useState(0)
 
@@ -65,24 +68,44 @@ function ImportarContent() {
         (q) => q.warnings.length > 0 || q.quality_flags.length > 0
       )
     }
+    if (filterInBank) list = list.filter((q) => q.existing_in_bank != null)
     if (searchTecId.trim()) {
       const id = parseInt(searchTecId, 10)
       if (!Number.isNaN(id)) list = list.filter((q) => q.tec_id === id)
     }
     return list
-  }, [questions, filterNeedsReview, filterLow, filterWarnings, searchTecId])
+  }, [questions, filterNeedsReview, filterLow, filterWarnings, filterInBank, searchTecId])
 
   const pageCount = Math.max(1, Math.ceil(filteredQuestions.length / PAGE_SIZE))
   const pageItems = filteredQuestions.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
 
   const missingGabarito = useMemo(
-    () => questions.filter((q) => !q.merged.correct_answer?.trim()),
+    () =>
+      questions.filter((q) => {
+        const keepingBank = q.existing_in_bank && !q.replace_in_bank
+        return !keepingBank && !q.merged.correct_answer?.trim()
+      }),
     [questions]
   )
+
+  const bankStats = useMemo(() => {
+    const inBank = questions.filter((q) => q.existing_in_bank)
+    return {
+      keeping: inBank.filter((q) => !q.replace_in_bank).length,
+      replacing: inBank.filter((q) => q.replace_in_bank).length,
+      newCount: questions.filter((q) => !q.existing_in_bank).length,
+    }
+  }, [questions])
 
   const updateQuestion = useCallback((tecId: number, merged: ParsedTecQuestion) => {
     setQuestions((prev) =>
       prev.map((q) => (q.tec_id === tecId ? { ...q, merged } : q))
+    )
+  }, [])
+
+  const updateReplaceInBank = useCallback((tecId: number, replace: boolean) => {
+    setQuestions((prev) =>
+      prev.map((q) => (q.tec_id === tecId ? { ...q, replace_in_bank: replace } : q))
     )
   }, [])
 
@@ -112,8 +135,8 @@ function ImportarContent() {
       setLoading(false)
       return
     }
-    setParseResult(data as NotebookParseResult)
-    setQuestions(data.questions as QuestionParseResult[])
+    setParseResult(data as ImportNotebookParseResult)
+    setQuestions(data.questions as ImportQuestionParseResult[])
     setLoading(false)
   }
 
@@ -139,7 +162,10 @@ function ImportarContent() {
           ordering: parseResult.ordering,
           warnings: parseResult.warnings,
         },
-        questions: questions.map((q) => q.merged),
+        questions: questions.map((q) => ({
+          ...q.merged,
+          replace_in_bank: q.existing_in_bank ? q.replace_in_bank : undefined,
+        })),
       }),
     })
     const data = await res.json()
@@ -252,6 +278,43 @@ function ImportarContent() {
               <p className="text-slate-600">
                 Precisam revisão de conteúdo: {parseResult.stats.needs_review}
               </p>
+              {parseResult.stats.already_in_bank > 0 && (
+                <p className="mt-2 flex items-center gap-1 font-medium text-green-800">
+                  <Check className="h-4 w-4" />
+                  {parseResult.stats.already_in_bank === 1
+                    ? "1 questão já está no banco (será mantida por padrão)"
+                    : `${parseResult.stats.already_in_bank} questões já estão no banco (serão mantidas por padrão)`}
+                </p>
+              )}
+              {parseResult.stats.already_in_bank > 0 && (
+                <ul className="mt-2 space-y-2">
+                  {questions
+                    .filter((q) => q.existing_in_bank)
+                    .slice(0, 5)
+                    .map((q) => (
+                      <li
+                        key={q.tec_id}
+                        className="rounded border border-green-200 bg-green-50/80 p-2 text-xs text-green-900"
+                      >
+                        <span className="inline-flex items-center gap-1 font-medium">
+                          <Check className="h-3 w-3" />
+                          TEC {q.tec_id}
+                        </span>
+                        <p className="mt-1 line-clamp-2 text-green-800">
+                          {q.existing_in_bank?.statement}
+                        </p>
+                        <p className="mt-1 text-green-700">
+                          Gabarito no banco: {q.existing_in_bank?.correct_answer}
+                        </p>
+                      </li>
+                    ))}
+                  {parseResult.stats.already_in_bank > 5 && (
+                    <li className="text-xs text-green-700">
+                      … e mais {parseResult.stats.already_in_bank - 5} na revisão
+                    </li>
+                  )}
+                </ul>
+              )}
               {parseResult.warnings.length > 0 && (
                 <ul className="mt-2 text-xs text-amber-700">
                   {parseResult.warnings.slice(0, 5).map((w, i) => (
@@ -314,6 +377,17 @@ function ImportarContent() {
               />
               Só com avisos
             </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={filterInBank}
+                onChange={(e) => {
+                  setFilterInBank(e.target.checked)
+                  setPage(0)
+                }}
+              />
+              Só já no banco
+            </label>
             <input
               type="text"
               placeholder="Buscar TEC ID"
@@ -339,6 +413,8 @@ function ImportarContent() {
                 item={item}
                 userId={userId}
                 llmEnabled={LLM_ENABLED}
+                replaceInBank={item.replace_in_bank}
+                onReplaceChange={(replace) => updateReplaceInBank(item.tec_id, replace)}
                 onChange={(merged) => updateQuestion(item.tec_id, merged)}
               />
             ))}
@@ -401,6 +477,20 @@ function ImportarContent() {
               Alta confiança: {parseResult.stats.high} · Revisadas manualmente:{" "}
               {questions.length - parseResult.stats.high}
             </p>
+            {bankStats.keeping > 0 && (
+              <p className="mt-1 text-green-800">
+                <Check className="mr-1 inline h-4 w-4" />
+                {bankStats.keeping} mantidas do banco (sem alterar conteúdo)
+              </p>
+            )}
+            {bankStats.replacing > 0 && (
+              <p className="mt-1 text-amber-800">
+                {bankStats.replacing} substituirão a versão do banco
+              </p>
+            )}
+            {bankStats.newCount > 0 && (
+              <p className="mt-1 text-slate-600">{bankStats.newCount} novas no banco global</p>
+            )}
             {subjectId && subjects.length > 0 && (
               <p className="mt-1 text-slate-600">
                 Matéria: {subjects.find((s) => s.id === subjectId)?.name ?? "—"}
@@ -431,7 +521,8 @@ function ImportarContent() {
             <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
               <p className="font-medium text-green-900">Importação concluída!</p>
               <p className="mt-1">Novas questões: {String(commitResult.created_questions ?? 0)}</p>
-              <p>Reutilizadas: {String(commitResult.reused_questions ?? 0)}</p>
+              <p>Mantidas do banco: {String(commitResult.reused_questions ?? 0)}</p>
+              <p>Substituídas no banco: {String(commitResult.updated_questions ?? 0)}</p>
               <div className="mt-3 flex flex-wrap gap-3">
                 {typeof commitResult.notebook_id === "string" && (
                   <Link
