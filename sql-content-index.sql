@@ -1,4 +1,4 @@
--- Índice de conteúdo (árvore TEC + cadernos) + blocos manuais do ciclo
+-- Índice de conteúdo (árvore TEC + cadernos) + blocos manuais do ciclos
 -- Execute após sql-study-cycle.sql
 
 CREATE TABLE IF NOT EXISTS subject_content_nodes (
