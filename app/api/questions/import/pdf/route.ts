@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
-import { parseTecPdf } from "@/lib/tec-pdf-parser"
+import {
+  notebookParseResultToParsed,
+  parseTecPdfPipeline,
+} from "@/lib/tec-pdf-parse-pipeline"
 import { importNotebookFromParsed } from "@/lib/question-import"
 
 export const runtime = "nodejs"
@@ -28,7 +31,8 @@ export async function POST(req: Request) {
 
     await loadPdfTextCorrectionConfig()
     const buffer = Buffer.from(await file.arrayBuffer())
-    const parsed = await parseTecPdf(buffer)
+    const pipeline = await parseTecPdfPipeline(buffer)
+    const parsed = notebookParseResultToParsed(pipeline)
     const result = await importNotebookFromParsed(user_id, parsed, {
       subject_id: subject_id || null,
       folder_id,
@@ -39,6 +43,8 @@ export async function POST(req: Request) {
       ...result,
       question_count: parsed.questions.length,
       parsed_name: parsed.name,
+      parse_stats: pipeline.stats,
+      parse_warnings: pipeline.warnings,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : "Erro ao importar PDF"

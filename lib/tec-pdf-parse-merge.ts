@@ -136,17 +136,32 @@ function computeConfidence(
 function pickMerged(
   candidates: Record<ParseSource, ParsedTecQuestion | null>,
   block: string,
-  index: number
+  index: number,
+  answers: Map<number, string>
 ): ParsedTecQuestion {
-  if (candidates.primary) return { ...candidates.primary }
+  if (candidates.primary) {
+    const q = { ...candidates.primary }
+    if (!q.correct_answer?.trim()) {
+      const ans = answers.get(q.index)
+      if (ans) q.correct_answer = ans
+    }
+    return q
+  }
   for (const src of ["lines", "strict"] as ParseSource[]) {
-    if (candidates[src]) return { ...candidates[src]! }
+    if (candidates[src]) {
+      const q = { ...candidates[src]! }
+      if (!q.correct_answer?.trim()) {
+        const ans = answers.get(q.index)
+        if (ans) q.correct_answer = ans
+      }
+      return q
+    }
   }
   const urlMatch = block.match(
     /(?:https?:\/\/)?(?:www\.)?tecconcursos\.com\.br\/questoes\/(\d+)/i
   )
   const tec_id = urlMatch ? parseInt(urlMatch[1], 10) : 0
-  return {
+  const stub: ParsedTecQuestion = {
     index,
     tec_id,
     tec_url: tec_id
@@ -163,6 +178,9 @@ function pickMerged(
     options: [],
     correct_answer: "",
   }
+  const ans = answers.get(index)
+  if (ans) stub.correct_answer = ans
+  return stub
 }
 
 export function parseBlockWithAllVariants(
@@ -197,7 +215,7 @@ export function parseBlockWithAllVariants(
     }
   }
 
-  const merged = pickMerged(candidates, block, index)
+  const merged = pickMerged(candidates, block, index, answers)
   const conflicts = collectConflicts(candidates)
   let confidence = computeConfidence(candidates)
   const { quality_flags, needs_review } = assessQuestionQuality(merged, candidates)

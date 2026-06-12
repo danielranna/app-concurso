@@ -115,6 +115,8 @@ export async function upsertGlobalQuestion(
         ano: q.ano,
         tec_subject: q.tec_subject,
         tec_topic: q.tec_topic,
+        type: q.type,
+        tec_url: q.tec_url,
       })
       .eq("id", existing.id)
 
@@ -194,6 +196,8 @@ export async function importNotebookFromParsed(
   reused_questions: number
   updated_questions: number
   skipped_in_notebook: number
+  skipped_no_gabarito: number
+  skipped_tec_ids: number[]
   linked_questions: number
   warnings: string[]
 }> {
@@ -207,6 +211,8 @@ export async function importNotebookFromParsed(
   let reused_questions = 0
   let updated_questions = 0
   let skipped_in_notebook = 0
+  let skipped_no_gabarito = 0
+  const skipped_tec_ids: number[] = []
   const questionIds: { question_id: string; position: number }[] = []
   const tecToQuestionId = new Map<number, string>()
   const existingByTecId = await fetchBankQuestionsByTecIds(
@@ -216,7 +222,11 @@ export async function importNotebookFromParsed(
   for (let i = 0; i < questionsToImport.length; i++) {
     const q = questionsToImport[i]
     const keepingBank = existingByTecId.has(q.tec_id) && !q.replace_in_bank
-    if (!keepingBank && !q.correct_answer?.trim()) continue
+    if (!keepingBank && !q.correct_answer?.trim()) {
+      skipped_no_gabarito++
+      skipped_tec_ids.push(q.tec_id)
+      continue
+    }
 
     const result = await upsertGlobalQuestion(q)
     if (result.created) created_questions++
@@ -290,6 +300,8 @@ export async function importNotebookFromParsed(
     reused_questions,
     updated_questions,
     skipped_in_notebook,
+    skipped_no_gabarito,
+    skipped_tec_ids,
     linked_questions,
     warnings: parsed.warnings,
   }

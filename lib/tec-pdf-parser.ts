@@ -234,7 +234,8 @@ const ENUNCIADO_PHRASES =
   "De acordo com|Sabendo que|Suponha que|Considere que|Observe que|As normas|As fontes|Dadas as|Elemento|Fluxos|" +
   "No tocante|Relativamente|Nos termos(?: do| da)?|Analise|Qual a|Qual o|Para responder|Conforme (?:a|o) |" +
   "Quando utiliza|Quando o|Em um|Em nova|Um Auditor|Uma empresa|A empresa|A secretaria|O objetivo|" +
-  "O auditor|O Estado|O ato|O lançamento|A função|A Sociedade|A Constituição|A fiscalização|A atitude|" +
+  "O auditor|O Estado|O acto|O lançamento|A função|A Sociedade|A Constituição|A fiscalização|A atitude|" +
+  "Sobre(?: a| o| as| os| e)?|" +
   "O sistema|Ocorrerá|Independentemente|Isenção|São modalidades|Decretada|Determin|Informe se|Talvez uma|" +
   "O sistema organizacional|A propósito|O ato administrativo|A avaliação|A publicidade|A atuação|A deficiência|" +
   "A frase|Tenho-me|Certo dia|A obtenção|A Sociedade Empresária|Nessa situação|Isenção do|Com o objetivo|" +
@@ -325,7 +326,16 @@ function splitTaxonomyByLines(afterMeta: string): {
   const firstStmt = lines.findIndex((l) => isEnunciadoLine(l))
   if (firstStmt > 0) {
     const taxLines = lines.slice(0, firstStmt).filter((l) => l.includes(" - "))
-    if (taxLines.length === 0) return null
+    if (taxLines.length === 0) {
+      const subjectOnly = lines[0]
+      if (subjectOnly && !subjectOnly.includes(" - ") && firstStmt >= 1) {
+        return {
+          taxonomyLine: subjectOnly,
+          rest: lines.slice(firstStmt).join("\n"),
+        }
+      }
+      return null
+    }
     return {
       taxonomyLine: taxLines.join(" "),
       rest: lines.slice(firstStmt).join("\n"),
@@ -335,11 +345,36 @@ function splitTaxonomyByLines(afterMeta: string): {
   const optLine = lines.findIndex((l) => MCQ_OPTION_LINE_RE.test(l))
   if (optLine > 1) {
     const taxLines = lines.slice(0, optLine).filter((l) => l.includes(" - "))
-    if (taxLines.length === 0) return null
-    const stmtLines = lines.slice(taxLines.length, optLine)
+    if (taxLines.length === 0) {
+      const subjectOnly = lines[0]
+      if (subjectOnly && !subjectOnly.includes(" - ") && optLine >= 1) {
+        return {
+          taxonomyLine: subjectOnly,
+          rest: lines.slice(1, optLine).concat(lines.slice(optLine)).join("\n"),
+        }
+      }
+      return null
+    }
+    const firstTaxEnd = lines.findIndex((l, i) => i < optLine && l.includes(" - "))
+    const stmtStart = lines
+      .slice(0, optLine)
+      .findIndex((l, i) => i > firstTaxEnd && !l.includes(" - "))
+    const stmtLines =
+      stmtStart > firstTaxEnd
+        ? lines.slice(stmtStart, optLine)
+        : lines.slice(taxLines.length, optLine)
     return {
       taxonomyLine: taxLines.join(" "),
       rest: [...stmtLines, ...lines.slice(optLine)].join("\n"),
+    }
+  }
+
+  if (lines.length >= 2 && !lines[0].includes(" - ")) {
+    const stmtIdx = lines.findIndex(
+      (l, i) => i > 0 && (isEnunciadoLine(l) || /^\d+\)\s/.test(l))
+    )
+    if (stmtIdx > 0) {
+      return { taxonomyLine: lines[0], rest: lines.slice(stmtIdx).join("\n") }
     }
   }
 
@@ -358,7 +393,29 @@ function splitTaxonomySingleLine(
   if (!trimmed) return { taxonomyLine: "", rest: "" }
 
   const dash = trimmed.search(/\s+-\s+/)
-  if (dash < 0) return { taxonomyLine: trimmed, rest: "" }
+  if (dash < 0) {
+    if (!flattenBody && afterMeta.includes("\n")) {
+      const lines = afterMeta.split("\n").map((l) => l.trim()).filter(Boolean)
+      if (lines.length >= 2 && !lines[0].includes(" - ")) {
+        return { taxonomyLine: lines[0], rest: lines.slice(1).join("\n") }
+      }
+    }
+    const stmtIdx = trimmed.search(STATEMENT_START_RE)
+    if (stmtIdx > 12) {
+      return {
+        taxonomyLine: trimmed.slice(0, stmtIdx).trim(),
+        rest: trimmed.slice(stmtIdx).trim(),
+      }
+    }
+    const numIdx = trimmed.search(/\s\d+\)\s/)
+    if (numIdx > 12) {
+      return {
+        taxonomyLine: trimmed.slice(0, numIdx).trim(),
+        rest: trimmed.slice(numIdx).trim(),
+      }
+    }
+    return { taxonomyLine: trimmed, rest: "" }
+  }
   const subject = trimmed.slice(0, dash).trim()
   const tail = trimmed.slice(dash + 3).trim()
 
@@ -489,20 +546,18 @@ export function parseQuestionBlock(
   const hasMcqOptions = parserOpts.strictOptions
     ? rest.split("\n").some((l) => MCQ_OPTION_LINE_RE.test(l.trim()))
     : MCQ_OPTION_RE.test(rest)
-  const isCertoErrado =
-    !hasMcqOptions && /\bCerto\b/.test(rest) && /\bErrado\b/.test(rest)
+  const isCertoErrado = !hasMcqOptions && isCertoErradoBlock(rest)
   const type: QuestionType = isCertoErrado ? "certo_errado" : "multiple_choice"
+
+  if (!tec_topic.trim() && rest.trim()) {
+    tec_topic = "Sem Classificação"
+  }
 
   let statement = ""
   let options: { label: string; text: string }[] = []
 
   if (type === "certo_errado") {
-    const certoIdx = rest.search(/\bCerto\b/)
-    statement = rest
-      .slice(0, certoIdx)
-      .trim()
-      .replace(/^(?:\d+\)\s*)+/, "")
-      .trim()
+    statement = splitCertoErradoStatement(rest)
     options = [
       { label: "Certo", text: "Certo" },
       { label: "Errado", text: "Errado" },
@@ -576,12 +631,15 @@ function parseMetaLine(line: string): {
   }
 }
 
-/** Assunto colado após ")" final do título (ex.: "...Acessória) Um Auditor..."). */
-function capTopicLeak(topic: string, rest: string): { topic: string; rest: string } {
+const TOPIC_LEAK_STARTERS =
+  /^(?:um |uma |Um |Uma |A |O |An |No |Na |Em |As |Os |Para |Nessa |Sobre |Suponha |Considere |Considerando |Analise |Julgue |Assinale |Preencha |Qual |Texto |Elemento |Fluxos |Item\s+\d+\s*[-–—]\s|P:\s|Proposição\s+P:\s|\d+\)\s)/i
+
+/** Assunto colado ao enunciado na mesma linha. */
+export function capTopicLeak(topic: string, rest: string): { topic: string; rest: string } {
   let splitAt = -1
   for (const m of topic.matchAll(/\)\s+/g)) {
     const after = topic.slice(m.index! + m[0].length)
-    if (/^(?:um |Um |A |O |An |No |Um Auditor)/i.test(after)) {
+    if (TOPIC_LEAK_STARTERS.test(after)) {
       splitAt = m.index! + 1
     }
   }
@@ -591,7 +649,90 @@ function capTopicLeak(topic: string, rest: string): { topic: string; rest: strin
       rest: (topic.slice(splitAt).trim() + (rest ? " " + rest : "")).trim(),
     }
   }
+
+  const stmtIdx = topic.search(STATEMENT_START_RE)
+  if (stmtIdx > 8) {
+    return {
+      topic: topic.slice(0, stmtIdx).trim(),
+      rest: (topic.slice(stmtIdx).trim() + (rest ? " " + rest : "")).trim(),
+    }
+  }
+
+  const itemMatch = topic.match(/\sItem\s+\d+\s*[-–—]\s/i)
+  if (itemMatch?.index != null && itemMatch.index > 5) {
+    return {
+      topic: topic.slice(0, itemMatch.index).trim(),
+      rest: (topic.slice(itemMatch.index).trim() + (rest ? " " + rest : "")).trim(),
+    }
+  }
+
+  const numMatch = topic.match(/\s\d+\)\s/)
+  if (numMatch?.index != null && numMatch.index > 8) {
+    return {
+      topic: topic.slice(0, numMatch.index).trim(),
+      rest: (topic.slice(numMatch.index).trim() + (rest ? " " + rest : "")).trim(),
+    }
+  }
+
   return { topic, rest }
+}
+
+/** Certo/Errado como opções finais — evita falso positivo em "certo ou errado que". */
+export function isCertoErradoBlock(rest: string): boolean {
+  const trimmed = rest.trim()
+  if (!trimmed || MCQ_OPTION_RE.test(trimmed)) return false
+  if (/^[a-e]\)\s/im.test(trimmed)) return false
+
+  if (/\bCerto\s+Errado\s*$/im.test(trimmed)) return true
+
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean)
+  if (lines.length >= 2) {
+    const a = lines[lines.length - 2]
+    const b = lines[lines.length - 1]
+    if (/^certo$/i.test(a) && /^errado$/i.test(b)) return true
+  }
+  if (lines.length >= 1 && /^certo\s+errado$/i.test(lines[lines.length - 1])) return true
+
+  const tail = trimmed.slice(-120)
+  if (/\bCerto\b/i.test(tail) && /\bErrado\b/i.test(tail)) {
+    if (/\bCerto\s+Errado\b/i.test(tail)) return true
+    if (/^certo$/im.test(lines[lines.length - 1] ?? "")) return true
+  }
+
+  if (
+    /\bItem\s+\d+\s*[-–—]/i.test(trimmed) &&
+    (/\bjulgue\b/i.test(trimmed) ||
+      /\bcerto ou errado\b/i.test(trimmed) ||
+      /\bafirmar se é certo ou errado\b/i.test(trimmed))
+  ) {
+    return true
+  }
+
+  return false
+}
+
+export function splitCertoErradoStatement(rest: string): string {
+  const trimmed = rest.trim()
+  const tailPair = trimmed.match(/^([\s\S]*?)\s*\bCerto\s+Errado\s*$/im)
+  if (tailPair) {
+    return tailPair[1].trim().replace(/^(?:\d+\)\s*)+/, "").trim()
+  }
+
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean)
+  if (lines.length >= 2 && /^certo$/i.test(lines[lines.length - 2]) && /^errado$/i.test(lines[lines.length - 1])) {
+    return lines.slice(0, -2).join("\n").replace(/^(?:\d+\)\s*)+/, "").trim()
+  }
+
+  const lastCertoErrado = trimmed.match(/\bCerto\s+Errado\b/gi)
+  if (lastCertoErrado?.length) {
+    const needle = lastCertoErrado[lastCertoErrado.length - 1]
+    const idx = trimmed.toLowerCase().lastIndexOf(needle.toLowerCase())
+    if (idx > 0) {
+      return trimmed.slice(0, idx).trim().replace(/^(?:\d+\)\s*)+/, "").trim()
+    }
+  }
+
+  return trimmed.replace(/^(?:\d+\)\s*)+/, "").trim()
 }
 
 function parseTaxonomyLine(line: string): {

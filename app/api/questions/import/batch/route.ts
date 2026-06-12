@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { loadPdfTextCorrectionConfig } from "@/lib/pdf-text-corrections"
-import { parseTecPdf } from "@/lib/tec-pdf-parser"
+import {
+  notebookParseResultToParsed,
+  parseTecPdfPipeline,
+} from "@/lib/tec-pdf-parse-pipeline"
 import { importNotebookFromParsed } from "@/lib/question-import"
 
 export const runtime = "nodejs"
@@ -26,14 +29,19 @@ export async function POST(req: Request) {
     const results = []
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer())
-      const parsed = await parseTecPdf(buffer)
+      const pipeline = await parseTecPdfPipeline(buffer)
+      const parsed = notebookParseResultToParsed(pipeline)
       const name = (form.get(`name_${file.name}`) as string) || parsed.name
       const result = await importNotebookFromParsed(user_id, parsed, {
         subject_id: subject_id || null,
         folder_id,
         name,
       })
-      results.push({ file: file.name, ...result })
+      results.push({
+        file: file.name,
+        ...result,
+        parse_stats: pipeline.stats,
+      })
     }
 
     return NextResponse.json({ notebooks: results })

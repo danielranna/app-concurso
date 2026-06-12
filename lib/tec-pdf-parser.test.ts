@@ -397,6 +397,49 @@ function runTests() {
   assert(mcqNum.options[0].text === "primeira", `mcq opt0: ${mcqNum.options[0].text}`)
   assert(mcqNum.options[4].text === "quinta", `mcq opt4: ${mcqNum.options[4].text}`)
 
+  const ELASTICIDADE_SNIPPET = `
+www.tecconcursos.com.br/questoes/3099402
+ANPEC - ExSN (ANPEC)/ANPEC/2024
+Economia e Finanças Públicas - Elasticidade Preço da Demanda
+Um famoso bar decidiu pesquisar o comportamento de seus consumidores de chope.
+Item 3 - A elasticidade-preço da demanda é nula para uma quantidade de 4.000 tulipas.
+Certo Errado
+Gabarito 1) Certo
+`
+
+  const elas = parseTecPdfText(ELASTICIDADE_SNIPPET).questions[0]
+  assert(elas.tec_topic === "Elasticidade Preço da Demanda", `elas topic: ${elas.tec_topic}`)
+  assert(elas.statement.startsWith("Um famoso bar"), `elas stmt: ${elas.statement.slice(0, 40)}`)
+
+  const PAEG_SNIPPET = `
+www.tecconcursos.com.br/questoes/3098608
+ANPEC - ExSN (ANPEC)/ANPEC/2024
+Economia e Finanças Públicas - PAEG
+Sobre a economia brasileira durante a ditadura militar (1964-1985), é possível afirmar se é certo ou errado que:
+Item 0 - O ajuste econômico levado a cabo durante a gestão de Campos e Bulhões foi operacionalizado.
+Certo Errado
+Gabarito 1) Certo
+`
+
+  const paeg = parseTecPdfText(PAEG_SNIPPET).questions[0]
+  assert(paeg.type === "certo_errado", `paeg type: ${paeg.type}`)
+  assert(paeg.tec_topic === "PAEG", `paeg topic: ${paeg.tec_topic}`)
+  assert(paeg.statement.includes("ditadura militar"), `paeg stmt: ${paeg.statement.slice(0, 50)}`)
+
+  const SUBJECT_ONLY_SNIPPET = `
+www.tecconcursos.com.br/questoes/3919856
+CEBRASPE (CESPE) - Analista (INFRA S.A.)/INFRA S.A./Economista/2026
+Economia e Finanças Públicas
+152) Os modelos de regressão têm múltiplas aplicações no setor de transportes.
+Acerca de teste de hipóteses, julgue o item.
+Certo Errado
+Gabarito 1) Certo
+`
+
+  const subOnly = parseTecPdfText(SUBJECT_ONLY_SNIPPET).questions[0]
+  assert(subOnly.tec_topic === "Sem Classificação", `subOnly topic: ${subOnly.tec_topic}`)
+  assert(subOnly.statement.includes("modelos de regressão"), `subOnly stmt: ${subOnly.statement.slice(0, 40)}`)
+
   console.log("tec-pdf-parser tests OK")
 }
 

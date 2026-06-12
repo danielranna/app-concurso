@@ -129,6 +129,7 @@ export type BankFilters = {
   ano?: number[]
   tec_subject?: string[]
   tec_topic?: string[]
+  tec_topic_pairs?: { tec_subject: string; tec_topic: string }[]
   type?: QuestionType[]
   subject_id?: string
   topic_id?: string

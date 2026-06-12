@@ -7,7 +7,15 @@ import { supabase } from "@/lib/supabase"
 import { ArrowLeft } from "lucide-react"
 import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
 
-type TecGroup = { tec_subject: string; topics: string[] }
+import { encodeTecTopicPair } from "@/lib/tec-facets"
+import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
+import type { FacetQuality } from "@/lib/tec-facets"
+
+type TecGroup = {
+  tec_subject: string
+  topics: string[]
+  topic_qualities?: Record<string, FacetQuality>
+}
 
 type Facets = {
   bancas: string[]
@@ -17,9 +25,8 @@ type Facets = {
   tec_subjects: string[]
   tec_topics: string[]
   tec_groups: TecGroup[]
+  tec_trees?: TecSubjectTreeResponse[]
 }
-
-type Subject = { id: string; name: string }
 
 const CATEGORIES = [
   { key: "banca", label: "Banca" },
@@ -30,6 +37,58 @@ const CATEGORIES = [
   { key: "tec_topic", label: "Assuntos (por matéria)" },
 ] as const
 
+type Subject = { id: string; name: string }
+
+type BankTreeNodeProps = {
+  node: import("@/lib/tec-subject-tree-types").TecSubjectNode
+  depth: number
+  tecSubject: string
+  isTopicChecked: (s: string, t: string) => boolean
+  toggleTopic: (s: string, t: string) => void
+}
+
+function BankTreeNode({
+  node,
+  depth,
+  tecSubject,
+  isTopicChecked,
+  toggleTopic,
+}: BankTreeNodeProps) {
+  if (node.node_type === "topic" && node.tec_topic) {
+    return (
+      <label
+        className="flex cursor-pointer items-center gap-2 py-0.5 text-sm"
+        style={{ paddingLeft: depth * 12 + 4 }}
+      >
+        <input
+          type="checkbox"
+          checked={isTopicChecked(tecSubject, node.tec_topic)}
+          onChange={() => toggleTopic(tecSubject, node.tec_topic!)}
+        />
+        <span className="truncate">{node.name}</span>
+        <span className="text-xs text-slate-400">
+          {node.question_count} ({node.percent?.toFixed(1)}%)
+        </span>
+      </label>
+    )
+  }
+  return (
+    <div style={{ paddingLeft: depth * 12 }}>
+      <p className="py-1 text-sm font-medium text-slate-700">{node.name}</p>
+      {node.children?.map((c) => (
+        <BankTreeNode
+          key={c.id}
+          node={c}
+          depth={depth + 1}
+          tecSubject={tecSubject}
+          isTopicChecked={isTopicChecked}
+          toggleTopic={toggleTopic}
+        />
+      ))}
+    </div>
+  )
+}
+
 export default function BancoPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
@@ -37,6 +96,7 @@ export default function BancoPage() {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [activeCategory, setActiveCategory] = useState<string>("banca")
   const [filters, setFilters] = useState<Record<string, string[]>>({})
+  const [tecPairs, setTecPairs] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [cadernoName, setCadernoName] = useState("")
   const [subjectId, setSubjectId] = useState("")
@@ -46,10 +106,11 @@ export default function BancoPage() {
     if (!userId) return
     const params = new URLSearchParams({ user_id: userId, limit: "1" })
     Object.entries(filters).forEach(([k, vals]) => vals.forEach((v) => params.append(k, v)))
+    tecPairs.forEach((p) => params.append("tec_pair", p))
     const res = await fetch(`/api/questions/bank?${params}`)
     const data = await res.json()
     setTotal(data.total ?? 0)
-  }, [userId, filters])
+  }, [userId, filters, tecPairs])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -58,7 +119,9 @@ export default function BancoPage() {
         return
       }
       setUserId(user.id)
-      fetch(`/api/questions/bank?facets=1`).then((r) => r.json()).then(setFacets)
+      fetch(`/api/questions/bank?facets=1&user_id=${user.id}&include_hidden=1`)
+        .then((r) => r.json())
+        .then(setFacets)
       fetch(`/api/subjects?user_id=${user.id}`).then((r) => r.json()).then(setSubjects)
     })
   }, [router])
@@ -75,21 +138,25 @@ export default function BancoPage() {
     })
   }
 
-  /** Assunto sempre carrega a matéria TEC pai no filtro. */
+  /** Assunto com par (matéria, assunto) para evitar colisão cross-matéria. */
   function toggleTopic(tecSubject: string, tecTopic: string) {
-    setFilters((prev) => {
-      const topics = prev.tec_topic ?? []
-      const subjects = prev.tec_subject ?? []
-      const has = topics.includes(tecTopic)
-      const nextTopics = has
-        ? topics.filter((t) => t !== tecTopic)
-        : [...topics, tecTopic]
-      let nextSubjects = subjects
-      if (!has && !subjects.includes(tecSubject)) {
-        nextSubjects = [...subjects, tecSubject]
-      }
-      return { ...prev, tec_topic: nextTopics, tec_subject: nextSubjects }
+    const pair = encodeTecTopicPair(tecSubject, tecTopic)
+    setTecPairs((prev) => {
+      const has = prev.includes(pair)
+      const next = has ? prev.filter((p) => p !== pair) : [...prev, pair]
+      return next
     })
+    setFilters((prev) => {
+      const subjects = prev.tec_subject ?? []
+      if (!subjects.includes(tecSubject)) {
+        return { ...prev, tec_subject: [...subjects, tecSubject] }
+      }
+      return prev
+    })
+  }
+
+  function isTopicChecked(tecSubject: string, tecTopic: string) {
+    return tecPairs.includes(encodeTecTopicPair(tecSubject, tecTopic))
   }
 
   function facetValues(key: string): string[] {
@@ -124,7 +191,12 @@ export default function BancoPage() {
         name: cadernoName,
         subject_id: subjectId,
         folder_id: folderId || null,
-        filters,
+        filters: { ...filters, tec_topic_pairs: tecPairs.map((p) => {
+          const idx = p.indexOf("\0")
+          return idx >= 0
+            ? { tec_subject: p.slice(0, idx), tec_topic: p.slice(idx + 1) }
+            : null
+        }).filter(Boolean) },
         limit: 200,
       }),
     })
@@ -132,9 +204,13 @@ export default function BancoPage() {
     if (data.notebook_id) router.push(`/questoes/cadernos/${data.notebook_id}`)
   }
 
-  const activeFilters = Object.entries(filters).flatMap(([k, vals]) =>
-    vals.map((v) => ({ k, v }))
-  )
+  const activeFilters = [
+    ...Object.entries(filters).flatMap(([k, vals]) => vals.map((v) => ({ k, v }))),
+    ...tecPairs.map((p) => {
+      const i = p.indexOf("\0")
+      return { k: "tec_pair", v: i >= 0 ? `${p.slice(0, i)} → ${p.slice(i + 1)}` : p }
+    }),
+  ]
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col p-4">
@@ -171,6 +247,39 @@ export default function BancoPage() {
                   todas.
                 </p>
               )}
+              {(facets.tec_trees ?? []).length > 0 &&
+                visibleTecGroups().some((g) =>
+                  facets.tec_trees?.some((t) => t.tec_subject === g.tec_subject)
+                ) &&
+                facets.tec_trees!.filter((t) =>
+                  visibleTecGroups().some((g) => g.tec_subject === t.tec_subject)
+                ).map((tree) => (
+                  <div key={tree.tec_subject} className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
+                    <p className="mb-2 text-sm font-semibold text-violet-900">
+                      {tree.tec_subject} (organizada)
+                    </p>
+                    {tree.nodes.map((node) => (
+                      <BankTreeNode
+                        key={node.id}
+                        node={node}
+                        depth={0}
+                        isTopicChecked={isTopicChecked}
+                        toggleTopic={toggleTopic}
+                        tecSubject={tree.tec_subject}
+                      />
+                    ))}
+                    {tree.ungrouped.map((node) => (
+                      <BankTreeNode
+                        key={node.id}
+                        node={node}
+                        depth={0}
+                        isTopicChecked={isTopicChecked}
+                        toggleTopic={toggleTopic}
+                        tecSubject={tree.tec_subject}
+                      />
+                    ))}
+                  </div>
+                ))}
               {visibleTecGroups().map((g) => (
                 <div key={g.tec_subject} className="rounded-lg border bg-slate-50/80 p-3">
                   <label className="flex cursor-pointer items-center gap-2 border-b border-slate-200 pb-2 text-sm font-semibold text-blue-800">
@@ -188,10 +297,15 @@ export default function BancoPage() {
                           <input
                             type="checkbox"
                             className="mt-0.5"
-                            checked={(filters.tec_topic ?? []).includes(topic)}
+                            checked={isTopicChecked(g.tec_subject, topic)}
                             onChange={() => toggleTopic(g.tec_subject, topic)}
                           />
-                          <span>{topic}</span>
+                          <span>
+                            {topic}
+                            {g.topic_qualities?.[topic] === "warn" && (
+                              <span className="ml-1 text-xs text-amber-600">⚠</span>
+                            )}
+                          </span>
                         </label>
                       </li>
                     ))}

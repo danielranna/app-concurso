@@ -5,6 +5,7 @@ import {
   parseBankFiltersFromSearchParams,
   applyMappingFilter,
 } from "@/lib/question-bank"
+import { fetchTecTreeFacetsForBank } from "@/lib/tec-subject-tree"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -17,8 +18,11 @@ export async function GET(req: Request) {
 
   const facetsOnly = searchParams.get("facets") === "1"
   if (facetsOnly) {
-    const facets = await fetchFilterFacets()
-    return NextResponse.json(facets)
+    const includeHidden = searchParams.get("include_hidden") === "1"
+    const facets = await fetchFilterFacets({ includeHiddenTopics: includeHidden })
+    const tec_trees =
+      user_id ? await fetchTecTreeFacetsForBank(user_id) : []
+    return NextResponse.json({ ...facets, tec_trees })
   }
 
   const limit = parseInt(searchParams.get("limit") ?? "50", 10)

@@ -4,6 +4,9 @@ import {
   listUnmappedTecSubjects,
   listUnmappedTecTopics,
   listUnmappedTecTopicsGrouped,
+  listMappedTopics,
+  getMappingProgress,
+  bulkMapTopicsByName,
   saveSubjectMapping,
   saveTopicMapping,
   createTopicAndMapping,
@@ -32,6 +35,16 @@ export async function GET(req: Request) {
 
   if (mode === "topics_grouped") {
     const items = await listUnmappedTecTopicsGrouped(user_id)
+    return NextResponse.json(items)
+  }
+
+  if (mode === "mapped") {
+    const items = await listMappedTopics(user_id)
+    return NextResponse.json(items)
+  }
+
+  if (mode === "progress") {
+    const items = await getMappingProgress(user_id)
     return NextResponse.json(items)
   }
 
@@ -106,6 +119,11 @@ export async function POST(req: Request) {
       }
       const data = await createTopicAndMapping(user_id, tec_subject, tec_topic)
       return NextResponse.json(data)
+    }
+
+    if (type === "bulk_by_name") {
+      const result = await bulkMapTopicsByName(user_id, tec_subject)
+      return NextResponse.json(result)
     }
 
     return NextResponse.json({ error: "type inválido" }, { status: 400 })

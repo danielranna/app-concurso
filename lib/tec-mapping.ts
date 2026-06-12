@@ -1,4 +1,6 @@
 import { supabaseServer } from "./supabase-server"
+import { assessTecFacetQuality } from "./tec-facets"
+import { mirrorTecTreeToContentIndex } from "./tec-subject-tree"
 
 export type TecSubjectGroup = {
   tec_subject: string
@@ -111,6 +113,7 @@ export async function listUnmappedTecTopics(userId: string): Promise<TecTopicGro
     const sub = normKey(q.tec_subject ?? "")
     const top = normKey(q.tec_topic ?? "")
     if (!sub || !top) continue
+    if (assessTecFacetQuality(top) === "hidden") continue
     const key = `${sub}|||${top}`
     if (mappedTopicKeys.has(key)) continue
 
@@ -163,6 +166,13 @@ export async function saveSubjectMapping(
     .select()
     .single()
   if (error) throw new Error(error.message)
+
+  try {
+    await mirrorTecTreeToContentIndex(userId, tec_subject.trim(), subject_id)
+  } catch {
+    /* espelho opcional */
+  }
+
   return data
 }
 
@@ -274,7 +284,121 @@ export async function resolveQuestionMapping(
   return { subject_id, topic_id }
 }
 
-/** Assuntos pendentes agrupados pela matéria TEC (hierarquia do PDF). */
+/** Progresso de mapeamento por matéria TEC. */
+export async function getMappingProgress(userId: string): Promise<
+  {
+    tec_subject: string
+    total_topics: number
+    mapped_topics: number
+    subject_mapped: boolean
+  }[]
+> {
+  const { data: questions } = await supabaseServer
+    .from("questions")
+    .select("tec_subject, tec_topic")
+
+  const topicSets = new Map<string, Set<string>>()
+  for (const q of questions ?? []) {
+    const sub = normKey(q.tec_subject ?? "")
+    const top = normKey(q.tec_topic ?? "")
+    if (!sub || !top) continue
+    if (assessTecFacetQuality(top) === "hidden") continue
+    const set = topicSets.get(sub) ?? new Set<string>()
+    set.add(top)
+    topicSets.set(sub, set)
+  }
+
+  const mappings = await loadMappings(userId)
+  const mappedSubjects = new Set(
+    mappings
+      .filter((m) => isSubjectLevelMapping(m.tec_topic))
+      .map((m) => normKey(m.tec_subject))
+  )
+  const mappedTopics = new Set(
+    mappings
+      .filter((m) => !isSubjectLevelMapping(m.tec_topic))
+      .map((m) => `${normKey(m.tec_subject)}|||${normKey(m.tec_topic)}`)
+  )
+
+  return [...topicSets.entries()]
+    .map(([tec_subject, topics]) => ({
+      tec_subject,
+      total_topics: topics.size,
+      mapped_topics: [...topics].filter((t) =>
+        mappedTopics.has(`${tec_subject}|||${t}`)
+      ).length,
+      subject_mapped: mappedSubjects.has(tec_subject),
+    }))
+    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+}
+
+export async function listMappedTopics(userId: string) {
+  const mappings = await loadMappings(userId)
+  const { data: subjects } = await supabaseServer
+    .from("subjects")
+    .select("id, name")
+    .eq("user_id", userId)
+  const { data: topics } = await supabaseServer
+    .from("topics")
+    .select("id, name, subject_id")
+    .eq("user_id", userId)
+
+  const subjectNames = new Map((subjects ?? []).map((s) => [s.id, s.name]))
+  const topicNames = new Map((topics ?? []).map((t) => [t.id, t.name]))
+
+  return mappings
+    .filter((m) => !isSubjectLevelMapping(m.tec_topic))
+    .map((m) => ({
+      id: m.id,
+      tec_subject: m.tec_subject,
+      tec_topic: m.tec_topic,
+      subject_id: m.subject_id,
+      subject_name: subjectNames.get(m.subject_id) ?? null,
+      topic_id: m.topic_id,
+      topic_name: m.topic_id ? topicNames.get(m.topic_id) ?? null : null,
+    }))
+    .sort(
+      (a, b) =>
+        a.tec_subject.localeCompare(b.tec_subject, "pt-BR") ||
+        (a.tec_topic ?? "").localeCompare(b.tec_topic ?? "", "pt-BR")
+    )
+}
+
+/** Mapeia assuntos cujo nome coincide com tema existente na matéria vinculada. */
+export async function bulkMapTopicsByName(
+  userId: string,
+  tec_subject: string
+): Promise<{ mapped: number; skipped: number }> {
+  const unmapped = await listUnmappedTecTopics(userId)
+  const forSubject = unmapped.filter(
+    (t) => normKey(t.tec_subject) === normKey(tec_subject) && t.mapped_subject_id
+  )
+  if (!forSubject.length) return { mapped: 0, skipped: 0 }
+
+  const subjectId = forSubject[0].mapped_subject_id!
+  const { data: topics } = await supabaseServer
+    .from("topics")
+    .select("id, name")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+
+  let mapped = 0
+  let skipped = 0
+  for (const item of forSubject) {
+    const match = (topics ?? []).find(
+      (t) => normKey(t.name) === normKey(item.tec_topic)
+    )
+    if (!match) {
+      skipped++
+      continue
+    }
+    await saveTopicMapping(userId, item.tec_subject, item.tec_topic, match.id)
+    mapped++
+  }
+  return { mapped, skipped }
+}
+
+/** Assuntos pendentes agrupados pela matéria TEC. */
 export async function listUnmappedTecTopicsGrouped(
   userId: string
 ): Promise<{ tec_subject: string; topics: TecTopicGroup[] }[]> {

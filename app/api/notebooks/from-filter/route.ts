@@ -4,6 +4,11 @@ import {
   parseBankFiltersFromSearchParams,
   applyMappingFilter,
 } from "@/lib/question-bank"
+import type { BankFilters } from "@/lib/question-types"
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,")
+}
 
 export async function POST(req: Request) {
   const body = await req.json()
@@ -17,7 +22,7 @@ export async function POST(req: Request) {
     )
   }
 
-  let filters = bodyFilters ?? {}
+  let filters: BankFilters = bodyFilters ?? {}
   if (filters.subject_id || filters.topic_id) {
     filters = await applyMappingFilter(user_id, filters)
   }
@@ -29,7 +34,15 @@ export async function POST(req: Request) {
   if (filters.cargo?.length) query = query.in("cargo", filters.cargo)
   if (filters.ano?.length) query = query.in("ano", filters.ano)
   if (filters.tec_subject?.length) query = query.in("tec_subject", filters.tec_subject)
-  if (filters.tec_topic?.length) query = query.in("tec_topic", filters.tec_topic)
+  if (filters.tec_topic_pairs?.length) {
+    const orParts = filters.tec_topic_pairs.map(
+      (p) =>
+        `and(tec_subject.eq.${escapeFilterValue(p.tec_subject)},tec_topic.eq.${escapeFilterValue(p.tec_topic)})`
+    )
+    query = query.or(orParts.join(","))
+  } else if (filters.tec_topic?.length) {
+    query = query.in("tec_topic", filters.tec_topic)
+  }
   if (filters.type?.length) query = query.in("type", filters.type)
 
   query = query.limit(Math.min(limit, 500))

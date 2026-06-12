@@ -1,5 +1,17 @@
 import { supabaseServer } from "./supabase-server"
 import type { BankFilters, QuestionRow } from "./question-types"
+import {
+  assessTecFacetQuality,
+  buildTecGroupsFromRows,
+  decodeTecTopicPair,
+  type TecTaxonomyGroup,
+} from "./tec-facets"
+
+export type { TecTaxonomyGroup }
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,")
+}
 
 export async function fetchBankQuestions(
   filters: BankFilters,
@@ -12,7 +24,14 @@ export async function fetchBankQuestions(
   if (filters.cargo?.length) query = query.in("cargo", filters.cargo)
   if (filters.ano?.length) query = query.in("ano", filters.ano)
   if (filters.tec_subject?.length) query = query.in("tec_subject", filters.tec_subject)
-  if (filters.tec_topic?.length) query = query.in("tec_topic", filters.tec_topic)
+  if (filters.tec_topic_pairs?.length) {
+    const orParts = filters.tec_topic_pairs.map(
+      (p) => `and(tec_subject.eq.${escapeFilterValue(p.tec_subject)},tec_topic.eq.${escapeFilterValue(p.tec_topic)})`
+    )
+    query = query.or(orParts.join(","))
+  } else if (filters.tec_topic?.length) {
+    query = query.in("tec_topic", filters.tec_topic)
+  }
   if (filters.type?.length) query = query.in("type", filters.type)
   if (filters.search?.trim()) {
     query = query.ilike("statement", `%${filters.search.trim()}%`)
@@ -31,12 +50,9 @@ export async function fetchBankQuestions(
   return { questions: (data ?? []) as QuestionRow[], total: count ?? 0 }
 }
 
-export type TecTaxonomyGroup = {
-  tec_subject: string
-  topics: string[]
-}
-
-export async function fetchFilterFacets(): Promise<{
+export async function fetchFilterFacets(opts?: {
+  includeHiddenTopics?: boolean
+}): Promise<{
   bancas: string[]
   orgaos: string[]
   cargos: string[]
@@ -55,34 +71,15 @@ export async function fetchFilterFacets(): Promise<{
   const uniq = (arr: (string | number | null)[]) =>
     [...new Set(arr.filter(Boolean) as string[])].sort()
 
-  const cleanFacet = (value: string | null) => {
-    if (!value?.trim()) return false
-    if (/^(?:\d+\)\s*)+\d/.test(value)) return false
-    if (value.length > 220) return false
-    if (/\bConsiderando\b/i.test(value) && value.length > 100) return false
-    if (/\s[a-e]\)\s/i.test(value)) return false
-    return true
-  }
+  const facetOk = (value: string | null) => assessTecFacetQuality(value) !== "hidden"
 
-  const groupMap = new Map<string, Set<string>>()
-  for (const r of rows) {
-    const sub = r.tec_subject?.trim()
-    const top = r.tec_topic?.trim()
-    if (!sub || !cleanFacet(sub) || !top || !cleanFacet(top)) continue
-    const set = groupMap.get(sub) ?? new Set<string>()
-    set.add(top)
-    groupMap.set(sub, set)
-  }
-
-  const tec_groups = [...groupMap.entries()]
-    .map(([tec_subject, topics]) => ({
-      tec_subject,
-      topics: [...topics].sort((a, b) => a.localeCompare(b, "pt-BR")),
-    }))
-    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+  const tec_groups = buildTecGroupsFromRows(rows, {
+    includeHidden: opts?.includeHiddenTopics ?? false,
+    includeWarn: true,
+  })
 
   return {
-    bancas: uniq(rows.map((r) => r.banca).filter(cleanFacet)),
+    bancas: uniq(rows.map((r) => r.banca).filter(facetOk)),
     orgaos: uniq(rows.map((r) => r.orgao)),
     cargos: uniq(rows.map((r) => r.cargo)),
     anos: [...new Set(rows.map((r) => r.ano).filter((a): a is number => a != null))].sort(
@@ -105,6 +102,10 @@ export function parseBankFiltersFromSearchParams(
     const v = params.getAll(key).map(Number).filter((n) => !Number.isNaN(n))
     return v.length ? v : undefined
   }
+  const pairs = params.getAll("tec_pair")
+  const tec_topic_pairs = pairs.length
+    ? pairs.map(decodeTecTopicPair).filter((p): p is NonNullable<typeof p> => p != null)
+    : undefined
   return {
     banca: arr("banca"),
     orgao: arr("orgao"),
@@ -112,6 +113,7 @@ export function parseBankFiltersFromSearchParams(
     ano: nums("ano"),
     tec_subject: arr("tec_subject"),
     tec_topic: arr("tec_topic"),
+    tec_topic_pairs,
     type: arr("type") as BankFilters["type"],
     subject_id: params.get("subject_id") ?? undefined,
     topic_id: params.get("topic_id") ?? undefined,
