@@ -1,7 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown, ChevronRight, FileSpreadsheet, FolderPlus, RefreshCw } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronRight,
+  FileSpreadsheet,
+  FolderPlus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import type { NotebookIndexPreview } from "@/lib/tec-notebook-index-import"
 import type { TecSubjectNode, TecSubjectSummary } from "@/lib/tec-subject-tree-types"
 
@@ -44,6 +51,18 @@ function findNodeById(nodes: TecSubjectNode[], id: string): TecSubjectNode | nul
     }
   }
   return null
+}
+
+function flattenTreeNodes(nodes: TecSubjectNode[]): TecSubjectNode[] {
+  const out: TecSubjectNode[] = []
+  function walk(list: TecSubjectNode[]) {
+    for (const n of list) {
+      out.push(n)
+      if (n.children?.length) walk(n.children)
+    }
+  }
+  walk(nodes)
+  return out
 }
 
 function folderOptionLabel(option: FolderOption): string {
@@ -194,6 +213,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   } | null>(null)
   const [loading, setLoading] = useState(false)
   const [moving, setMoving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [folderName, setFolderName] = useState("")
   const [newFolderParentId, setNewFolderParentId] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -252,6 +272,17 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     if (!newFolderParentId || !tree?.nodes.length) return null
     return findNodeById(tree.nodes, newFolderParentId)?.name ?? null
   }, [newFolderParentId, tree?.nodes])
+
+  const selectedTopicNodes = useMemo(() => {
+    if (!tree || selectedIds.size === 0) return []
+    const all = [...flattenTreeNodes(tree.nodes), ...tree.ungrouped]
+    return all.filter((n) => selectedIds.has(n.id) && n.node_type === "topic")
+  }, [tree, selectedIds])
+
+  const selectedQuestionTotal = useMemo(
+    () => selectedTopicNodes.reduce((sum, n) => sum + n.question_count, 0),
+    [selectedTopicNodes]
+  )
 
   function toggleNode(nodeId: string, checked: boolean) {
     setSelectedIds((prev) => {
@@ -395,6 +426,57 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     })
     await reloadSummaries()
     setTimeout(() => ungroupedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100)
+  }
+
+  async function deleteSelectedTopics() {
+    if (!selected || selectedTopicNodes.length === 0) return
+
+    const preview = selectedTopicNodes
+      .slice(0, 3)
+      .map((n) => n.name)
+      .join("\n• ")
+    const more =
+      selectedTopicNodes.length > 3
+        ? `\n… e mais ${selectedTopicNodes.length - 3} assunto(s)`
+        : ""
+
+    const ok = window.confirm(
+      `Apagar ${selectedQuestionTotal} questão(ões) do banco global e remover ${selectedTopicNodes.length} assunto(s)?\n\n` +
+        `• ${preview}${more}\n\n` +
+        "Isso remove as questões de todos os cadernos. Não dá para desfazer."
+    )
+    if (!ok) return
+
+    setDeleting(true)
+    const res = await fetch("/api/questions/tec-tree", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        action: "delete_topic_questions",
+        tec_subject: selected,
+        node_ids: selectedTopicNodes.map((n) => n.id),
+      }),
+    })
+    const data = await res.json()
+    setDeleting(false)
+
+    if (!res.ok) {
+      setMessage({ text: data.error ?? "Erro ao apagar", tone: "err" })
+      return
+    }
+
+    setTree(data.tree ?? null)
+    setSelectedIds(new Set())
+    const skipped = (data.skipped_folder_ids as string[] | undefined)?.length ?? 0
+    setMessage({
+      text:
+        skipped > 0
+          ? `${data.questions_deleted ?? 0} questão(ões) apagada(s), ${data.nodes_deleted ?? 0} assunto(s) removido(s). ${skipped} pasta(s) ignorada(s).`
+          : `${data.questions_deleted ?? 0} questão(ões) apagada(s), ${data.nodes_deleted ?? 0} assunto(s) removido(s).`,
+      tone: "ok",
+    })
+    await reloadSummaries()
   }
 
   async function bulkMove() {
@@ -599,8 +681,8 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
             )}
             <div className="mb-3 space-y-2 rounded-lg border bg-slate-50/80 p-3">
               <p className="text-xs text-slate-600">
-                Marque os assuntos, escolha o destino e clique em Mover. Crie pastas abaixo; elas
-                ficam recolhidas até você abrir.
+                Marque assuntos inválidos (parse errado) e use Apagar questões. Para organizar,
+                escolha o destino e clique em Mover.
               </p>
               <div className="flex flex-wrap gap-2">
                 <input
@@ -657,6 +739,19 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 >
                   Limpar
                 </button>
+                {selectedTopicNodes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deleteSelectedTopics}
+                    disabled={deleting}
+                    className="inline-flex items-center gap-1 rounded border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-800 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {deleting
+                      ? "Apagando…"
+                      : `Apagar questões (${selectedQuestionTotal})`}
+                  </button>
+                )}
               </div>
             )}
 

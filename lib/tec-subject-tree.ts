@@ -426,6 +426,67 @@ export async function applyNotebookIndexHierarchy(
   return { folders_created, folders_reused, topics_moved }
 }
 
+export async function deleteTopicNodesAndBankQuestions(
+  userId: string,
+  tecSubject: string,
+  nodeIds: string[]
+): Promise<{
+  nodes_deleted: number
+  questions_deleted: number
+  skipped_folder_ids: string[]
+}> {
+  const unique = [...new Set(nodeIds)]
+  if (unique.length === 0) {
+    return { nodes_deleted: 0, questions_deleted: 0, skipped_folder_ids: [] }
+  }
+
+  const { data: nodes, error } = await supabaseServer
+    .from("tec_subject_nodes")
+    .select("id, node_type, tec_topic, name")
+    .eq("user_id", userId)
+    .eq("tec_subject", tecSubject)
+    .in("id", unique)
+
+  if (error) throw new Error(error.message)
+
+  const skipped_folder_ids: string[] = []
+  let nodes_deleted = 0
+  let questions_deleted = 0
+
+  for (const node of nodes ?? []) {
+    if (node.node_type !== "topic") {
+      skipped_folder_ids.push(node.id as string)
+      continue
+    }
+
+    const tecTopic = ((node.tec_topic as string | null) ?? (node.name as string)).trim()
+    if (tecTopic) {
+      const { data: qrows, error: qErr } = await supabaseServer
+        .from("questions")
+        .select("id")
+        .eq("tec_subject", tecSubject)
+        .eq("tec_topic", tecTopic)
+
+      if (qErr) throw new Error(qErr.message)
+
+      const questionIds = (qrows ?? []).map((r) => r.id as string)
+      if (questionIds.length > 0) {
+        const { error: delErr } = await supabaseServer
+          .from("questions")
+          .delete()
+          .in("id", questionIds)
+        if (delErr) throw new Error(delErr.message)
+        questions_deleted += questionIds.length
+      }
+    }
+
+    await deleteTecSubjectNode(userId, node.id as string)
+    nodes_deleted++
+  }
+
+  return { nodes_deleted, questions_deleted, skipped_folder_ids }
+}
+
 export async function deleteTecSubjectNode(
   userId: string,
   nodeId: string

@@ -3,6 +3,7 @@ import {
   bulkMoveTecSubjectNodes,
   createTecFolder,
   deleteTecSubjectNode,
+  deleteTopicNodesAndBankQuestions,
   fetchTecSubjectTree,
   listTecSubjectSummaries,
   seedTecSubjectTopicsFromBank,
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, action, tec_subject, name, parent_id } = body
+  const { user_id, action, tec_subject, name, parent_id, node_ids } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
@@ -49,6 +50,16 @@ export async function POST(req: Request) {
     if (action === "create_folder" && tec_subject && name) {
       const node = await createTecFolder(user_id, tec_subject, name, parent_id ?? null)
       return NextResponse.json({ node })
+    }
+
+    if (action === "delete_topic_questions" && tec_subject && Array.isArray(node_ids)) {
+      const result = await deleteTopicNodesAndBankQuestions(
+        user_id,
+        tec_subject,
+        node_ids as string[]
+      )
+      const tree = await fetchTecSubjectTree(user_id, tec_subject)
+      return NextResponse.json({ ...result, tree })
     }
 
     return NextResponse.json({ error: "action inválida" }, { status: 400 })
