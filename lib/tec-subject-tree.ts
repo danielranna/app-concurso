@@ -11,6 +11,9 @@ import type {
   TecSubjectTreeResponse,
 } from "./tec-subject-tree-types"
 
+export type { OrphanTecTopics } from "./tec-tree-sync"
+export { collectTecTopicsFromTree, computeOrphanTecTopics } from "./tec-tree-sync"
+
 type NodeRow = {
   id: string
   user_id: string
@@ -92,6 +95,38 @@ async function countQuestionsForTopic(
   return count ?? 0
 }
 
+export async function refreshTecNodeCounts(
+  userId: string,
+  tecSubject: string
+): Promise<{ updated: number }> {
+  const { data: rows, error } = await supabaseServer
+    .from("tec_subject_nodes")
+    .select("id, tec_topic")
+    .eq("user_id", userId)
+    .eq("tec_subject", tecSubject)
+    .eq("node_type", "topic")
+
+  if (error) throw new Error(error.message)
+
+  let updated = 0
+  for (const row of rows ?? []) {
+    const topic = (row.tec_topic as string | null)?.trim()
+    if (!topic) continue
+    const count = await countQuestionsForTopic(tecSubject, topic)
+    const { error: upErr } = await supabaseServer
+      .from("tec_subject_nodes")
+      .update({
+        question_count: count,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id as string)
+    if (upErr) throw new Error(upErr.message)
+    updated++
+  }
+
+  return { updated }
+}
+
 export async function listTecSubjectSummaries(
   userId: string
 ): Promise<TecSubjectSummary[]> {
@@ -128,8 +163,13 @@ export async function listTecSubjectSummaries(
 
 export async function fetchTecSubjectTree(
   userId: string,
-  tecSubject: string
+  tecSubject: string,
+  options?: { refreshCounts?: boolean }
 ): Promise<TecSubjectTreeResponse> {
+  if (options?.refreshCounts !== false) {
+    await refreshTecNodeCounts(userId, tecSubject)
+  }
+
   const { data: rows, error } = await supabaseServer
     .from("tec_subject_nodes")
     .select("*")
@@ -678,7 +718,8 @@ export async function fetchTecTreeFacetsForBank(
 
   const out: TecSubjectTreeResponse[] = []
   for (const sub of subjects) {
-    const tree = await fetchTecSubjectTree(userId, sub)
+    await refreshTecNodeCounts(userId, sub)
+    const tree = await fetchTecSubjectTree(userId, sub, { refreshCounts: false })
     if (tree.nodes.length || tree.ungrouped.length) out.push(tree)
   }
   return out

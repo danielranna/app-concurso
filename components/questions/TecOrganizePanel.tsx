@@ -426,8 +426,11 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     setTree(data.tree ?? null)
     setFoldersOpen(true)
     const skipped = data.topics_skipped_placed ?? 0
+    const mirrorNote = data.content_mirror?.mirrored
+      ? ` Índice espelhado no Ciclo → Conteúdo (${data.content_mirror.folders ?? 0} pasta(s), ${data.content_mirror.topics ?? 0} assunto(s)).`
+      : ""
     setMessage({
-      text: `Hierarquia aplicada: ${data.folders_created ?? 0} pasta(s) criada(s), ${data.topics_moved ?? 0} assunto(s) movido(s)${skipped ? `, ${skipped} já em pasta (mantidos)` : ""}. Ajuste o residual abaixo.`,
+      text: `Hierarquia aplicada: ${data.folders_created ?? 0} pasta(s) criada(s), ${data.topics_moved ?? 0} assunto(s) movido(s)${skipped ? `, ${skipped} já em pasta (mantidos)` : ""}.${mirrorNote} Ajuste o residual abaixo.`,
       tone: "ok",
     })
     await reloadSummaries()

@@ -8,8 +8,10 @@ import {
   applyNotebookIndexHierarchy,
   fetchTecSubjectTree,
   listTecTopicNodesForSubject,
+  refreshTecNodeCounts,
   seedTecSubjectTopicsFromBank,
 } from "@/lib/tec-subject-tree"
+import { tryMirrorTecTreeAfterOrganize } from "@/lib/content-index-sync"
 
 export const runtime = "nodejs"
 
@@ -50,9 +52,13 @@ export async function POST(req: Request) {
         folders,
         matches
       )
-      const tree = await fetchTecSubjectTree(user_id, tec_subject)
+      await refreshTecNodeCounts(user_id, tec_subject)
+      const tree = await fetchTecSubjectTree(user_id, tec_subject, {
+        refreshCounts: false,
+      })
+      const content_mirror = await tryMirrorTecTreeAfterOrganize(user_id, tec_subject)
 
-      return NextResponse.json({ ...result, tree })
+      return NextResponse.json({ ...result, tree, content_mirror })
     }
 
     const files = form

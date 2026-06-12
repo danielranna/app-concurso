@@ -34,6 +34,30 @@ export async function loadMappings(userId: string) {
   return data ?? []
 }
 
+export async function resolveTecSubjectForSubjectId(
+  userId: string,
+  subjectId: string
+): Promise<string | null> {
+  const mappings = await loadMappings(userId)
+  const row = mappings.find(
+    (m) => isSubjectLevelMapping(m.tec_topic) && m.subject_id === subjectId
+  )
+  return row?.tec_subject?.trim() ?? null
+}
+
+export async function resolveSubjectIdForTecSubject(
+  userId: string,
+  tecSubject: string
+): Promise<string | null> {
+  const mappings = await loadMappings(userId)
+  const row = mappings.find(
+    (m) =>
+      isSubjectLevelMapping(m.tec_topic) &&
+      normKey(m.tec_subject) === normKey(tecSubject)
+  )
+  return row?.subject_id ?? null
+}
+
 /** Matérias TEC ainda sem vínculo com a sua matéria (uma linha = toda a matéria TEC). */
 export async function listUnmappedTecSubjects(
   userId: string

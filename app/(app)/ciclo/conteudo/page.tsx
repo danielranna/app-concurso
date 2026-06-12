@@ -120,6 +120,8 @@ export default function CicloConteudoPage() {
   const [selected, setSelected] = useState<SubjectContentNode | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [mirroringTec, setMirroringTec] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [newGroupName, setNewGroupName] = useState("")
   const [banca, setBanca] = useState("")
   const [percent, setPercent] = useState("")
@@ -163,9 +165,10 @@ export default function CicloConteudoPage() {
 
   const allGroups = flattenTree(tree).filter((n) => n.node_type === "group")
 
-  async function handleSync() {
+  async function handleSyncNotebooks() {
     if (!userId || !subjectId) return
     setSyncing(true)
+    setSyncMessage(null)
     try {
       const res = await fetch("/api/ciclo/content", {
         method: "POST",
@@ -181,9 +184,40 @@ export default function CicloConteudoPage() {
       else {
         setTree(d.tree?.nodes ?? [])
         setUngrouped(d.tree?.ungrouped ?? [])
+        setSyncMessage(
+          `Cadernos: ${d.synced ?? 0} sincronizado(s), ${d.skipped ?? 0} ignorado(s).`
+        )
       }
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function handleMirrorTecTree() {
+    if (!userId || !subjectId) return
+    setMirroringTec(true)
+    setSyncMessage(null)
+    try {
+      const res = await fetch("/api/ciclo/content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          action: "mirror_tec_tree",
+          subject_id: subjectId,
+        }),
+      })
+      const d = await res.json()
+      if (d.error) alert(d.error)
+      else {
+        setTree(d.tree?.nodes ?? [])
+        setUngrouped(d.tree?.ungrouped ?? [])
+        setSyncMessage(
+          `Organizar TEC (${d.tec_subject}): ${d.folders ?? 0} pasta(s), ${d.topics ?? 0} assunto(s) espelhado(s).`
+        )
+      }
+    } finally {
+      setMirroringTec(false)
     }
   }
 
@@ -281,24 +315,45 @@ export default function CicloConteudoPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Conteúdo e hierarquia</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Organize tópicos TEC (cadernos) em grupos. Defina incidência por banca em
-            cada nó.
+            Espelhe a hierarquia do Organizar TEC ou sincronize tópicos a partir de
+            cadernos. Defina incidência por banca em cada nó.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleSync}
-          disabled={syncing || !subjectId}
-          className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-        >
-          {syncing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          Sincronizar cadernos
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleMirrorTecTree}
+            disabled={mirroringTec || syncing || !subjectId}
+            className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+          >
+            {mirroringTec ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Sincronizar do Organizar TEC
+          </button>
+          <button
+            type="button"
+            onClick={handleSyncNotebooks}
+            disabled={syncing || mirroringTec || !subjectId}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {syncing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Sincronizar de cadernos
+          </button>
+        </div>
       </div>
+
+      {syncMessage && (
+        <p className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+          {syncMessage}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm font-medium text-slate-700">Matéria</label>
@@ -346,7 +401,8 @@ export default function CicloConteudoPage() {
             <div className="mt-2 min-h-[200px]">
               {tree.length === 0 && ungrouped.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Nenhum tópico. Importe cadernos e clique em Sincronizar.
+                  Nenhum tópico. Use &quot;Sincronizar do Organizar TEC&quot; ou importe
+                  cadernos.
                 </p>
               ) : (
                 tree.map((n) => (

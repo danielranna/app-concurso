@@ -8,7 +8,10 @@ import {
   updateContentNode,
   upsertNodeIncidence,
 } from "@/lib/content-index-db"
-import { syncSubjectContentIndex } from "@/lib/content-index-sync"
+import {
+  syncContentIndexFromTecTree,
+  syncSubjectContentIndex,
+} from "@/lib/content-index-sync"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -53,6 +56,12 @@ export async function POST(req: Request) {
   try {
     if (action === "sync" && subject_id) {
       const result = await syncSubjectContentIndex(user_id, subject_id)
+      const tree = await fetchContentTree(user_id, subject_id)
+      return NextResponse.json({ ...result, tree })
+    }
+
+    if (action === "mirror_tec_tree" && subject_id) {
+      const result = await syncContentIndexFromTecTree(user_id, subject_id)
       const tree = await fetchContentTree(user_id, subject_id)
       return NextResponse.json({ ...result, tree })
     }

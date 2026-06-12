@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
 
 import { encodeTecTopicPair } from "@/lib/tec-facets"
@@ -17,6 +17,11 @@ type TecGroup = {
   topic_qualities?: Record<string, FacetQuality>
 }
 
+type OrphanTecTopics = {
+  tec_subject: string
+  topics: string[]
+}
+
 type Facets = {
   bancas: string[]
   orgaos: string[]
@@ -26,6 +31,7 @@ type Facets = {
   tec_topics: string[]
   tec_groups: TecGroup[]
   tec_trees?: TecSubjectTreeResponse[]
+  orphan_topics?: OrphanTecTopics[]
 }
 
 const CATEGORIES = [
@@ -191,6 +197,20 @@ export default function BancoPage() {
   const [cadernoName, setCadernoName] = useState("")
   const [subjectId, setSubjectId] = useState("")
   const [folderId, setFolderId] = useState("")
+  const [facetsLoading, setFacetsLoading] = useState(false)
+
+  const loadFacets = useCallback(async (uid: string) => {
+    setFacetsLoading(true)
+    try {
+      const res = await fetch(
+        `/api/questions/bank?facets=1&user_id=${uid}&include_hidden=1`
+      )
+      const data = await res.json()
+      setFacets(data)
+    } finally {
+      setFacetsLoading(false)
+    }
+  }, [])
 
   const loadCount = useCallback(async () => {
     if (!userId) return
@@ -209,12 +229,20 @@ export default function BancoPage() {
         return
       }
       setUserId(user.id)
-      fetch(`/api/questions/bank?facets=1&user_id=${user.id}&include_hidden=1`)
-        .then((r) => r.json())
-        .then(setFacets)
+      loadFacets(user.id)
       fetch(`/api/subjects?user_id=${user.id}`).then((r) => r.json()).then(setSubjects)
     })
-  }, [router])
+  }, [router, loadFacets])
+
+  useEffect(() => {
+    if (!userId) return
+    const uid = userId
+    function onVisible() {
+      if (document.visibilityState === "visible") void loadFacets(uid)
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [userId, loadFacets])
 
   useEffect(() => {
     loadCount()
@@ -289,6 +317,14 @@ export default function BancoPage() {
     [facets?.tec_trees, visibleTecGroups]
   )
 
+  const orphanBySubject = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const row of facets?.orphan_topics ?? []) {
+      map.set(row.tec_subject, row.topics)
+    }
+    return map
+  }, [facets?.orphan_topics])
+
   async function createFromFilter() {
     if (!userId || !cadernoName || !subjectId) return
     const res = await fetch("/api/notebooks/from-filter", {
@@ -349,6 +385,17 @@ export default function BancoPage() {
 
           {activeCategory === "tec_topic" && facets?.tec_groups.length ? (
             <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => userId && loadFacets(userId)}
+                  disabled={facetsLoading || !userId}
+                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${facetsLoading ? "animate-spin" : ""}`} />
+                  Atualizar assuntos
+                </button>
+              </div>
               {(filters.tec_subject?.length ?? 0) > 0 && (
                 <p className="text-xs text-slate-500">
                   Mostrando assuntos das matérias selecionadas. Limpe &quot;Matéria TEC&quot; para ver
@@ -358,11 +405,21 @@ export default function BancoPage() {
               {visibleTecTrees.map((tree) => {
                 const topicCount =
                   tree.ungrouped.length + countTreeTopics(tree.nodes)
+                const orphans = orphanBySubject.get(tree.tec_subject) ?? []
+                const bankGroup = facets.tec_groups.find(
+                  (g) => g.tec_subject === tree.tec_subject
+                )
+                const totalBankTopics = bankGroup?.topics.length ?? topicCount
                 return (
                   <SubjectCollapsible
                     key={tree.tec_subject}
                     title={tree.tec_subject}
                     topicCount={topicCount}
+                    subtitle={
+                      orphans.length > 0
+                        ? `${topicCount} no índice · ${totalBankTopics} no banco · ${orphans.length} fora do índice`
+                        : undefined
+                    }
                     variant="organized"
                     headerCheckbox={
                       <input
@@ -396,6 +453,28 @@ export default function BancoPage() {
                         tecSubject={tree.tec_subject}
                       />
                     ))}
+                    {orphans.length > 0 && (
+                      <div className="mt-3 border-t border-violet-200/80 pt-2">
+                        <p className="mb-1 text-xs font-medium text-amber-800">
+                          Fora do índice ({orphans.length})
+                        </p>
+                        <ul className="space-y-1 pl-1">
+                          {orphans.map((topic) => (
+                            <li key={`${tree.tec_subject}|||orphan|||${topic}`}>
+                              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5"
+                                  checked={isTopicChecked(tree.tec_subject, topic)}
+                                  onChange={() => toggleTopic(tree.tec_subject, topic)}
+                                />
+                                <span className="min-w-0 flex-1 break-words">{topic}</span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </SubjectCollapsible>
                 )
               })}

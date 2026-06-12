@@ -1,4 +1,13 @@
+import { deleteContentNode, listContentNodesFlat } from "./content-index-db"
 import { supabaseServer } from "./supabase-server"
+import {
+  resolveSubjectIdForTecSubject,
+  resolveTecSubjectForSubjectId,
+} from "./tec-mapping"
+import {
+  mirrorTecTreeToContentIndex,
+  refreshTecNodeCounts,
+} from "./tec-subject-tree"
 
 const DOMINANCE_THRESHOLD = 0.8
 
@@ -257,6 +266,85 @@ export async function syncNotebookToContentIndex(
 
   if (error) throw new Error(error.message)
   return { created: true, updated: false, node_id: created?.id ?? null }
+}
+
+export async function clearTecLinkedContentNodes(
+  userId: string,
+  subjectId: string,
+  tecSubject: string
+): Promise<{ removed_topics: number; removed_groups: number }> {
+  const { data: deleted, error } = await supabaseServer
+    .from("subject_content_nodes")
+    .delete()
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+    .eq("node_type", "topic")
+    .eq("tec_subject", tecSubject)
+    .select("id")
+
+  if (error) throw new Error(error.message)
+
+  let removed_groups = 0
+  for (let pass = 0; pass < 20; pass++) {
+    const nodes = await listContentNodesFlat(userId, subjectId)
+    const hasChild = new Set<string>()
+    for (const n of nodes) {
+      if (n.parent_id) hasChild.add(n.parent_id)
+    }
+    const emptyGroups = nodes.filter(
+      (n) => n.node_type === "group" && !hasChild.has(n.id)
+    )
+    if (emptyGroups.length === 0) break
+    for (const g of emptyGroups) {
+      await deleteContentNode(userId, g.id)
+      removed_groups++
+    }
+  }
+
+  return { removed_topics: deleted?.length ?? 0, removed_groups }
+}
+
+export async function syncContentIndexFromTecTree(
+  userId: string,
+  subjectId: string
+): Promise<{
+  tec_subject: string
+  removed_topics: number
+  removed_groups: number
+  folders: number
+  topics: number
+}> {
+  const tecSubject = await resolveTecSubjectForSubjectId(userId, subjectId)
+  if (!tecSubject) {
+    throw new Error(
+      "Vincule a matéria TEC em Mapeamento antes de sincronizar do Organizar."
+    )
+  }
+
+  await refreshTecNodeCounts(userId, tecSubject)
+  const cleared = await clearTecLinkedContentNodes(userId, subjectId, tecSubject)
+  const mirrored = await mirrorTecTreeToContentIndex(userId, tecSubject, subjectId)
+
+  return { tec_subject: tecSubject, ...cleared, ...mirrored }
+}
+
+export async function tryMirrorTecTreeAfterOrganize(
+  userId: string,
+  tecSubject: string
+): Promise<{
+  mirrored: boolean
+  folders?: number
+  topics?: number
+} | null> {
+  const subjectId = await resolveSubjectIdForTecSubject(userId, tecSubject)
+  if (!subjectId) return null
+
+  const result = await syncContentIndexFromTecTree(userId, subjectId)
+  return {
+    mirrored: true,
+    folders: result.folders,
+    topics: result.topics,
+  }
 }
 
 export async function syncSubjectContentIndex(
