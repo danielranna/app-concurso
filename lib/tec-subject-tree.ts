@@ -248,11 +248,42 @@ export async function createTecFolder(
   return rowToNode(data as NodeRow)
 }
 
+async function isNodeUnderAncestor(
+  userId: string,
+  ancestorId: string,
+  nodeId: string
+): Promise<boolean> {
+  let current: string | null = nodeId
+  while (current) {
+    if (current === ancestorId) return true
+    const { data } = await supabaseServer
+      .from("tec_subject_nodes")
+      .select("parent_id")
+      .eq("id", current)
+      .eq("user_id", userId)
+      .maybeSingle()
+    current = (data?.parent_id as string | null) ?? null
+  }
+  return false
+}
+
 export async function updateTecSubjectNode(
   userId: string,
   nodeId: string,
   patch: { name?: string; parent_id?: string | null; sort_order?: number }
 ): Promise<void> {
+  if (patch.parent_id !== undefined) {
+    if (patch.parent_id === nodeId) {
+      throw new Error("Não é possível mover um item para dentro de si mesmo")
+    }
+    if (patch.parent_id) {
+      const nested = await isNodeUnderAncestor(userId, nodeId, patch.parent_id)
+      if (nested) {
+        throw new Error("Não é possível mover uma pasta para dentro de uma subpasta dela")
+      }
+    }
+  }
+
   const { error } = await supabaseServer
     .from("tec_subject_nodes")
     .update({ ...patch, updated_at: new Date().toISOString() })
