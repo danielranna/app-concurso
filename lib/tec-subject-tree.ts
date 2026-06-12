@@ -293,6 +293,34 @@ export async function updateTecSubjectNode(
   if (error) throw new Error(error.message)
 }
 
+export async function bulkMoveTecSubjectNodes(
+  userId: string,
+  nodeIds: string[],
+  parentId: string | null
+): Promise<{ moved: number; skipped: number }> {
+  const unique = [...new Set(nodeIds)]
+  const valid: string[] = []
+
+  for (const nodeId of unique) {
+    if (parentId === nodeId) continue
+    if (parentId && (await isNodeUnderAncestor(userId, nodeId, parentId))) continue
+    valid.push(nodeId)
+  }
+
+  if (valid.length === 0) {
+    return { moved: 0, skipped: unique.length }
+  }
+
+  const { error } = await supabaseServer
+    .from("tec_subject_nodes")
+    .update({ parent_id: parentId, updated_at: new Date().toISOString() })
+    .in("id", valid)
+    .eq("user_id", userId)
+
+  if (error) throw new Error(error.message)
+  return { moved: valid.length, skipped: unique.length - valid.length }
+}
+
 export async function deleteTecSubjectNode(
   userId: string,
   nodeId: string

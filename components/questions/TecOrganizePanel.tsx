@@ -50,15 +50,34 @@ function folderOptionLabel(option: FolderOption): string {
   return `${indent}${option.name}`
 }
 
+function bulkMoveExcludeIds(
+  rootNodes: TecSubjectNode[],
+  selectedIds: Set<string>
+): Set<string> {
+  const exclude = new Set<string>()
+  function walk(nodes: TecSubjectNode[]) {
+    for (const n of nodes) {
+      if (n.node_type === "folder" && selectedIds.has(n.id)) {
+        collectSubtreeIds(n).forEach((id) => exclude.add(id))
+      }
+      if (n.children?.length) walk(n.children)
+    }
+  }
+  walk(rootNodes)
+  return exclude
+}
+
 function ParentFolderSelect({
   value,
   onChange,
   options,
+  includeUngrouped = false,
   className = "",
 }: {
   value: string
   onChange: (parentId: string) => void
   options: FolderOption[]
+  includeUngrouped?: boolean
   className?: string
 }) {
   return (
@@ -67,37 +86,8 @@ function ParentFolderSelect({
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
-      <option value="">Raiz da matéria</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {folderOptionLabel(o)}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-function MoveToFolderSelect({
-  node,
-  rootNodes,
-  onMove,
-}: {
-  node: TecSubjectNode
-  rootNodes: TecSubjectNode[]
-  onMove: (nodeId: string, parentId: string | null) => void
-}) {
-  const excludeIds =
-    node.node_type === "folder" ? collectSubtreeIds(node) : new Set<string>()
-  const options = listFolderOptions(rootNodes, excludeIds)
-
-  return (
-    <select
-      className="ml-1 max-w-[9rem] truncate rounded border px-1 py-0.5 text-[10px]"
-      value={node.parent_id ?? ""}
-      onChange={(e) => onMove(node.id, e.target.value || null)}
-      title="Mover para pasta"
-    >
-      <option value="">Sem pasta</option>
+      {includeUngrouped && <option value="">Sem pasta</option>}
+      {!includeUngrouped && <option value="">Raiz da matéria</option>}
       {options.map((o) => (
         <option key={o.id} value={o.id}>
           {folderOptionLabel(o)}
@@ -110,27 +100,45 @@ function MoveToFolderSelect({
 function TecTreeNode({
   node,
   depth,
-  rootNodes,
-  onMove,
+  selectedIds,
+  onToggle,
   onCreateSubfolder,
+  defaultOpen = false,
 }: {
   node: TecSubjectNode
   depth: number
-  rootNodes: TecSubjectNode[]
-  onMove: (nodeId: string, parentId: string | null) => void
+  selectedIds: Set<string>
+  onToggle: (nodeId: string, checked: boolean) => void
   onCreateSubfolder: (parentId: string) => void
+  defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(defaultOpen)
   const isFolder = node.node_type === "folder"
+  const checked = selectedIds.has(node.id)
 
   return (
     <div>
-      <div
-        className="flex items-center gap-1 rounded px-2 py-1.5 text-sm hover:bg-slate-50"
+      <label
+        className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 ${
+          checked ? "bg-blue-50/80" : ""
+        }`}
         style={{ paddingLeft: depth * 14 + 8 }}
       >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onToggle(node.id, e.target.checked)}
+          className="shrink-0"
+        />
         {isFolder ? (
-          <button type="button" onClick={() => setOpen(!open)} className="shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              setOpen(!open)
+            }}
+            className="shrink-0"
+          >
             {open ? (
               <ChevronDown className="h-4 w-4 text-slate-400" />
             ) : (
@@ -138,7 +146,7 @@ function TecTreeNode({
             )}
           </button>
         ) : (
-          <span className="w-4 shrink-0 text-slate-300">•</span>
+          <span className="w-4 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate" title={node.name}>
           {node.name}
@@ -149,23 +157,26 @@ function TecTreeNode({
         {isFolder && (
           <button
             type="button"
-            onClick={() => onCreateSubfolder(node.id)}
+            onClick={(e) => {
+              e.preventDefault()
+              onCreateSubfolder(node.id)
+            }}
             className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-white"
             title="Criar subpasta"
           >
             + sub
           </button>
         )}
-        <MoveToFolderSelect node={node} rootNodes={rootNodes} onMove={onMove} />
-      </div>
+      </label>
       {isFolder && open && node.children?.map((c) => (
         <TecTreeNode
           key={c.id}
           node={c}
           depth={depth + 1}
-          rootNodes={rootNodes}
-          onMove={onMove}
+          selectedIds={selectedIds}
+          onToggle={onToggle}
           onCreateSubfolder={onCreateSubfolder}
+          defaultOpen={false}
         />
       ))}
     </div>
@@ -181,8 +192,12 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     total_questions: number
   } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [moving, setMoving] = useState(false)
   const [folderName, setFolderName] = useState("")
   const [newFolderParentId, setNewFolderParentId] = useState("")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkTargetId, setBulkTargetId] = useState("")
+  const [foldersOpen, setFoldersOpen] = useState(false)
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "err" } | null>(null)
 
   const reloadSummaries = useCallback(async () => {
@@ -190,15 +205,15 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     setSummaries(await res.json())
   }, [userId])
 
-  const reloadTree = useCallback(async () => {
+  const reloadTree = useCallback(async (silent = false) => {
     if (!selected) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     const res = await fetch(
       `/api/questions/tec-tree?user_id=${userId}&tec_subject=${encodeURIComponent(selected)}`
     )
     const data = await res.json()
     setTree(data)
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [userId, selected])
 
   useEffect(() => {
@@ -206,6 +221,8 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   }, [reloadSummaries])
 
   useEffect(() => {
+    setSelectedIds(new Set())
+    setBulkTargetId("")
     reloadTree()
   }, [reloadTree])
 
@@ -214,10 +231,38 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     [tree?.nodes]
   )
 
+  const bulkTargetOptions = useMemo(() => {
+    if (!tree?.nodes.length) return folderOptions
+    const exclude = bulkMoveExcludeIds(tree.nodes, selectedIds)
+    return listFolderOptions(tree.nodes, exclude)
+  }, [tree?.nodes, selectedIds, folderOptions])
+
   const newFolderParentName = useMemo(() => {
     if (!newFolderParentId || !tree?.nodes.length) return null
     return findNodeById(tree.nodes, newFolderParentId)?.name ?? null
   }, [newFolderParentId, tree?.nodes])
+
+  function toggleNode(nodeId: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(nodeId)
+      else next.delete(nodeId)
+      return next
+    })
+  }
+
+  function selectAllUngrouped() {
+    if (!tree?.ungrouped.length) return
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const n of tree.ungrouped) next.add(n.id)
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
 
   async function seedTopics() {
     if (!selected) return
@@ -233,6 +278,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
       tone: "ok",
     })
     setTree(data.tree ?? null)
+    setSelectedIds(new Set())
     await reloadSummaries()
     setLoading(false)
   }
@@ -257,27 +303,46 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     }
     setFolderName("")
     setNewFolderParentId("")
-    await reloadTree()
+    await reloadTree(true)
   }
 
   function startSubfolder(parentId: string) {
     setNewFolderParentId(parentId)
+    setFoldersOpen(true)
     setMessage(null)
   }
 
-  async function moveNode(nodeId: string, parentId: string | null) {
+  async function bulkMove() {
+    if (selectedIds.size === 0) return
+    setMoving(true)
     const res = await fetch("/api/questions/tec-tree", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, node_id: nodeId, parent_id: parentId }),
+      body: JSON.stringify({
+        user_id: userId,
+        node_ids: [...selectedIds],
+        parent_id: bulkTargetId || null,
+      }),
     })
     const data = await res.json()
+    setMoving(false)
     if (!res.ok) {
-      setMessage({ text: data.error ?? "Erro ao mover item", tone: "err" })
+      setMessage({ text: data.error ?? "Erro ao mover itens", tone: "err" })
       return
     }
-    await reloadTree()
+    const skipped = data.skipped ?? 0
+    setMessage({
+      text:
+        skipped > 0
+          ? `${data.moved ?? selectedIds.size} item(ns) movido(s). ${skipped} ignorado(s).`
+          : `${data.moved ?? selectedIds.size} item(ns) movido(s).`,
+      tone: "ok",
+    })
+    setSelectedIds(new Set())
+    await reloadTree(true)
   }
+
+  const selectedCount = selectedIds.size
 
   return (
     <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
@@ -328,11 +393,10 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 {message.text}
               </p>
             )}
-            <div className="mb-2 space-y-2 rounded-lg border bg-slate-50/80 p-3">
+            <div className="mb-3 space-y-2 rounded-lg border bg-slate-50/80 p-3">
               <p className="text-xs text-slate-600">
-                Crie pastas em qualquer nível. Use o seletor de cada linha para mover assuntos ou
-                pastas; clique em <span className="font-medium">+ sub</span> para agregar dentro de
-                uma pasta.
+                Marque os assuntos, escolha o destino e clique em Mover. Crie pastas abaixo; elas
+                ficam recolhidas até você abrir.
               </p>
               <div className="flex flex-wrap gap-2">
                 <input
@@ -361,6 +425,37 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 </button>
               </div>
             </div>
+
+            {selectedCount > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+                <span className="text-sm font-medium text-blue-900">
+                  {selectedCount} selecionado(s)
+                </span>
+                <ParentFolderSelect
+                  value={bulkTargetId}
+                  onChange={setBulkTargetId}
+                  options={bulkTargetOptions}
+                  includeUngrouped
+                  className="min-w-[10rem] flex-1 rounded border bg-white px-2 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={bulkMove}
+                  disabled={moving}
+                  className="rounded bg-blue-700 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+                >
+                  {moving ? "Movendo…" : "Mover"}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded border bg-white px-3 py-1.5 text-sm"
+                >
+                  Limpar
+                </button>
+              </div>
+            )}
+
             {loading ? (
               <p className="text-sm text-slate-500">Carregando…</p>
             ) : !tree?.nodes.length && !tree?.ungrouped.length ? (
@@ -369,29 +464,80 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
               </p>
             ) : (
               <div className="max-h-[60vh] overflow-y-auto rounded-lg border p-2">
-                {tree?.nodes.map((n) => (
-                  <TecTreeNode
-                    key={n.id}
-                    node={n}
-                    depth={0}
-                    rootNodes={tree.nodes}
-                    onMove={moveNode}
-                    onCreateSubfolder={startSubfolder}
-                  />
-                ))}
                 {tree?.ungrouped && tree.ungrouped.length > 0 && (
-                  <div className="mt-4 border-t pt-3">
-                    <p className="mb-2 text-xs font-medium text-slate-500">Sem pasta</p>
+                  <div className="mb-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-slate-600">
+                        Sem pasta ({tree.ungrouped.length})
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={selectAllUngrouped}
+                          className="text-[11px] text-blue-700 hover:underline"
+                        >
+                          Selecionar todos
+                        </button>
+                        {selectedCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={clearSelection}
+                            className="text-[11px] text-slate-500 hover:underline"
+                          >
+                            Limpar
+                          </button>
+                        )}
+                      </div>
+                    </div>
                     {tree.ungrouped.map((n) => (
-                      <TecTreeNode
+                      <label
                         key={n.id}
-                        node={n}
-                        depth={0}
-                        rootNodes={tree.nodes}
-                        onMove={moveNode}
-                        onCreateSubfolder={startSubfolder}
-                      />
+                        className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50 ${
+                          selectedIds.has(n.id) ? "bg-blue-50/80" : ""
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(n.id)}
+                          onChange={(e) => toggleNode(n.id, e.target.checked)}
+                        />
+                        <span className="min-w-0 flex-1 truncate" title={n.name}>
+                          {n.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-400">
+                          {n.question_count} ({n.percent?.toFixed(1) ?? 0}%)
+                        </span>
+                      </label>
                     ))}
+                  </div>
+                )}
+
+                {tree && tree.nodes.length > 0 && (
+                  <div className={tree.ungrouped.length > 0 ? "border-t pt-3" : ""}>
+                    <button
+                      type="button"
+                      onClick={() => setFoldersOpen(!foldersOpen)}
+                      className="mb-2 flex w-full items-center gap-1 text-left text-xs font-medium text-slate-600"
+                    >
+                      {foldersOpen ? (
+                        <ChevronDown className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0" />
+                      )}
+                      Pastas ({tree.nodes.length} na raiz)
+                    </button>
+                    {foldersOpen &&
+                      tree.nodes.map((n) => (
+                        <TecTreeNode
+                          key={n.id}
+                          node={n}
+                          depth={0}
+                          selectedIds={selectedIds}
+                          onToggle={toggleNode}
+                          onCreateSubfolder={startSubfolder}
+                          defaultOpen={false}
+                        />
+                      ))}
                   </div>
                 )}
               </div>
