@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Loader2, Sparkles } from "lucide-react"
+import { Check, Loader2, Sparkles, Trash2 } from "lucide-react"
 import type { BankQuestionSnapshot, ParsedTecQuestion } from "@/lib/question-types"
 import type { QuestionParseResult, ParseSource } from "@/lib/tec-pdf-parse-merge"
 import type { ImportQuestionParseResult } from "@/lib/tec-pdf-parse-pipeline"
@@ -17,6 +17,7 @@ type Props = {
   replaceInBank?: boolean
   onReplaceChange?: (replace: boolean) => void
   linkedContentLabel?: string | null
+  onRemove?: () => void
 }
 
 function BankSnapshotPanel({ snapshot }: { snapshot: BankQuestionSnapshot }) {
@@ -87,6 +88,7 @@ export default function ImportQuestionReviewCard({
   replaceInBank = false,
   onReplaceChange,
   linkedContentLabel,
+  onRemove,
 }: Props) {
   const q = item.merged
   const existingInBank =
@@ -197,6 +199,16 @@ export default function ImportQuestionReviewCard({
           >
             {expanded ? "Recolher" : "Expandir"}
           </button>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+              title="Não importar esta questão"
+            >
+              <Trash2 className="h-3 w-3" /> Remover
+            </button>
+          )}
         </div>
       </div>
 

@@ -159,6 +159,75 @@ function ImportarContent() {
     )
   }, [])
 
+  const removeQuestion = useCallback((tecId: number) => {
+    if (
+      !confirm(
+        "Remover esta questão do import? Ela não entrará no caderno."
+      )
+    )
+      return
+
+    setQuestions((prev) => {
+      const next = prev.filter((q) => q.tec_id !== tecId)
+      setParseResult((pr) =>
+        pr
+          ? {
+              ...pr,
+              stats: {
+                total: next.length,
+                high: next.filter((q) => q.confidence === "high").length,
+                medium: next.filter((q) => q.confidence === "medium").length,
+                low: next.filter((q) => q.confidence === "low").length,
+                needs_review: next.filter((q) => q.needs_review).length,
+                already_in_bank: next.filter((q) => q.existing_in_bank).length,
+              },
+            }
+          : null
+      )
+      return next
+    })
+
+    setPendingSharedLinks((prev) =>
+      prev
+        .map((link) => ({
+          ...link,
+          tecIds: link.tecIds.filter((id) => id !== tecId),
+          overridesByTecId: Object.fromEntries(
+            Object.entries(link.overridesByTecId ?? {}).filter(
+              ([id]) => Number(id) !== tecId
+            )
+          ),
+        }))
+        .filter((link) => link.tecIds.length > 0)
+    )
+
+    setPage((p) => {
+      const remaining = questions.filter((q) => q.tec_id !== tecId)
+      let list = remaining
+      if (filterNeedsReview) list = list.filter((q) => q.needs_review)
+      if (filterLow) list = list.filter((q) => q.confidence === "low")
+      if (filterWarnings) {
+        list = list.filter(
+          (q) => q.warnings.length > 0 || q.quality_flags.length > 0
+        )
+      }
+      if (filterInBank) list = list.filter((q) => q.existing_in_bank != null)
+      if (searchTecId.trim()) {
+        const id = parseInt(searchTecId, 10)
+        if (!Number.isNaN(id)) list = list.filter((q) => q.tec_id === id)
+      }
+      const maxPage = Math.max(0, Math.ceil(list.length / PAGE_SIZE) - 1)
+      return Math.min(p, maxPage)
+    })
+  }, [
+    questions,
+    filterNeedsReview,
+    filterLow,
+    filterWarnings,
+    filterInBank,
+    searchTecId,
+  ])
+
   function resetWizard() {
     setStep(1)
     setParseResult(null)
@@ -536,7 +605,8 @@ function ImportarContent() {
 
           {missingGabaritoAll.length > 0 && (
             <p className="text-sm text-red-700">
-              {missingGabaritoAll.length} questão(ões) sem gabarito — corrija antes de salvar.
+              {missingGabaritoAll.length} questão(ões) sem gabarito — corrija ou use{" "}
+              <strong>Remover</strong> no card da questão.
             </p>
           )}
 
@@ -551,6 +621,7 @@ function ImportarContent() {
                 linkedContentLabel={linkedLabelByTecId.get(item.tec_id) ?? null}
                 onReplaceChange={(replace) => updateReplaceInBank(item.tec_id, replace)}
                 onChange={(merged) => updateQuestion(item.tec_id, merged)}
+                onRemove={() => removeQuestion(item.tec_id)}
               />
             ))}
           </div>

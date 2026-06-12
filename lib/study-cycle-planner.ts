@@ -1,9 +1,26 @@
-import type {
-  CyclePlannerDay,
-  CyclePlannerInput,
-  CyclePlannerResult,
-  WeekdayLimits,
-} from "./study-cycle-types"
+import type { WeekdayLimits } from "./study-cycle-types"
+
+export type CyclePlannerInput = {
+  subject_ids: string[]
+  subjects_per_day: number
+  weekday_limits: WeekdayLimits[]
+  subject_brain_scores?: Record<string, number>
+}
+
+export type CyclePlannerDay = {
+  day_index: number
+  weekday: number
+  subject_ids: string[]
+  subject_names: string[]
+  estimated_minutes: number
+  daily_limits: WeekdayLimits["daily_limits"]
+}
+
+export type CyclePlannerResult = {
+  total_days: number
+  days: CyclePlannerDay[]
+  subjects_doubled: string[]
+}
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 
