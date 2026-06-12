@@ -1,5 +1,8 @@
+import * as fs from "node:fs"
+import * as path from "node:path"
 import * as XLSX from "xlsx"
 import { describe, expect, it } from "vitest"
+import { expandWorksheetRange } from "./incidence-xlsx"
 import {
   buildNotebookIndexPreview,
   parseNotebookIndexBuffer,
@@ -22,7 +25,44 @@ function makeAfoFixtureBuffer(): Buffer {
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer
 }
 
+function makeTruncatedRefSheet(): XLSX.WorkSheet {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ["Hierarquia", "Índice", "Quantidade", "Porcentagem"],
+    ["", "Auditoria Privada", 40, 100],
+    ["01", "Estrutura Conceitual", 1, 2.5],
+    ["02", "Auditoria Independente", 27, 67.5],
+    ["02.01", "Normas Profissionais", 6, 15],
+  ])
+  ws["!ref"] = "A1:D1"
+  return ws
+}
+
+describe("expandWorksheetRange", () => {
+  it("corrige !ref truncado do export TEC", () => {
+    const sheet = makeTruncatedRefSheet()
+    expandWorksheetRange(sheet)
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as unknown[][]
+    expect(rows.length).toBeGreaterThan(4)
+  })
+})
+
+const REAL_TEC_INDEX = path.join(
+  "C:",
+  "Users",
+  "Daniel Ranna",
+  "Desktop",
+  "Auditoria indice.xlsx"
+)
+
 describe("parseNotebookIndexBuffer", () => {
+  it("lê export real do TEC (Auditoria indice.xlsx)", () => {
+    if (!fs.existsSync(REAL_TEC_INDEX)) return
+    const buffer = fs.readFileSync(REAL_TEC_INDEX)
+    const parsed = parseNotebookIndexBuffer(buffer, "Auditoria Privada")
+    expect(parsed.folders.length).toBeGreaterThan(5)
+    expect(parsed.leaves.length).toBeGreaterThan(20)
+  })
+
   it("monta pastas e folhas a partir da hierarquia", () => {
     const buffer = makeAfoFixtureBuffer()
     const parsed = parseNotebookIndexBuffer(

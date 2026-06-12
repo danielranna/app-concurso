@@ -1,9 +1,44 @@
 import * as XLSX from "xlsx"
+import type { WorkSheet } from "xlsx"
 import {
   hierarchyDepth,
   normalizeHierarchyCode,
   parentCodeFromHierarchy,
 } from "./incidence-hierarchy"
+
+/** TEC às vezes exporta !ref só no cabeçalho (A1:D1) com dados abaixo fora do range. */
+export function expandWorksheetRange(sheet: WorkSheet): void {
+  const cellAddrs = Object.keys(sheet).filter((k) => /^[A-Z]{1,3}\d+$/.test(k))
+  if (cellAddrs.length === 0) return
+
+  let minR = Infinity
+  let minC = Infinity
+  let maxR = 0
+  let maxC = 0
+
+  for (const addr of cellAddrs) {
+    const { r, c } = XLSX.utils.decode_cell(addr)
+    minR = Math.min(minR, r)
+    minC = Math.min(minC, c)
+    maxR = Math.max(maxR, r)
+    maxC = Math.max(maxC, c)
+  }
+
+  const current = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null
+  const needsExpand =
+    !current ||
+    minR < current.s.r ||
+    minC < current.s.c ||
+    maxR > current.e.r ||
+    maxC > current.e.c
+
+  if (needsExpand) {
+    sheet["!ref"] = XLSX.utils.encode_range({
+      s: { r: minR, c: minC },
+      e: { r: maxR, c: maxC },
+    })
+  }
+}
 
 export type IncidenceGroup = {
   code: string
@@ -305,6 +340,7 @@ export function parseIncidenceXlsx(buffer: Buffer): ParsedIncidenceWorkbook {
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName]
     if (!sheet) continue
+    expandWorksheetRange(sheet)
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
       defval: "",
