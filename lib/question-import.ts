@@ -15,9 +15,9 @@ function sanitizeImportQuestion(q: ImportQuestionInput): ImportQuestionInput {
   return {
     ...q,
     tec_url: sanitizePostgresText(q.tec_url),
-    banca: sanitizePostgresTextNullable(q.banca),
-    cargo: sanitizePostgresTextNullable(q.cargo),
-    orgao: sanitizePostgresTextNullable(q.orgao),
+    banca: sanitizePostgresText(q.banca),
+    cargo: sanitizePostgresText(q.cargo),
+    orgao: sanitizePostgresText(q.orgao),
     tec_subject: sanitizePostgresText(q.tec_subject),
     tec_topic: sanitizePostgresText(q.tec_topic),
     statement: sanitizePostgresText(q.statement),
