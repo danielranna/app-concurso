@@ -36,21 +36,32 @@ export function buildTecGroupsFromRows(
   const includeHidden = opts?.includeHidden ?? false
   const includeWarn = opts?.includeWarn ?? true
 
+  const UNCLASSIFIED_TOPIC = "(sem assunto classificado)"
+
   const groupMap = new Map<string, Map<string, FacetQuality>>()
   for (const r of rows) {
     const sub = normTecKey(r.tec_subject)
-    const top = normTecKey(r.tec_topic)
-    if (!sub || !top) continue
+    if (!sub) continue
 
     const subQ = assessTecFacetQuality(sub)
+    if (subQ === "hidden" && !includeHidden) continue
+
+    const top = normTecKey(r.tec_topic)
+    const topics = groupMap.get(sub) ?? new Map<string, FacetQuality>()
+
+    if (!top) {
+      topics.set(UNCLASSIFIED_TOPIC, "warn")
+      groupMap.set(sub, topics)
+      continue
+    }
+
     const topQ = assessTecFacetQuality(top)
-    if (subQ === "hidden" || topQ === "hidden") {
+    if (topQ === "hidden") {
       if (!includeHidden) continue
     } else if (topQ === "warn" && !includeWarn) {
       continue
     }
 
-    const topics = groupMap.get(sub) ?? new Map<string, FacetQuality>()
     const prev = topics.get(top)
     if (!prev || topQ === "ok") topics.set(top, topQ)
     groupMap.set(sub, topics)

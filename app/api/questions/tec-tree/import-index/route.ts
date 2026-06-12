@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import {
-  buildNotebookIndexPreview,
+  buildNotebookIndexPreviewFromBuffers,
   previewToApplyPayload,
   type NotebookIndexPreview,
 } from "@/lib/tec-notebook-index-import"
@@ -55,21 +55,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ ...result, tree })
     }
 
-    const file = form.get("file")
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Arquivo Excel (.xlsx) obrigatório" }, { status: 400 })
-    }
+    const files = form
+      .getAll("file")
+      .filter((entry): entry is File => entry instanceof File)
 
-    const name = file.name.toLowerCase()
-    if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+    if (files.length === 0) {
       return NextResponse.json(
-        { error: "Envie um arquivo Excel (.xlsx ou .xls)" },
+        { error: "Envie um ou mais arquivos Excel (.xlsx ou .xls)" },
         { status: 400 }
       )
     }
 
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "Arquivo muito grande (máx. 15 MB)" }, { status: 400 })
+    for (const file of files) {
+      const name = file.name.toLowerCase()
+      if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+        return NextResponse.json(
+          { error: `Arquivo inválido: ${file.name}. Use .xlsx ou .xls` },
+          { status: 400 }
+        )
+      }
+      if (file.size > MAX_BYTES) {
+        return NextResponse.json(
+          { error: `Arquivo muito grande (máx. 15 MB): ${file.name}` },
+          { status: 400 }
+        )
+      }
     }
 
     const syncFirst = form.get("sync_first") === "1"
@@ -77,7 +87,13 @@ export async function POST(req: Request) {
       await seedTecSubjectTopicsFromBank(user_id, tec_subject)
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer())
+    const parts = await Promise.all(
+      files.map(async (file) => ({
+        buffer: Buffer.from(await file.arrayBuffer()),
+        fileName: file.name,
+      }))
+    )
+
     const dbTopics = await listTecTopicNodesForSubject(user_id, tec_subject)
 
     if (dbTopics.length === 0) {
@@ -90,7 +106,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const preview = buildNotebookIndexPreview(buffer, tec_subject, dbTopics)
+    const preview = buildNotebookIndexPreviewFromBuffers(parts, tec_subject, dbTopics)
     return NextResponse.json(preview)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro ao importar índice"

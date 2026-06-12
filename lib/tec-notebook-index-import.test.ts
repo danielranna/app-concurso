@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { expandWorksheetRange } from "./incidence-xlsx"
 import {
   buildNotebookIndexPreview,
+  buildNotebookIndexPreviewFromBuffers,
   parseNotebookIndexBuffer,
   previewToApplyPayload,
   sortFoldersByDepth,
@@ -85,6 +86,40 @@ describe("parseNotebookIndexBuffer", () => {
     const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer
 
     expect(() => parseNotebookIndexBuffer(buffer, "AFO")).toThrow(/não contém linhas/)
+  })
+})
+
+function makeTiPartBuffer(partName: string, topicName: string): Buffer {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ["Hierarquia", "Índice", "Quantidade", "Porcentagem"],
+    ["", "Tecnologia da Informacao", 50, 100],
+    ["01", `Area ${partName}`, 10, 20],
+    ["01.01", topicName, 1, 2],
+  ])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, "Índice do Caderno")
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer
+}
+
+describe("buildNotebookIndexPreviewFromBuffers", () => {
+  it("mescla várias partes sem colidir paths 01", () => {
+    const preview = buildNotebookIndexPreviewFromBuffers(
+      [
+        { buffer: makeTiPartBuffer("pt1", "Topico A"), fileName: "TI pt1.xlsx" },
+        { buffer: makeTiPartBuffer("pt2", "Topico B"), fileName: "TI pt2.xlsx" },
+      ],
+      "Tecnologia da Informação",
+      [
+        { id: "a", tec_topic: "Topico A", name: "Topico A", question_count: 1 },
+        { id: "b", tec_topic: "Topico B", name: "Topico B", question_count: 1 },
+      ]
+    )
+
+    expect(preview.part_count).toBe(2)
+    expect(preview.source_files).toEqual(["TI pt1.xlsx", "TI pt2.xlsx"])
+    expect(preview.leaves.map((l) => l.path)).toContain("TI pt1/01/01.01")
+    expect(preview.leaves.map((l) => l.path)).toContain("TI pt2/01/01.01")
+    expect(preview.matches).toHaveLength(2)
   })
 })
 

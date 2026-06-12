@@ -354,15 +354,18 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     setMessage(null)
   }
 
-  async function uploadIndexExcel(file: File) {
+  async function uploadIndexExcel(files: FileList | File[]) {
     if (!selected) return
+    const list = [...files]
+    if (list.length === 0) return
+
     setIndexImporting(true)
     setMessage(null)
     const fd = new FormData()
     fd.append("user_id", userId)
     fd.append("tec_subject", selected)
     fd.append("action", "preview")
-    fd.append("file", file)
+    for (const file of list) fd.append("file", file)
     if (syncBeforeIndex) fd.append("sync_first", "1")
 
     const res = await fetch("/api/questions/tec-tree/import-index", {
@@ -552,10 +555,11 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 ref={fileInputRef}
                 type="file"
                 accept=".xlsx,.xls"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) uploadIndexExcel(f)
+                  const picked = e.target.files
+                  if (picked?.length) uploadIndexExcel(picked)
                   e.target.value = ""
                 }}
               />
@@ -564,9 +568,10 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 onClick={() => fileInputRef.current?.click()}
                 disabled={indexImporting}
                 className="inline-flex items-center gap-1 rounded border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs text-violet-900"
+                title="Selecione um ou mais Excel (ex.: TI pt1, pt2, pt3)"
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
-                {indexImporting ? "Lendo Excel…" : "Importar índice Excel"}
+                {indexImporting ? "Lendo Excel…" : "Importar índice(s) Excel"}
               </button>
               <label className="flex items-center gap-1 text-[11px] text-slate-600">
                 <input
@@ -584,10 +589,18 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                   <div>
                     <p className="font-medium text-violet-950">Prévia do índice Excel</p>
                     <p className="text-xs text-violet-800/80">
-                      {indexPreview.excel_subject_label} · {indexPreview.stats.folder_count}{" "}
-                      pasta(s) · {indexPreview.stats.matched_count} pareamento(s) ·{" "}
+                      {indexPreview.excel_subject_label}
+                      {indexPreview.part_count > 1 &&
+                        ` · ${indexPreview.part_count} arquivo(s)`}{" "}
+                      · {indexPreview.stats.folder_count} pasta(s) ·{" "}
+                      {indexPreview.stats.matched_count} pareamento(s) ·{" "}
                       {indexPreview.stats.unmatched_db_count} residual(is) no banco
                     </p>
+                    {indexPreview.source_files?.length > 0 && (
+                      <p className="mt-1 text-[11px] text-violet-700/90">
+                        Arquivos: {indexPreview.source_files.join(" · ")}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <button

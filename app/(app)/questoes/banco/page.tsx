@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react"
 import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
 
 import { encodeTecTopicPair } from "@/lib/tec-facets"
@@ -39,8 +39,19 @@ const CATEGORIES = [
 
 type Subject = { id: string; name: string }
 
+type TecSubjectNode = import("@/lib/tec-subject-tree-types").TecSubjectNode
+
+function countTreeTopics(nodes: TecSubjectNode[]): number {
+  let total = 0
+  for (const node of nodes) {
+    if (node.node_type === "topic") total++
+    if (node.children?.length) total += countTreeTopics(node.children)
+  }
+  return total
+}
+
 type BankTreeNodeProps = {
-  node: import("@/lib/tec-subject-tree-types").TecSubjectNode
+  node: TecSubjectNode
   depth: number
   tecSubject: string
   isTopicChecked: (s: string, t: string) => boolean
@@ -54,6 +65,8 @@ function BankTreeNode({
   isTopicChecked,
   toggleTopic,
 }: BankTreeNodeProps) {
+  const [open, setOpen] = useState(false)
+
   if (node.node_type === "topic" && node.tec_topic) {
     return (
       <label
@@ -66,25 +79,102 @@ function BankTreeNode({
           onChange={() => toggleTopic(tecSubject, node.tec_topic!)}
         />
         <span className="truncate">{node.name}</span>
-        <span className="text-xs text-slate-400">
+        <span className="shrink-0 text-xs text-slate-400">
           {node.question_count} ({node.percent?.toFixed(1)}%)
         </span>
       </label>
     )
   }
+
   return (
     <div style={{ paddingLeft: depth * 12 }}>
-      <p className="py-1 text-sm font-medium text-slate-700">{node.name}</p>
-      {node.children?.map((c) => (
-        <BankTreeNode
-          key={c.id}
-          node={c}
-          depth={depth + 1}
-          tecSubject={tecSubject}
-          isTopicChecked={isTopicChecked}
-          toggleTopic={toggleTopic}
-        />
-      ))}
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1 py-1 text-left text-sm font-medium text-slate-700"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        )}
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        <span className="shrink-0 text-xs font-normal text-slate-400">
+          {node.question_count}
+        </span>
+      </button>
+      {open &&
+        node.children?.map((c) => (
+          <BankTreeNode
+            key={c.id}
+            node={c}
+            depth={depth + 1}
+            tecSubject={tecSubject}
+            isTopicChecked={isTopicChecked}
+            toggleTopic={toggleTopic}
+          />
+        ))}
+    </div>
+  )
+}
+
+function SubjectCollapsible({
+  title,
+  subtitle,
+  topicCount,
+  defaultOpen = false,
+  headerCheckbox,
+  variant = "default",
+  children,
+}: {
+  title: string
+  subtitle?: string
+  topicCount?: number
+  defaultOpen?: boolean
+  headerCheckbox?: ReactNode
+  variant?: "default" | "organized"
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const boxClass =
+    variant === "organized"
+      ? "border-violet-200 bg-violet-50/40"
+      : "border-slate-200 bg-slate-50/80"
+
+  return (
+    <div className={`rounded-lg border p-3 ${boxClass}`}>
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="mt-0.5 shrink-0 text-slate-500"
+          aria-expanded={open}
+        >
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {headerCheckbox}
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              className={`text-left text-sm font-semibold ${
+                variant === "organized" ? "text-violet-900" : "text-blue-800"
+              }`}
+            >
+              {title}
+              {variant === "organized" && (
+                <span className="ml-1 text-xs font-normal text-violet-700">(organizada)</span>
+              )}
+            </button>
+            {topicCount != null && (
+              <span className="text-xs text-slate-500">{topicCount} assunto(s)</span>
+            )}
+          </div>
+          {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+        </div>
+      </div>
+      {open && <div className="mt-2 border-t border-slate-200/80 pt-2">{children}</div>}
     </div>
   )
 }
@@ -172,14 +262,32 @@ export default function BancoPage() {
     return (map[key] ?? []) as string[]
   }
 
-  const visibleTecGroups = (): TecGroup[] => {
+  const visibleTecGroups = useMemo((): TecGroup[] => {
     if (!facets?.tec_groups.length) return []
     const selectedSubjects = filters.tec_subject ?? []
     if (activeCategory === "tec_topic" && selectedSubjects.length > 0) {
       return facets.tec_groups.filter((g) => selectedSubjects.includes(g.tec_subject))
     }
     return facets.tec_groups
-  }
+  }, [facets?.tec_groups, activeCategory, filters.tec_subject])
+
+  const organizedSubjectSet = useMemo(
+    () => new Set((facets?.tec_trees ?? []).map((t) => t.tec_subject)),
+    [facets?.tec_trees]
+  )
+
+  const flatTecGroups = useMemo(
+    () => visibleTecGroups.filter((g) => !organizedSubjectSet.has(g.tec_subject)),
+    [visibleTecGroups, organizedSubjectSet]
+  )
+
+  const visibleTecTrees = useMemo(
+    () =>
+      (facets?.tec_trees ?? []).filter((t) =>
+        visibleTecGroups.some((g) => g.tec_subject === t.tec_subject)
+      ),
+    [facets?.tec_trees, visibleTecGroups]
+  )
 
   async function createFromFilter() {
     if (!userId || !cadernoName || !subjectId) return
@@ -247,27 +355,27 @@ export default function BancoPage() {
                   todas.
                 </p>
               )}
-              {(facets.tec_trees ?? []).length > 0 &&
-                visibleTecGroups().some((g) =>
-                  facets.tec_trees?.some((t) => t.tec_subject === g.tec_subject)
-                ) &&
-                facets.tec_trees!.filter((t) =>
-                  visibleTecGroups().some((g) => g.tec_subject === t.tec_subject)
-                ).map((tree) => (
-                  <div key={tree.tec_subject} className="rounded-lg border border-violet-200 bg-violet-50/40 p-3">
-                    <p className="mb-2 text-sm font-semibold text-violet-900">
-                      {tree.tec_subject} (organizada)
-                    </p>
-                    {tree.nodes.map((node) => (
-                      <BankTreeNode
-                        key={node.id}
-                        node={node}
-                        depth={0}
-                        isTopicChecked={isTopicChecked}
-                        toggleTopic={toggleTopic}
-                        tecSubject={tree.tec_subject}
+              {visibleTecTrees.map((tree) => {
+                const topicCount =
+                  tree.ungrouped.length + countTreeTopics(tree.nodes)
+                return (
+                  <SubjectCollapsible
+                    key={tree.tec_subject}
+                    title={tree.tec_subject}
+                    topicCount={topicCount}
+                    variant="organized"
+                    headerCheckbox={
+                      <input
+                        type="checkbox"
+                        checked={(filters.tec_subject ?? []).includes(tree.tec_subject)}
+                        onChange={() => toggleFilter("tec_subject", tree.tec_subject)}
+                        onClick={(e) => e.stopPropagation()}
                       />
-                    ))}
+                    }
+                  >
+                    {tree.ungrouped.length > 0 && (
+                      <p className="mb-1 text-xs font-medium text-slate-500">Sem pasta</p>
+                    )}
                     {tree.ungrouped.map((node) => (
                       <BankTreeNode
                         key={node.id}
@@ -278,19 +386,39 @@ export default function BancoPage() {
                         tecSubject={tree.tec_subject}
                       />
                     ))}
-                  </div>
-                ))}
-              {visibleTecGroups().map((g) => (
-                <div key={g.tec_subject} className="rounded-lg border bg-slate-50/80 p-3">
-                  <label className="flex cursor-pointer items-center gap-2 border-b border-slate-200 pb-2 text-sm font-semibold text-blue-800">
+                    {tree.nodes.map((node) => (
+                      <BankTreeNode
+                        key={node.id}
+                        node={node}
+                        depth={0}
+                        isTopicChecked={isTopicChecked}
+                        toggleTopic={toggleTopic}
+                        tecSubject={tree.tec_subject}
+                      />
+                    ))}
+                  </SubjectCollapsible>
+                )
+              })}
+              {flatTecGroups.map((g) => (
+                <SubjectCollapsible
+                  key={g.tec_subject}
+                  title={g.tec_subject}
+                  topicCount={g.topics.length}
+                  subtitle={
+                    g.topics.some((t) => g.topic_qualities?.[t] === "warn")
+                      ? "⚠ assuntos com parse suspeito ou sem classificação"
+                      : undefined
+                  }
+                  headerCheckbox={
                     <input
                       type="checkbox"
                       checked={(filters.tec_subject ?? []).includes(g.tec_subject)}
                       onChange={() => toggleFilter("tec_subject", g.tec_subject)}
+                      onClick={(e) => e.stopPropagation()}
                     />
-                    {g.tec_subject}
-                  </label>
-                  <ul className="mt-2 space-y-1 pl-1">
+                  }
+                >
+                  <ul className="space-y-1 pl-1">
                     {g.topics.map((topic) => (
                       <li key={`${g.tec_subject}|||${topic}`}>
                         <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-800">
@@ -310,8 +438,14 @@ export default function BancoPage() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </SubjectCollapsible>
               ))}
+              {visibleTecTrees.length === 0 && flatTecGroups.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  Nenhuma matéria com assuntos no banco. Importe questões com matéria e assunto TEC
+                  preenchidos.
+                </p>
+              )}
             </div>
           ) : (
             <ul className="space-y-1">

@@ -45,6 +45,8 @@ export type IndexMatchProposal = {
 export type NotebookIndexPreview = {
   excel_subject_label: string
   sheet_names: string[]
+  source_files: string[]
+  part_count: number
   folders: ExcelIndexFolder[]
   leaves: ExcelIndexLeaf[]
   matches: IndexMatchProposal[]
@@ -225,13 +227,67 @@ export function parseNotebookIndexBuffer(
   }
 }
 
-export function buildNotebookIndexPreview(
-  buffer: Buffer,
+function addPartPrefix(
+  folders: ExcelIndexFolder[],
+  leaves: ExcelIndexLeaf[],
+  partLabel: string
+): { folders: ExcelIndexFolder[]; leaves: ExcelIndexLeaf[] } {
+  const pref = (path: string) => `${partLabel}/${path}`
+  const prefParent = (parent: string | null) => (parent ? pref(parent) : null)
+
+  return {
+    folders: folders.map((f) => ({
+      ...f,
+      path: pref(f.path),
+      parent_path: prefParent(f.parent_path),
+    })),
+    leaves: leaves.map((l) => ({
+      ...l,
+      path: pref(l.path),
+      parent_path: prefParent(l.parent_path),
+    })),
+  }
+}
+
+function partLabelFromFileName(fileName: string, index: number): string {
+  const base = fileName.replace(/\.(xlsx|xls)$/i, "").trim()
+  return base || `parte-${index + 1}`
+}
+
+export function buildNotebookIndexPreviewFromBuffers(
+  parts: { buffer: Buffer; fileName?: string }[],
   tecSubject: string,
   dbTopics: DbTopicCandidate[]
 ): NotebookIndexPreview {
-  const { folders, leaves, excel_subject_label, sheet_names } =
-    parseNotebookIndexBuffer(buffer, tecSubject)
+  if (parts.length === 0) {
+    throw new Error("Nenhum arquivo Excel enviado.")
+  }
+
+  const multiPart = parts.length > 1
+  const folders: ExcelIndexFolder[] = []
+  const leaves: ExcelIndexLeaf[] = []
+  const sheet_names: string[] = []
+  const source_files: string[] = []
+  let excel_subject_label = ""
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!
+    const parsed = parseNotebookIndexBuffer(part.buffer, tecSubject)
+    const label = partLabelFromFileName(part.fileName ?? "", i)
+
+    source_files.push(part.fileName ?? label)
+    sheet_names.push(...parsed.sheet_names)
+    if (!excel_subject_label) excel_subject_label = parsed.excel_subject_label
+
+    if (multiPart) {
+      const prefixed = addPartPrefix(parsed.folders, parsed.leaves, label)
+      folders.push(...prefixed.folders)
+      leaves.push(...prefixed.leaves)
+    } else {
+      folders.push(...parsed.folders)
+      leaves.push(...parsed.leaves)
+    }
+  }
 
   const { matches, unmatched_excel, unmatched_db } = matchLeavesToDbTopics(
     leaves,
@@ -242,7 +298,9 @@ export function buildNotebookIndexPreview(
 
   return {
     excel_subject_label,
-    sheet_names,
+    sheet_names: [...new Set(sheet_names)],
+    source_files,
+    part_count: parts.length,
     folders,
     leaves,
     matches,
@@ -257,6 +315,14 @@ export function buildNotebookIndexPreview(
       unmatched_db_count: unmatched_db.length,
     },
   }
+}
+
+export function buildNotebookIndexPreview(
+  buffer: Buffer,
+  tecSubject: string,
+  dbTopics: DbTopicCandidate[]
+): NotebookIndexPreview {
+  return buildNotebookIndexPreviewFromBuffers([{ buffer }], tecSubject, dbTopics)
 }
 
 /** Pastas em ordem de profundidade (pais antes dos filhos). */
