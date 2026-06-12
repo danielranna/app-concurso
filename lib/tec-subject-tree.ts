@@ -1,3 +1,9 @@
+import {
+  sortFoldersByDepth,
+  type ApplyIndexFolderInput,
+  type ApplyIndexMatchInput,
+  type DbTopicCandidate,
+} from "./tec-notebook-index-import"
 import { supabaseServer } from "./supabase-server"
 import type {
   TecSubjectNode,
@@ -319,6 +325,105 @@ export async function bulkMoveTecSubjectNodes(
 
   if (error) throw new Error(error.message)
   return { moved: valid.length, skipped: unique.length - valid.length }
+}
+
+export async function listTecTopicNodesForSubject(
+  userId: string,
+  tecSubject: string
+): Promise<DbTopicCandidate[]> {
+  const { data, error } = await supabaseServer
+    .from("tec_subject_nodes")
+    .select("id, name, tec_topic, question_count")
+    .eq("user_id", userId)
+    .eq("tec_subject", tecSubject)
+    .eq("node_type", "topic")
+
+  if (error) throw new Error(error.message)
+
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    tec_topic: (row.tec_topic as string | null) ?? (row.name as string),
+    name: row.name as string,
+    question_count: (row.question_count as number) ?? 0,
+  }))
+}
+
+async function findExistingTecFolder(
+  userId: string,
+  tecSubject: string,
+  name: string,
+  parentId: string | null
+): Promise<TecSubjectNode | null> {
+  let query = supabaseServer
+    .from("tec_subject_nodes")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("tec_subject", tecSubject)
+    .eq("node_type", "folder")
+    .eq("name", name)
+
+  if (parentId) query = query.eq("parent_id", parentId)
+  else query = query.is("parent_id", null)
+
+  const { data, error } = await query.maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  return rowToNode(data as NodeRow)
+}
+
+export async function applyNotebookIndexHierarchy(
+  userId: string,
+  tecSubject: string,
+  folders: ApplyIndexFolderInput[],
+  matches: ApplyIndexMatchInput[]
+): Promise<{
+  folders_created: number
+  folders_reused: number
+  topics_moved: number
+}> {
+  const pathToFolderId = new Map<string, string>()
+  let folders_created = 0
+  let folders_reused = 0
+  let topics_moved = 0
+
+  for (const folder of sortFoldersByDepth(folders)) {
+    const parentId = folder.parent_path
+      ? (pathToFolderId.get(folder.parent_path) ?? null)
+      : null
+
+    const existing = await findExistingTecFolder(
+      userId,
+      tecSubject,
+      folder.name,
+      parentId
+    )
+
+    if (existing) {
+      pathToFolderId.set(folder.path, existing.id)
+      folders_reused++
+    } else {
+      const created = await createTecFolder(userId, tecSubject, folder.name, parentId)
+      pathToFolderId.set(folder.path, created.id)
+      folders_created++
+    }
+  }
+
+  const byParentId = new Map<string | null, string[]>()
+  for (const match of matches) {
+    const parentId = match.parent_path
+      ? (pathToFolderId.get(match.parent_path) ?? null)
+      : null
+    const list = byParentId.get(parentId) ?? []
+    list.push(match.db_node_id)
+    byParentId.set(parentId, list)
+  }
+
+  for (const [parentId, nodeIds] of byParentId) {
+    const result = await bulkMoveTecSubjectNodes(userId, nodeIds, parentId)
+    topics_moved += result.moved
+  }
+
+  return { folders_created, folders_reused, topics_moved }
 }
 
 export async function deleteTecSubjectNode(

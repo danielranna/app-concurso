@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, FolderPlus, RefreshCw } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ChevronDown, ChevronRight, FileSpreadsheet, FolderPlus, RefreshCw } from "lucide-react"
+import type { NotebookIndexPreview } from "@/lib/tec-notebook-index-import"
 import type { TecSubjectNode, TecSubjectSummary } from "@/lib/tec-subject-tree-types"
 
 type FolderOption = {
@@ -199,6 +200,14 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   const [bulkTargetId, setBulkTargetId] = useState("")
   const [foldersOpen, setFoldersOpen] = useState(false)
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "err" } | null>(null)
+  const [indexPreview, setIndexPreview] = useState<NotebookIndexPreview | null>(null)
+  const [indexImporting, setIndexImporting] = useState(false)
+  const [indexApplying, setIndexApplying] = useState(false)
+  const [syncBeforeIndex, setSyncBeforeIndex] = useState(true)
+  const [confirmedMatchIds, setConfirmedMatchIds] = useState<Set<string>>(new Set())
+  const [matchesOpen, setMatchesOpen] = useState(true)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const ungroupedRef = useRef<HTMLDivElement>(null)
 
   const reloadSummaries = useCallback(async () => {
     const res = await fetch(`/api/questions/tec-tree?user_id=${userId}`)
@@ -223,6 +232,8 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   useEffect(() => {
     setSelectedIds(new Set())
     setBulkTargetId("")
+    setIndexPreview(null)
+    setConfirmedMatchIds(new Set())
     reloadTree()
   }, [reloadTree])
 
@@ -312,6 +323,80 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     setMessage(null)
   }
 
+  async function uploadIndexExcel(file: File) {
+    if (!selected) return
+    setIndexImporting(true)
+    setMessage(null)
+    const fd = new FormData()
+    fd.append("user_id", userId)
+    fd.append("tec_subject", selected)
+    fd.append("action", "preview")
+    fd.append("file", file)
+    if (syncBeforeIndex) fd.append("sync_first", "1")
+
+    const res = await fetch("/api/questions/tec-tree/import-index", {
+      method: "POST",
+      body: fd,
+    })
+    const data = await res.json()
+    setIndexImporting(false)
+
+    if (!res.ok) {
+      setMessage({ text: data.error ?? "Falha ao ler Excel", tone: "err" })
+      return
+    }
+
+    const preview = data as NotebookIndexPreview
+    setIndexPreview(preview)
+    setConfirmedMatchIds(
+      new Set(preview.matches.filter((m) => m.default_confirmed).map((m) => m.db_node_id))
+    )
+    if (syncBeforeIndex) await reloadTree(true)
+  }
+
+  function toggleMatchConfirm(dbNodeId: string, checked: boolean) {
+    setConfirmedMatchIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(dbNodeId)
+      else next.delete(dbNodeId)
+      return next
+    })
+  }
+
+  async function applyIndexHierarchy() {
+    if (!selected || !indexPreview) return
+    setIndexApplying(true)
+    const fd = new FormData()
+    fd.append("user_id", userId)
+    fd.append("tec_subject", selected)
+    fd.append("action", "apply")
+    fd.append("preview", JSON.stringify(indexPreview))
+    fd.append("confirmed_node_ids", JSON.stringify([...confirmedMatchIds]))
+
+    const res = await fetch("/api/questions/tec-tree/import-index", {
+      method: "POST",
+      body: fd,
+    })
+    const data = await res.json()
+    setIndexApplying(false)
+
+    if (!res.ok) {
+      setMessage({ text: data.error ?? "Falha ao aplicar hierarquia", tone: "err" })
+      return
+    }
+
+    setIndexPreview(null)
+    setConfirmedMatchIds(new Set())
+    setTree(data.tree ?? null)
+    setFoldersOpen(true)
+    setMessage({
+      text: `Hierarquia aplicada: ${data.folders_created ?? 0} pasta(s) criada(s), ${data.topics_moved ?? 0} assunto(s) movido(s). Ajuste o residual abaixo.`,
+      tone: "ok",
+    })
+    await reloadSummaries()
+    setTimeout(() => ungroupedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100)
+  }
+
   async function bulkMove() {
     if (selectedIds.size === 0) return
     setMoving(true)
@@ -381,7 +466,126 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
               >
                 <RefreshCw className="h-3.5 w-3.5" /> Importar assuntos do banco
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadIndexExcel(f)
+                  e.target.value = ""
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={indexImporting}
+                className="inline-flex items-center gap-1 rounded border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs text-violet-900"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                {indexImporting ? "Lendo Excel…" : "Importar índice Excel"}
+              </button>
+              <label className="flex items-center gap-1 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={syncBeforeIndex}
+                  onChange={(e) => setSyncBeforeIndex(e.target.checked)}
+                />
+                Sincronizar banco antes
+              </label>
             </div>
+
+            {indexPreview && (
+              <div className="mb-4 space-y-3 rounded-lg border border-violet-200 bg-violet-50/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-violet-950">Prévia do índice Excel</p>
+                    <p className="text-xs text-violet-800/80">
+                      {indexPreview.excel_subject_label} · {indexPreview.stats.folder_count}{" "}
+                      pasta(s) · {indexPreview.stats.matched_count} pareamento(s) ·{" "}
+                      {indexPreview.stats.unmatched_db_count} residual(is) no banco
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIndexPreview(null)}
+                      className="rounded border bg-white px-3 py-1.5 text-xs"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyIndexHierarchy}
+                      disabled={indexApplying || confirmedMatchIds.size === 0}
+                      className="rounded bg-violet-700 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                    >
+                      {indexApplying ? "Aplicando…" : "Aplicar hierarquia"}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setMatchesOpen(!matchesOpen)}
+                  className="flex items-center gap-1 text-xs font-medium text-violet-900"
+                >
+                  {matchesOpen ? (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  )}
+                  Pareamentos ({confirmedMatchIds.size}/{indexPreview.matches.length} confirmados)
+                </button>
+                {matchesOpen && (
+                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded border bg-white p-2 text-xs">
+                    {indexPreview.matches.map((m) => (
+                      <li key={m.excel_path} className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={confirmedMatchIds.has(m.db_node_id)}
+                          onChange={(e) => toggleMatchConfirm(m.db_node_id, e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="text-slate-700">{m.excel_name}</span>
+                          <span className="text-slate-400"> → </span>
+                          <span className="text-slate-900">{m.db_tec_topic}</span>
+                          <span className="ml-1 text-slate-400">({m.score}%)</span>
+                          {!m.default_confirmed && (
+                            <span className="ml-1 text-amber-700">sugestão</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {indexPreview.unmatched_excel.length > 0 && (
+                  <div className="rounded border border-amber-200 bg-amber-50/80 p-2 text-xs">
+                    <p className="font-medium text-amber-900">
+                      Excel sem par no banco ({indexPreview.unmatched_excel.length})
+                    </p>
+                    <p className="mt-1 line-clamp-3 text-amber-800">
+                      {indexPreview.unmatched_excel.map((u) => u.name).join(" · ")}
+                    </p>
+                  </div>
+                )}
+
+                {indexPreview.unmatched_db.length > 0 && (
+                  <div className="rounded border border-slate-200 bg-white p-2 text-xs">
+                    <p className="font-medium text-slate-800">
+                      Residual no banco ({indexPreview.unmatched_db.length}) — organize manualmente
+                      após aplicar
+                    </p>
+                    <p className="mt-1 line-clamp-3 text-slate-600">
+                      {indexPreview.unmatched_db.map((u) => u.tec_topic).join(" · ")}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             {message && (
               <p
                 className={`mb-3 rounded border px-3 py-2 text-sm ${
@@ -465,7 +669,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
             ) : (
               <div className="max-h-[60vh] overflow-y-auto rounded-lg border p-2">
                 {tree?.ungrouped && tree.ungrouped.length > 0 && (
-                  <div className="mb-4">
+                  <div ref={ungroupedRef} className="mb-4">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <p className="text-xs font-medium text-slate-600">
                         Sem pasta ({tree.ungrouped.length})
