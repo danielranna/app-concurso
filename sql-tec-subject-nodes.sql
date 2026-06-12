@@ -1,4 +1,4 @@
--- Árvore TEC organizável (pré-mapeamento) por matéria TEC
+-- Árvore TEC organizável (pré-mapeamEento) por matéria TEC
 -- Execute após sql-questions.sql
 
 CREATE TABLE IF NOT EXISTS tec_subject_nodes (
