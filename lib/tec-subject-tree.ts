@@ -253,16 +253,17 @@ async function isNodeUnderAncestor(
   ancestorId: string,
   nodeId: string
 ): Promise<boolean> {
-  let current: string | null = nodeId
-  while (current) {
-    if (current === ancestorId) return true
-    const { data } = await supabaseServer
-      .from("tec_subject_nodes")
-      .select("parent_id")
-      .eq("id", current)
-      .eq("user_id", userId)
-      .maybeSingle()
-    current = (data?.parent_id as string | null) ?? null
+  let walkId: string | null = nodeId
+  while (walkId) {
+    if (walkId === ancestorId) return true
+    const { data: row }: { data: { parent_id: string | null } | null } =
+      await supabaseServer
+        .from("tec_subject_nodes")
+        .select("parent_id")
+        .eq("id", walkId)
+        .eq("user_id", userId)
+        .maybeSingle()
+    walkId = row?.parent_id ?? null
   }
   return false
 }
