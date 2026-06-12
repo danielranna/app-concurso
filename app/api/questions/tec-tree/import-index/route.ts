@@ -94,7 +94,10 @@ export async function POST(req: Request) {
       }))
     )
 
-    const dbTopics = await listTecTopicNodesForSubject(user_id, tec_subject)
+    const ungroupedOnly = form.get("ungrouped_only") !== "0"
+    const dbTopics = await listTecTopicNodesForSubject(user_id, tec_subject, {
+      ungroupedOnly,
+    })
 
     if (dbTopics.length === 0) {
       return NextResponse.json(

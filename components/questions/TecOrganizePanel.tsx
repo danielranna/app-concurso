@@ -224,6 +224,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   const [indexImporting, setIndexImporting] = useState(false)
   const [indexApplying, setIndexApplying] = useState(false)
   const [syncBeforeIndex, setSyncBeforeIndex] = useState(true)
+  const [matchUngroupedOnly, setMatchUngroupedOnly] = useState(true)
   const [confirmedMatchIds, setConfirmedMatchIds] = useState<Set<string>>(new Set())
   const [matchesOpen, setMatchesOpen] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -367,6 +368,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     fd.append("action", "preview")
     for (const file of list) fd.append("file", file)
     if (syncBeforeIndex) fd.append("sync_first", "1")
+    if (!matchUngroupedOnly) fd.append("ungrouped_only", "0")
 
     const res = await fetch("/api/questions/tec-tree/import-index", {
       method: "POST",
@@ -423,8 +425,9 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
     setConfirmedMatchIds(new Set())
     setTree(data.tree ?? null)
     setFoldersOpen(true)
+    const skipped = data.topics_skipped_placed ?? 0
     setMessage({
-      text: `Hierarquia aplicada: ${data.folders_created ?? 0} pasta(s) criada(s), ${data.topics_moved ?? 0} assunto(s) movido(s). Ajuste o residual abaixo.`,
+      text: `Hierarquia aplicada: ${data.folders_created ?? 0} pasta(s) criada(s), ${data.topics_moved ?? 0} assunto(s) movido(s)${skipped ? `, ${skipped} já em pasta (mantidos)` : ""}. Ajuste o residual abaixo.`,
       tone: "ok",
     })
     await reloadSummaries()
@@ -580,6 +583,17 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                   onChange={(e) => setSyncBeforeIndex(e.target.checked)}
                 />
                 Sincronizar banco antes
+              </label>
+              <label
+                className="flex items-center gap-1 text-[11px] text-slate-600"
+                title="Importe pt1, aplique, depois pt2: só pareia o que ainda está em Sem pasta"
+              >
+                <input
+                  type="checkbox"
+                  checked={matchUngroupedOnly}
+                  onChange={(e) => setMatchUngroupedOnly(e.target.checked)}
+                />
+                Só assuntos sem pasta
               </label>
             </div>
 

@@ -329,18 +329,23 @@ export async function bulkMoveTecSubjectNodes(
 
 export async function listTecTopicNodesForSubject(
   userId: string,
-  tecSubject: string
+  tecSubject: string,
+  options?: { ungroupedOnly?: boolean }
 ): Promise<DbTopicCandidate[]> {
   const { data, error } = await supabaseServer
     .from("tec_subject_nodes")
-    .select("id, name, tec_topic, question_count")
+    .select("id, name, tec_topic, question_count, parent_id")
     .eq("user_id", userId)
     .eq("tec_subject", tecSubject)
     .eq("node_type", "topic")
 
   if (error) throw new Error(error.message)
 
-  return (data ?? []).map((row) => ({
+  const rows = options?.ungroupedOnly
+    ? (data ?? []).filter((row) => row.parent_id == null)
+    : (data ?? [])
+
+  return rows.map((row) => ({
     id: row.id as string,
     tec_topic: (row.tec_topic as string | null) ?? (row.name as string),
     name: row.name as string,
@@ -380,6 +385,7 @@ export async function applyNotebookIndexHierarchy(
   folders_created: number
   folders_reused: number
   topics_moved: number
+  topics_skipped_placed: number
 }> {
   const pathToFolderId = new Map<string, string>()
   let folders_created = 0
@@ -408,8 +414,30 @@ export async function applyNotebookIndexHierarchy(
     }
   }
 
+  const matchIds = matches.map((m) => m.db_node_id)
+  let activeMatches = matches
+  let topics_skipped_placed = 0
+
+  if (matchIds.length > 0) {
+    const { data: placedRows, error: placedErr } = await supabaseServer
+      .from("tec_subject_nodes")
+      .select("id, parent_id")
+      .eq("user_id", userId)
+      .in("id", matchIds)
+
+    if (placedErr) throw new Error(placedErr.message)
+
+    const placedIds = new Set(
+      (placedRows ?? [])
+        .filter((row) => row.parent_id != null)
+        .map((row) => row.id as string)
+    )
+    activeMatches = matches.filter((m) => !placedIds.has(m.db_node_id))
+    topics_skipped_placed = matches.length - activeMatches.length
+  }
+
   const byParentId = new Map<string | null, string[]>()
-  for (const match of matches) {
+  for (const match of activeMatches) {
     const parentId = match.parent_path
       ? (pathToFolderId.get(match.parent_path) ?? null)
       : null
@@ -423,7 +451,7 @@ export async function applyNotebookIndexHierarchy(
     topics_moved += result.moved
   }
 
-  return { folders_created, folders_reused, topics_moved }
+  return { folders_created, folders_reused, topics_moved, topics_skipped_placed }
 }
 
 export async function deleteTopicNodesAndBankQuestions(
