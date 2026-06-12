@@ -1,4 +1,8 @@
 import { syncNotebookToContentIndex } from "./content-index-sync"
+import {
+  sanitizePostgresText,
+  sanitizePostgresTextNullable,
+} from "./sanitize-postgres-text"
 import { supabaseServer } from "./supabase-server"
 import { bulkLinkAssetToQuestions } from "./shared-assets-server"
 import type {
@@ -6,6 +10,24 @@ import type {
   ImportQuestionInput,
   ParsedTecNotebook,
 } from "./question-types"
+
+function sanitizeImportQuestion(q: ImportQuestionInput): ImportQuestionInput {
+  return {
+    ...q,
+    tec_url: sanitizePostgresText(q.tec_url),
+    banca: sanitizePostgresTextNullable(q.banca),
+    cargo: sanitizePostgresTextNullable(q.cargo),
+    orgao: sanitizePostgresTextNullable(q.orgao),
+    tec_subject: sanitizePostgresText(q.tec_subject),
+    tec_topic: sanitizePostgresText(q.tec_topic),
+    statement: sanitizePostgresText(q.statement),
+    correct_answer: sanitizePostgresText(q.correct_answer),
+    options: q.options.map((o) => ({
+      label: sanitizePostgresText(o.label),
+      text: sanitizePostgresText(o.text),
+    })),
+  }
+}
 
 export type ImportSharedLinkInput = {
   asset_id: string
@@ -88,6 +110,8 @@ export async function fetchBankQuestionsByTecIds(
 export async function upsertGlobalQuestion(
   q: ImportQuestionInput
 ): Promise<ImportQuestionResult> {
+  q = sanitizeImportQuestion(q)
+
   const { data: existing } = await supabaseServer
     .from("questions")
     .select("id, tec_id")
@@ -242,8 +266,8 @@ export async function importNotebookFromParsed(
       user_id: userId,
       subject_id: opts.subject_id ?? null,
       folder_id: opts.folder_id ?? null,
-      name: opts.name ?? parsed.name,
-      share_url: parsed.share_url,
+      name: sanitizePostgresText(opts.name ?? parsed.name),
+      share_url: sanitizePostgresTextNullable(parsed.share_url),
       question_count: questionIds.length,
     })
     .select("id")
@@ -281,7 +305,7 @@ export async function importNotebookFromParsed(
 
     for (const ov of link.overrides ?? []) {
       const questionId = tecToQuestionId.get(ov.tec_id)
-      const override = ov.content_override?.trim()
+      const override = sanitizePostgresText(ov.content_override ?? "").trim()
       if (!questionId || !override) continue
       const { error } = await supabaseServer
         .from("user_question_asset_links")
