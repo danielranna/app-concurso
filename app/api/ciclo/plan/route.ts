@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { generateFullCycle, previewCycleStats } from "@/lib/study-cycle-deadline-planner"
+import { generateFullCycle, previewCycleStats, resolveSubjectsPerDayLimit } from "@/lib/study-cycle-deadline-planner"
 import {
   activateCycle,
   getActiveOrDraftCycle,
@@ -37,13 +37,10 @@ export async function POST(req: Request) {
         ? await getCyclePreferences(user_id)
         : null
 
-    const resolveSubjectsPerDay = (
-      cycle: NonNullable<Awaited<ReturnType<typeof getActiveOrDraftCycle>>>
-    ) =>
-      Number(
-        subjects_per_day ??
-          prefs?.subjects_per_cycle_day ??
-          2
+    const resolveSubjectsPerDay = () =>
+      resolveSubjectsPerDayLimit(
+        subjects_per_day,
+        prefs?.subjects_per_cycle_day
       )
 
     if (action === "preview") {
@@ -83,7 +80,7 @@ export async function POST(req: Request) {
         limits,
         Number(target_weeks ?? cycle.target_weeks ?? 8),
         Number(default_block_minutes ?? cycle.default_block_minutes ?? 45),
-        resolveSubjectsPerDay(cycle)
+        resolveSubjectsPerDay()
       )
 
       return NextResponse.json({ stats })
@@ -127,16 +124,22 @@ export async function POST(req: Request) {
 
       const weeks = Number(target_weeks ?? cycle.target_weeks ?? 8)
       const blockMinutes = Number(default_block_minutes ?? cycle.default_block_minutes ?? 45)
-      const resolvedSubjectsPerDay = resolveSubjectsPerDay(cycle)
+      const resolvedSubjectsPerDay = resolveSubjectsPerDay()
 
-      const generated = generateFullCycle({
-        subjects: subjectPlans,
-        weekday_limits: limits,
-        target_weeks: weeks,
-        default_block_minutes: blockMinutes,
-        subjects_per_day: resolvedSubjectsPerDay,
-        planning_mode: planning_mode ?? "deadline_driven",
-      })
+      let generated
+      try {
+        generated = generateFullCycle({
+          subjects: subjectPlans,
+          weekday_limits: limits,
+          target_weeks: weeks,
+          default_block_minutes: blockMinutes,
+          subjects_per_day: resolvedSubjectsPerDay,
+          planning_mode: planning_mode ?? "deadline_driven",
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Erro ao distribuir sessões"
+        return NextResponse.json({ error: msg }, { status: 400 })
+      }
 
       if (!generated.stats.feasible) {
         return NextResponse.json(
@@ -167,11 +170,16 @@ export async function POST(req: Request) {
         return NextResponse.json({
           cycle: active,
           stats: generated.stats,
+          distribution_stats: generated.distribution_stats,
           cycle_enabled: true,
         })
       }
 
-      return NextResponse.json({ cycle: saved, stats: generated.stats })
+      return NextResponse.json({
+        cycle: saved,
+        stats: generated.stats,
+        distribution_stats: generated.distribution_stats,
+      })
     }
 
     if (action === "save" || action === "save_and_activate") {

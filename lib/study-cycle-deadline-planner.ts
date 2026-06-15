@@ -69,6 +69,74 @@ export type GenerateCycleResult = {
   stats: CycleStats
   days: ManualCycleDayInput[]
   total_days: number
+  distribution_stats: DayDistributionStats
+}
+
+export type DayDistributionStats = {
+  subjects_per_day_used: number
+  max_distinct_subjects_in_any_day: number
+  max_blocks_in_any_day: number
+}
+
+/** Resolve limite de matérias/dia: override do body, senão prefs, senão 2 */
+export function resolveSubjectsPerDayLimit(
+  bodyOverride: unknown,
+  prefsSubjectsPerCycleDay?: number
+): number {
+  if (bodyOverride != null && bodyOverride !== "") {
+    const fromBody = Number(bodyOverride)
+    if (Number.isFinite(fromBody) && fromBody > 0) {
+      return Math.max(1, Math.floor(fromBody))
+    }
+  }
+  const fromPrefs = Number(prefsSubjectsPerCycleDay ?? 2)
+  if (Number.isFinite(fromPrefs) && fromPrefs > 0) {
+    return Math.max(1, Math.floor(fromPrefs))
+  }
+  return 2
+}
+
+function effectiveSubjectsPerDayCap(subjectsPerDay?: number): number | null {
+  if (subjectsPerDay == null || !Number.isFinite(subjectsPerDay) || subjectsPerDay <= 0) {
+    return null
+  }
+  return Math.max(1, Math.floor(subjectsPerDay))
+}
+
+export function computeDayDistributionStats(
+  days: ManualCycleDayInput[],
+  subjectsPerDay?: number
+): DayDistributionStats {
+  let maxDistinct = 0
+  let maxBlocks = 0
+  for (const day of days) {
+    const distinct = new Set(day.blocks.map((b) => b.subject_id)).size
+    maxDistinct = Math.max(maxDistinct, distinct)
+    maxBlocks = Math.max(maxBlocks, day.blocks.length)
+  }
+  const cap = effectiveSubjectsPerDayCap(subjectsPerDay)
+  return {
+    subjects_per_day_used: cap ?? 0,
+    max_distinct_subjects_in_any_day: maxDistinct,
+    max_blocks_in_any_day: maxBlocks,
+  }
+}
+
+export function assertDaySubjectLimits(
+  days: ManualCycleDayInput[],
+  subjectsPerDay?: number
+): void {
+  const max = effectiveSubjectsPerDayCap(subjectsPerDay)
+  if (max == null) return
+
+  for (const day of days) {
+    const distinct = new Set(day.blocks.map((b) => b.subject_id)).size
+    if (distinct > max) {
+      throw new Error(
+        `Dia ${day.day_index + 1} tem ${distinct} matérias distintas, acima do limite de ${max}.`
+      )
+    }
+  }
 }
 
 function sumMinutesPerWeek(weekday_limits: WeekdayLimits[]): number {
@@ -130,7 +198,7 @@ export function computeCycleStats(input: {
 
   const queue = buildFullSessionQueue(subjects)
   const totalMinutesRequired = queue.reduce(
-    (s, q) => s + (q.estimated_minutes || defaultMinutes),
+    (s, q) => s + (q.estimated_minutes ?? defaultMinutes),
     0
   )
   const minutesPerWeek = sumMinutesPerWeek(weekday_limits)
@@ -315,7 +383,7 @@ function plannedSessionToCycleBlock(
   sortOrder: number,
   defaultBlockMinutes: number
 ): Omit<StudyCycleBlock, "id" | "cycle_id"> {
-  const blockMinutes = session.estimated_minutes || defaultBlockMinutes
+  const blockMinutes = session.estimated_minutes ?? defaultBlockMinutes
   const manual = isManualSession(session)
   return {
     day_index: dayIndex,
@@ -345,7 +413,9 @@ export function distributeSessionsToDays(
   if (!active.length || !queue.length) return []
 
   const maxSubjectsPerDay =
-    subjectsPerDay != null && subjectsPerDay > 0
+    subjectsPerDay != null &&
+    Number.isFinite(subjectsPerDay) &&
+    subjectsPerDay > 0
       ? Math.max(1, Math.floor(subjectsPerDay))
       : Number.POSITIVE_INFINITY
 
@@ -364,7 +434,7 @@ export function distributeSessionsToDays(
 
     while (sessionIdx < queue.length) {
       const session = queue[sessionIdx]
-      const blockMinutes = session.estimated_minutes || defaultBlockMinutes
+      const blockMinutes = session.estimated_minutes ?? defaultBlockMinutes
       const isNewSubject = !subjectsInDay.has(session.subject_id)
 
       if (isNewSubject && subjectsInDay.size >= maxSubjectsPerDay) {
@@ -436,10 +506,17 @@ export function generateFullCycle(input: GenerateCycleInput): GenerateCycleResul
     input.subjects_per_day
   )
 
+  assertDaySubjectLimits(days, input.subjects_per_day)
+  const distribution_stats = computeDayDistributionStats(
+    days,
+    input.subjects_per_day
+  )
+
   return {
     stats,
     days,
     total_days: days.length,
+    distribution_stats,
   }
 }
 

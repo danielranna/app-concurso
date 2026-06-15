@@ -107,6 +107,13 @@ export default function CicloPlanejarPage() {
     if (!userId) return
     setGenerating(true)
     try {
+      const ciclo = await fetch(`/api/ciclo?user_id=${userId}`).then((r) =>
+        r.json()
+      )
+      const freshSubjectsPerDay =
+        ciclo.preferences?.subjects_per_cycle_day ?? subjectsPerDay
+      setSubjectsPerDay(freshSubjectsPerDay)
+
       const res = await fetch("/api/ciclo/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -116,7 +123,7 @@ export default function CicloPlanejarPage() {
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
           planning_mode: mode,
-          subjects_per_day: subjectsPerDay,
+          subjects_per_day: freshSubjectsPerDay,
         }),
       })
       const data = await res.json()

@@ -2,7 +2,7 @@
 
 import type { StudyCycle, StudyCycleBlock } from "@/lib/study-cycle-types"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
-import { groupDaysIntoWeeks } from "@/lib/study-cycle-week-utils"
+import { groupDaysIntoWeeks, getDayCellSummary } from "@/lib/study-cycle-week-utils"
 
 const SUBJECT_COLORS = [
   "bg-teal-100 border-teal-200 text-teal-900",
@@ -28,9 +28,16 @@ export default function WeekGrid({ cycle }: Props) {
   )
 
   const weeks = groupDaysIntoWeeks(cycle.days, cycle.weekday_limits)
+  const subjectsPerDayLimit = cycle.subjects_per_day
 
   return (
     <div className="space-y-6">
+      {subjectsPerDayLimit != null && subjectsPerDayLimit > 0 && (
+        <p className="text-xs text-slate-500">
+          Máximo configurado: {subjectsPerDayLimit} matérias distintas por dia de
+          estudo
+        </p>
+      )}
       {weeks.map((week, wi) => (
         <section key={wi} className="rounded-xl border border-slate-200 bg-white p-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-700">
@@ -39,6 +46,7 @@ export default function WeekGrid({ cycle }: Props) {
           <div className="grid gap-2 sm:grid-cols-7">
             {[0, 1, 2, 3, 4, 5, 6].map((wd) => {
               const day = week.find((d) => d.weekday === wd)
+              const summary = day ? getDayCellSummary(day) : null
               return (
                 <div
                   key={wd}
@@ -47,8 +55,16 @@ export default function WeekGrid({ cycle }: Props) {
                   <p className="mb-1 text-[10px] font-medium uppercase text-slate-400">
                     {WEEKDAY_LABELS[wd]}
                   </p>
-                  {day ? (
+                  {day && summary ? (
                     <div className="space-y-1">
+                      <div className="mb-1 space-y-0.5">
+                        <p className="text-[9px] font-semibold text-slate-600">
+                          {summary.dayLabel}
+                        </p>
+                        <p className="text-[8px] text-slate-400">
+                          {summary.countLabel}
+                        </p>
+                      </div>
                       {day.blocks.map((block, bi) => (
                         <BlockCard
                           key={bi}

@@ -9,7 +9,7 @@ import {
 } from "@react-pdf/renderer"
 import type { CycleStats } from "./study-cycle-deadline-planner"
 import { WEEKDAY_LABELS } from "./study-cycle-planner"
-import { groupDaysIntoWeeks } from "./study-cycle-week-utils"
+import { groupDaysIntoWeeks, getDayCellSummary } from "./study-cycle-week-utils"
 import type {
   StudyCycle,
   StudyCycleBlock,
@@ -95,7 +95,8 @@ const styles = StyleSheet.create({
     color: "#64748b",
     textTransform: "uppercase",
   },
-  cellDayLabel: { fontSize: 6, color: "#94a3b8", marginBottom: 2 },
+  cellDayLabel: { fontSize: 6, fontWeight: "bold", color: "#475569", marginBottom: 1 },
+  dayCount: { fontSize: 5, color: "#94a3b8", marginBottom: 2 },
   blockCard: {
     borderWidth: 1,
     borderRadius: 2,
@@ -367,10 +368,17 @@ function ScheduleSection({ cycle }: { cycle: StudyCycle }) {
   )
 
   const weeks = groupDaysIntoWeeks(cycle.days, cycle.weekday_limits)
+  const subjectsPerDayLimit = cycle.subjects_per_day
 
   return (
     <View>
       <Text style={styles.sectionTitle}>Grade do ciclo</Text>
+      {subjectsPerDayLimit != null && subjectsPerDayLimit > 0 ? (
+        <Text style={styles.note}>
+          Máximo configurado: {subjectsPerDayLimit} matérias distintas por dia de
+          estudo
+        </Text>
+      ) : null}
       <View style={styles.legend}>
         {cycle.subjects.map((s, i) => {
           const c = SUBJECT_COLORS[i % SUBJECT_COLORS.length]
@@ -395,20 +403,27 @@ function ScheduleSection({ cycle }: { cycle: StudyCycle }) {
           <View style={styles.gridRow}>
             {[0, 1, 2, 3, 4, 5, 6].map((wd) => {
               const day = week.find((d) => d.weekday === wd)
+              const summary = day ? getDayCellSummary(day) : null
               return (
                 <View key={wd} style={styles.gridCell}>
-                  {day ? (
-                    day.blocks.map((block, bi) => (
-                      <BlockCardPdf
-                        key={bi}
-                        block={block}
-                        color={
-                          colorMap.get(block.subject_id) ?? SUBJECT_COLORS[0]
-                        }
-                        weight={weightMap.get(block.subject_id) ?? 1}
-                        subjectName={block.subject_name}
-                      />
-                    ))
+                  {day && summary ? (
+                    <>
+                      <View style={{ marginBottom: 2 }}>
+                        <Text style={styles.cellDayLabel}>{summary.dayLabel}</Text>
+                        <Text style={styles.dayCount}>{summary.countLabel}</Text>
+                      </View>
+                      {day.blocks.map((block, bi) => (
+                        <BlockCardPdf
+                          key={bi}
+                          block={block}
+                          color={
+                            colorMap.get(block.subject_id) ?? SUBJECT_COLORS[0]
+                          }
+                          weight={weightMap.get(block.subject_id) ?? 1}
+                          subjectName={block.subject_name}
+                        />
+                      ))}
+                    </>
                   ) : (
                     <Text style={styles.emptyCell}>—</Text>
                   )}

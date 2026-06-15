@@ -2,6 +2,20 @@ import type { StudyCycle, StudyCycleBlock } from "./study-cycle-types"
 
 export type WeekDay = StudyCycle["days"][0] & { blocks: StudyCycleBlock[] }
 
+export function getDayCellSummary(day: {
+  day_index: number
+  blocks: { subject_id: string }[]
+}): { dayLabel: string; countLabel: string; subjectCount: number; blockCount: number } {
+  const subjectCount = new Set(day.blocks.map((b) => b.subject_id)).size
+  const blockCount = day.blocks.length
+  return {
+    dayLabel: `Dia ${day.day_index + 1}`,
+    countLabel: `${subjectCount} mat. · ${blockCount} blocos`,
+    subjectCount,
+    blockCount,
+  }
+}
+
 export function groupDaysIntoWeeks(
   days: StudyCycle["days"],
   weekdayLimits: StudyCycle["weekday_limits"]

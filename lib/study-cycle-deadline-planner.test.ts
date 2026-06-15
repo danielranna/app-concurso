@@ -6,6 +6,7 @@ import {
   computeTotalSessions,
   distributeSessionsToDays,
   generateFullCycle,
+  resolveSubjectsPerDayLimit,
 } from "./study-cycle-deadline-planner"
 import { defaultWeekdayLimits } from "./study-cycle-planner"
 import type { SubjectPlanInput } from "./study-cycle-deadline-planner"
@@ -168,6 +169,31 @@ describe("generateFullCycle", () => {
       const distinct = new Set(day.blocks.map((b) => b.subject_id)).size
       expect(distinct).toBeLessThanOrEqual(6)
     }
+    const firstDaySubjects = new Set(
+      result.days[0].blocks.map((b) => b.subject_id)
+    ).size
+    expect(firstDaySubjects).toBe(6)
+    expect(result.days[0].blocks.length).toBeLessThanOrEqual(8)
+    expect(result.distribution_stats.subjects_per_day_used).toBe(6)
+    expect(result.distribution_stats.max_distinct_subjects_in_any_day).toBeLessThanOrEqual(
+      6
+    )
     expect(result.days.reduce((s, d) => s + d.blocks.length, 0)).toBe(21)
+  })
+})
+
+describe("resolveSubjectsPerDayLimit", () => {
+  it("prefers valid body override", () => {
+    expect(resolveSubjectsPerDayLimit(8, 6)).toBe(8)
+  })
+
+  it("falls back to prefs when body is invalid", () => {
+    expect(resolveSubjectsPerDayLimit(undefined, 6)).toBe(6)
+    expect(resolveSubjectsPerDayLimit("abc", 6)).toBe(6)
+    expect(resolveSubjectsPerDayLimit(NaN, 6)).toBe(6)
+  })
+
+  it("defaults to 2 when nothing valid", () => {
+    expect(resolveSubjectsPerDayLimit(undefined, undefined)).toBe(2)
   })
 })
