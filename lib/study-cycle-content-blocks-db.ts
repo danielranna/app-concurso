@@ -1,8 +1,14 @@
 import { supabaseServer } from "./supabase-server"
+import { fetchTecSubjectTree } from "./tec-subject-tree"
+import type { TecSubjectTreeResponse } from "./tec-subject-tree-types"
 import type {
   StudyCycleContentBlock,
   StudyCycleContentBlockTopic,
 } from "./study-cycle-types"
+import { topicKey, type TecTopicRef } from "./study-cycle-topic-utils"
+
+export type { TecTopicRef } from "./study-cycle-topic-utils"
+export { flattenFolderTopics, topicKey } from "./study-cycle-topic-utils"
 
 export async function loadContentBlocksForCycle(
   cycleId: string
@@ -282,4 +288,90 @@ export async function getTecTopicsForSubject(
   return topics.sort((a, b) =>
     a.tec_subject.localeCompare(b.tec_subject) || a.tec_topic.localeCompare(b.tec_topic)
   )
+}
+
+export async function getTecSubjectsForSubject(
+  userId: string,
+  subjectId: string
+): Promise<string[]> {
+  const { data: mappings } = await supabaseServer
+    .from("tec_taxonomy_mappings")
+    .select("tec_subject, tec_topic")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+
+  if (!mappings?.length) return []
+
+  const fromSubjectLevel = mappings
+    .filter((m) => !m.tec_topic)
+    .map((m) => m.tec_subject.trim())
+    .filter(Boolean)
+
+  const fromTopics = mappings
+    .filter((m) => m.tec_topic)
+    .map((m) => m.tec_subject.trim())
+    .filter(Boolean)
+
+  return [...new Set([...fromSubjectLevel, ...fromTopics])]
+}
+
+export async function getTecTopicTreeForSubject(
+  userId: string,
+  subjectId: string
+): Promise<{ trees: TecSubjectTreeResponse[]; flat_topics: TecTopicRef[] }> {
+  const tecSubjects = await getTecSubjectsForSubject(userId, subjectId)
+  const flat_topics = await getTecTopicsForSubject(userId, subjectId)
+
+  if (!tecSubjects.length) {
+    return { trees: [], flat_topics }
+  }
+
+  const trees: TecSubjectTreeResponse[] = []
+  for (const tecSubject of tecSubjects) {
+    const tree = await fetchTecSubjectTree(userId, tecSubject)
+    if (tree.nodes.length || tree.ungrouped.length) {
+      trees.push(tree)
+    }
+  }
+
+  return { trees, flat_topics }
+}
+
+export async function addTopicsToContentBlock(
+  blockId: string,
+  topics: TecTopicRef[],
+  startSortOrder = 0
+): Promise<{ added: number; topics: StudyCycleContentBlockTopic[] }> {
+  if (!topics.length) return { added: 0, topics: [] }
+
+  const unique = new Map<string, TecTopicRef>()
+  for (const t of topics) {
+    const key = topicKey(t)
+    if (!unique.has(key)) unique.set(key, t)
+  }
+
+  const rows = [...unique.values()].map((t, i) => ({
+    content_block_id: blockId,
+    tec_subject: t.tec_subject,
+    tec_topic: t.tec_topic ?? "",
+    sort_order: startSortOrder + i,
+  }))
+
+  const { data, error } = await supabaseServer
+    .from("study_cycle_content_block_topics")
+    .upsert(rows, { onConflict: "content_block_id,tec_subject,tec_topic" })
+    .select("*")
+
+  if (error) throw new Error(error.message)
+
+  return {
+    added: data?.length ?? 0,
+    topics: (data ?? []).map((t) => ({
+      id: t.id,
+      content_block_id: t.content_block_id,
+      tec_subject: t.tec_subject,
+      tec_topic: t.tec_topic ?? "",
+      sort_order: t.sort_order,
+    })),
+  }
 }

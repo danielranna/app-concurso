@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import {
   addTopicToContentBlock,
+  addTopicsToContentBlock,
   createContentBlock,
   deleteContentBlock,
   ensureDraftCycle,
+  getTecTopicTreeForSubject,
   getTecTopicsForSubject,
   loadContentBlocksForCycle,
   removeTopicFromContentBlock,
@@ -18,12 +20,18 @@ export async function GET(req: Request) {
   const cycle_id = searchParams.get("cycle_id")
   const subject_id = searchParams.get("subject_id")
   const tec_topics = searchParams.get("tec_topics")
+  const tec_tree = searchParams.get("tec_tree")
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
   try {
+    if (tec_tree && subject_id) {
+      const result = await getTecTopicTreeForSubject(user_id, subject_id)
+      return NextResponse.json(result)
+    }
+
     if (tec_topics && subject_id) {
       const topics = await getTecTopicsForSubject(user_id, subject_id)
       return NextResponse.json({ topics })
@@ -64,6 +72,7 @@ export async function POST(req: Request) {
     tec_subject,
     tec_topic,
     topic_id,
+    topics,
     subjects,
   } = body
 
@@ -105,6 +114,15 @@ export async function POST(req: Request) {
         sort_order ?? 0
       )
       return NextResponse.json({ topic })
+    }
+
+    if (action === "add_topics" && block_id && Array.isArray(topics)) {
+      const result = await addTopicsToContentBlock(
+        block_id,
+        topics as { tec_subject: string; tec_topic: string }[],
+        sort_order ?? 0
+      )
+      return NextResponse.json(result)
     }
 
     return NextResponse.json({ error: "action inválida" }, { status: 400 })

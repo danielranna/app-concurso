@@ -1,12 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
   ArrowLeft,
-  GripVertical,
   Loader2,
   Plus,
   Trash2,
@@ -17,10 +16,13 @@ import type {
   StudyCycleContentBlockTopic,
   StudyCycleSubject,
 } from "@/lib/study-cycle-types"
-
-type TecTopic = { tec_subject: string; tec_topic: string }
-
-const DRAG_TYPE = "application/x-tec-topic"
+import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
+import { topicKey, type TecTopicRef } from "@/lib/study-cycle-topic-utils"
+import TecTopicTree, {
+  DRAG_TYPE,
+  dragPayloadToTopics,
+  parseDragPayload,
+} from "@/components/ciclo/TecTopicTree"
 
 export default function CicloBlocosPage() {
   const router = useRouter()
@@ -28,10 +30,12 @@ export default function CicloBlocosPage() {
   const [cycleSubjects, setCycleSubjects] = useState<StudyCycleSubject[]>([])
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null)
   const [blocks, setBlocks] = useState<StudyCycleContentBlock[]>([])
-  const [tecTopics, setTecTopics] = useState<TecTopic[]>([])
+  const [trees, setTrees] = useState<TecSubjectTreeResponse[]>([])
+  const [flatTopics, setFlatTopics] = useState<TecTopicRef[]>([])
   const [cycleId, setCycleId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingTopics, setLoadingTopics] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
 
   const loadBlocks = useCallback(async (uid: string, cid?: string | null) => {
     const q = cid ? `user_id=${uid}&cycle_id=${cid}` : `user_id=${uid}`
@@ -42,14 +46,15 @@ export default function CicloBlocosPage() {
     return d.blocks ?? []
   }, [])
 
-  const loadTopics = useCallback(async (uid: string, subjectId: string) => {
+  const loadTopicTree = useCallback(async (uid: string, subjectId: string) => {
     setLoadingTopics(true)
     try {
       const r = await fetch(
-        `/api/ciclo/content-blocks?user_id=${uid}&subject_id=${subjectId}&tec_topics=1`
+        `/api/ciclo/content-blocks?user_id=${uid}&subject_id=${subjectId}&tec_tree=1`
       )
       const d = await r.json()
-      setTecTopics(d.topics ?? [])
+      setTrees(d.trees ?? [])
+      setFlatTopics(d.flat_topics ?? [])
     } finally {
       setLoadingTopics(false)
     }
@@ -71,27 +76,34 @@ export default function CicloBlocosPage() {
       if (subs.length) {
         setSelectedSubjectId(subs[0].subject_id)
         await loadBlocks(user.id, ciclo.cycle?.id)
-        await loadTopics(user.id, subs[0].subject_id)
+        await loadTopicTree(user.id, subs[0].subject_id)
       }
       setLoading(false)
     })
-  }, [router, loadBlocks, loadTopics])
+  }, [router, loadBlocks, loadTopicTree])
 
   useEffect(() => {
     if (userId && selectedSubjectId) {
-      loadTopics(userId, selectedSubjectId)
+      loadTopicTree(userId, selectedSubjectId)
     }
-  }, [userId, selectedSubjectId, loadTopics])
+  }, [userId, selectedSubjectId, loadTopicTree])
 
   const subjectBlocks = blocks.filter((b) => b.subject_id === selectedSubjectId)
-  const assignedTopics = new Set(
-    subjectBlocks.flatMap((b) =>
-      b.topics.map((t) => `${t.tec_subject}\0${t.tec_topic}`)
-    )
-  )
-  const availableTopics = tecTopics.filter(
-    (t) => !assignedTopics.has(`${t.tec_subject}\0${t.tec_topic}`)
-  )
+
+  const assignedKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const b of subjectBlocks) {
+      for (const t of b.topics) {
+        keys.add(topicKey({ tec_subject: t.tec_subject, tec_topic: t.tec_topic }))
+      }
+    }
+    return keys
+  }, [subjectBlocks])
+
+  function showToast(msg: string) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
 
   async function createBlock() {
     if (!userId || !selectedSubjectId) return
@@ -115,24 +127,35 @@ export default function CicloBlocosPage() {
     }
   }
 
-  async function addTopicToBlock(blockId: string, topic: TecTopic) {
-    if (!userId) return
+  async function addTopicsToBlock(
+    blockId: string,
+    topics: TecTopicRef[],
+    blockName?: string
+  ) {
+    if (!userId || !topics.length) return
     const block = blocks.find((b) => b.id === blockId)
     const res = await fetch("/api/ciclo/content-blocks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
-        action: "add_topic",
+        action: "add_topics",
         block_id: blockId,
-        tec_subject: topic.tec_subject,
-        tec_topic: topic.tec_topic,
+        topics,
         sort_order: block?.topics.length ?? 0,
       }),
     })
     const data = await res.json()
     if (data.error) alert(data.error)
-    else await loadBlocks(userId, cycleId)
+    else {
+      const n = data.added ?? topics.length
+      showToast(
+        n === 1
+          ? `1 assunto adicionado${blockName ? ` em ${blockName}` : ""}`
+          : `${n} assuntos adicionados${blockName ? ` em ${blockName}` : ""}`
+      )
+      await loadBlocks(userId, cycleId)
+    }
   }
 
   async function removeTopic(topicId: string) {
@@ -173,16 +196,15 @@ export default function CicloBlocosPage() {
     )
   }
 
-  function handleDrop(blockId: string, e: React.DragEvent) {
+  function handleDrop(blockId: string, blockName: string, e: React.DragEvent) {
     e.preventDefault()
     const raw = e.dataTransfer.getData(DRAG_TYPE)
-    if (!raw) return
-    try {
-      const topic = JSON.parse(raw) as TecTopic
-      addTopicToBlock(blockId, topic)
-    } catch {
-      /* ignore */
-    }
+    const payload = parseDragPayload(raw)
+    if (!payload) return
+    const topics = dragPayloadToTopics(payload).filter(
+      (t) => !assignedKeys.has(topicKey(t))
+    )
+    if (topics.length) addTopicsToBlock(blockId, topics, blockName)
   }
 
   if (loading) {
@@ -204,6 +226,9 @@ export default function CicloBlocosPage() {
     )
   }
 
+  const selectedName =
+    cycleSubjects.find((s) => s.subject_id === selectedSubjectId)?.subject_name ?? ""
+
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <Link
@@ -217,17 +242,23 @@ export default function CicloBlocosPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Blocos de estudo</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Arraste assuntos do banco para montar blocos em cada matéria.
+          Arraste assuntos ou pastas inteiras do banco para montar blocos.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      {toast && (
+        <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">
+          {toast}
+        </div>
+      )}
+
+      <div className="grid h-[min(70vh,calc(100vh-11rem))] min-h-[24rem] gap-4 lg:grid-cols-12">
         {/* Matérias */}
-        <aside className="lg:col-span-2">
-          <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">
+        <aside className="flex min-h-0 flex-col lg:col-span-2">
+          <h2 className="mb-2 shrink-0 text-xs font-semibold uppercase text-slate-500">
             Matérias
           </h2>
-          <ul className="space-y-1">
+          <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {cycleSubjects.map((s) => {
               const count = blocks.filter((b) => b.subject_id === s.subject_id).length
               const active = selectedSubjectId === s.subject_id
@@ -251,77 +282,65 @@ export default function CicloBlocosPage() {
           </ul>
         </aside>
 
-        {/* Assuntos disponíveis */}
-        <section className="rounded-xl border border-slate-200 bg-white p-3 lg:col-span-4">
-          <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">
+        {/* Assuntos */}
+        <section className="flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-3 lg:col-span-4">
+          <h2 className="mb-2 shrink-0 text-xs font-semibold uppercase text-slate-500">
             Assuntos do banco
           </h2>
-          {loadingTopics ? (
-            <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" />
-          ) : availableTopics.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              {tecTopics.length === 0
-                ? "Mapeie esta matéria ao banco TEC em Questões → Mapeamento."
-                : "Todos os assuntos já estão em blocos."}
-            </p>
-          ) : (
-            <ul className="max-h-[28rem] space-y-1 overflow-y-auto">
-              {availableTopics.map((t) => (
-                <li
-                  key={`${t.tec_subject}:${t.tec_topic}`}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(t))
-                  }}
-                  className="flex cursor-grab items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-1.5 text-sm active:cursor-grabbing"
-                >
-                  <GripVertical className="h-3 w-3 shrink-0 text-slate-400" />
-                  <span className="truncate">{t.tec_topic || t.tec_subject}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {loadingTopics ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              </div>
+            ) : (
+              <TecTopicTree
+                trees={trees}
+                flatTopics={flatTopics}
+                assignedKeys={assignedKeys}
+              />
+            )}
+          </div>
         </section>
 
         {/* Blocos */}
-        <section className="space-y-3 lg:col-span-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase text-slate-500">
-              Blocos —{" "}
-              {cycleSubjects.find((s) => s.subject_id === selectedSubjectId)
-                ?.subject_name ?? ""}
+        <section className="flex min-h-0 flex-col lg:col-span-6">
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+            <h2 className="truncate text-xs font-semibold uppercase text-slate-500">
+              Blocos — {selectedName}
             </h2>
             <button
               type="button"
               onClick={createBlock}
-              className="inline-flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700"
             >
               <Plus className="h-3 w-3" />
               Novo bloco
             </button>
           </div>
 
-          {subjectBlocks.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              Crie um bloco e arraste assuntos para cá.
-            </div>
-          ) : (
-            subjectBlocks.map((block) => (
-              <BlockCard
-                key={block.id}
-                block={block}
-                onDrop={(e) => handleDrop(block.id, e)}
-                onRemoveTopic={removeTopic}
-                onDelete={() => deleteBlock(block.id)}
-                onRename={(name) => updateBlockName(block.id, name)}
-                onMinutes={(m) => updateBlockMinutes(block.id, m)}
-              />
-            ))
-          )}
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            {subjectBlocks.length === 0 ? (
+              <div className="flex h-full min-h-[8rem] items-center justify-center rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+                Crie um bloco e arraste assuntos ou pastas para cá.
+              </div>
+            ) : (
+              subjectBlocks.map((block) => (
+                <BlockCard
+                  key={block.id}
+                  block={block}
+                  onDrop={(e) => handleDrop(block.id, block.name, e)}
+                  onRemoveTopic={removeTopic}
+                  onDelete={() => deleteBlock(block.id)}
+                  onRename={(name) => updateBlockName(block.id, name)}
+                  onMinutes={(m) => updateBlockMinutes(block.id, m)}
+                />
+              ))
+            )}
+          </div>
 
           <Link
             href="/ciclo/planejar"
-            className="inline-block text-sm text-teal-700 underline"
+            className="mt-2 shrink-0 inline-block text-sm text-teal-700 underline"
           >
             Próximo: planejar ciclo →
           </Link>
@@ -368,9 +387,9 @@ function BlockCard({
           type="text"
           value={block.name}
           onChange={(e) => onRename(e.target.value)}
-          className="flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium"
+          className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium"
         />
-        <label className="flex items-center gap-1 text-xs text-slate-500">
+        <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
           min
           <input
             type="number"
@@ -384,7 +403,7 @@ function BlockCard({
         <button
           type="button"
           onClick={onDelete}
-          className="text-red-500 hover:text-red-700"
+          className="shrink-0 text-red-500 hover:text-red-700"
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -392,10 +411,14 @@ function BlockCard({
 
       {block.topics.length === 0 ? (
         <p className="py-4 text-center text-xs text-slate-400">
-          Solte assuntos aqui
+          Solte assuntos ou uma pasta aqui
         </p>
       ) : (
-        <ul className="flex flex-wrap gap-1">
+        <ul
+          className={`flex flex-wrap gap-1 ${
+            block.topics.length > 8 ? "max-h-24 overflow-y-auto" : ""
+          }`}
+        >
           {block.topics.map((t: StudyCycleContentBlockTopic) => (
             <li
               key={t.id ?? `${t.tec_subject}:${t.tec_topic}`}
