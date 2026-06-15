@@ -142,4 +142,32 @@ describe("generateFullCycle", () => {
     }
     expect(days.reduce((s, d) => s + d.blocks.length, 0)).toBe(9)
   })
+
+  it("caps distinct subjects per day with realistic minutes (mini-ciclo burst)", () => {
+    const limits = defaultWeekdayLimits().map((w) =>
+      w.weekday >= 1 && w.weekday <= 6
+        ? { ...w, active: true, minutes: 360 }
+        : { ...w, active: false, minutes: 0 }
+    )
+    const subjects: SubjectPlanInput[] = Array.from({ length: 21 }, (_, i) => ({
+      subject_id: `s${i}`,
+      subject_name: `Mat ${i}`,
+      weight: 1,
+      blocks: [makeBlock(`b${i}`, `s${i}`, `Bloco ${i}`, 0)],
+    }))
+    const result = generateFullCycle({
+      subjects,
+      weekday_limits: limits,
+      target_weeks: 12,
+      default_block_minutes: 45,
+      subjects_per_day: 6,
+      planning_mode: "deadline_driven",
+    })
+
+    for (const day of result.days) {
+      const distinct = new Set(day.blocks.map((b) => b.subject_id)).size
+      expect(distinct).toBeLessThanOrEqual(6)
+    }
+    expect(result.days.reduce((s, d) => s + d.blocks.length, 0)).toBe(21)
+  })
 })

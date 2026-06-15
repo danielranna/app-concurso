@@ -301,12 +301,12 @@ export async function saveManualCycle(
   const total_days = input.days.length
   const weekday_limits = input.weekday_limits ?? defaultWeekdayLimits()
 
-  const maxSubjectsPerDay =
+  const maxSubjectsPerDay = Math.max(
+    1,
     input.subjects_per_day ??
-    Math.max(
-      ...input.days.map((d) => new Set(d.blocks.map((b) => b.subject_id)).size),
-      1
-    )
+      (await getCyclePreferences(userId)).subjects_per_cycle_day ??
+      2
+  )
 
   if (cycleId) {
     await supabaseServer

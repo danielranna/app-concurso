@@ -46,9 +46,7 @@ export default function CicloPlanejarPage() {
       if (c?.target_weeks) setTargetWeeks(c.target_weeks)
       if (c?.default_block_minutes) setBlockMinutes(c.default_block_minutes)
       if (c?.weekday_limits?.length) setWeekdayLimits(c.weekday_limits)
-      setSubjectsPerDay(
-        ciclo.preferences?.subjects_per_cycle_day ?? c?.subjects_per_day ?? 2
-      )
+      setSubjectsPerDay(ciclo.preferences?.subjects_per_cycle_day ?? 2)
     } finally {
       setLoading(false)
     }

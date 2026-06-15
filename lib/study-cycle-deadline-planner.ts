@@ -346,7 +346,7 @@ export function distributeSessionsToDays(
 
   const maxSubjectsPerDay =
     subjectsPerDay != null && subjectsPerDay > 0
-      ? Math.max(1, subjectsPerDay)
+      ? Math.max(1, Math.floor(subjectsPerDay))
       : Number.POSITIVE_INFINITY
 
   const days: ManualCycleDayInput[] = []
@@ -365,14 +365,13 @@ export function distributeSessionsToDays(
     while (sessionIdx < queue.length) {
       const session = queue[sessionIdx]
       const blockMinutes = session.estimated_minutes || defaultBlockMinutes
-      if (blocks.length > 0 && usedMinutes + blockMinutes > maxMinutes) break
-
       const isNewSubject = !subjectsInDay.has(session.subject_id)
-      if (
-        blocks.length > 0 &&
-        isNewSubject &&
-        subjectsInDay.size >= maxSubjectsPerDay
-      ) {
+
+      if (isNewSubject && subjectsInDay.size >= maxSubjectsPerDay) {
+        break
+      }
+
+      if (blocks.length > 0 && usedMinutes + blockMinutes > maxMinutes) {
         break
       }
 
@@ -384,13 +383,26 @@ export function distributeSessionsToDays(
       usedMinutes += blockMinutes
       sessionIdx++
 
-      if (usedMinutes >= maxMinutes) break
+      if (usedMinutes >= maxMinutes) {
+        break
+      }
     }
 
     if (blocks.length === 0 && sessionIdx < queue.length) {
       const session = queue[sessionIdx]
-      blocks.push(plannedSessionToCycleBlock(session, dayIndex, 0, defaultBlockMinutes))
-      sessionIdx++
+      const wouldBeNew =
+        !subjectsInDay.has(session.subject_id) &&
+        subjectsInDay.size >= maxSubjectsPerDay
+      if (!wouldBeNew) {
+        blocks.push(
+          plannedSessionToCycleBlock(session, dayIndex, 0, defaultBlockMinutes)
+        )
+        sessionIdx++
+      }
+    }
+
+    if (blocks.length === 0) {
+      break
     }
 
     days.push({

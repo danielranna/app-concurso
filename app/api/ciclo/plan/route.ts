@@ -43,7 +43,6 @@ export async function POST(req: Request) {
       Number(
         subjects_per_day ??
           prefs?.subjects_per_cycle_day ??
-          cycle.subjects_per_day ??
           2
       )
 
