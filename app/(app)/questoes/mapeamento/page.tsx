@@ -80,28 +80,15 @@ export default function MapeamentoPage() {
   const [mappedRows, setMappedRows] = useState<MappedRow[]>([])
 
   const reload = useCallback(async (uid: string) => {
-    const [overview, t, g, p, m] = await Promise.all([
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=subjects_overview`).then(
-        (r) => r.json()
-      ),
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics_grouped`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=progress`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=mapped`).then((r) =>
-        r.json()
-      ),
-    ])
-    setSubjectsOverview(Array.isArray(overview) ? overview : [])
-    setUnmappedTopics(Array.isArray(t) ? t : [])
-    setUnmappedTopicGroups(Array.isArray(g) ? g : [])
-    setProgress(Array.isArray(p) ? p : [])
-    setMappedRows(Array.isArray(m) ? m : [])
+    const bundle = await fetch(
+      `/api/questions/mappings?user_id=${uid}&unmapped=bundle`
+    ).then((r) => r.json())
+
+    setSubjectsOverview(Array.isArray(bundle.subjects_overview) ? bundle.subjects_overview : [])
+    setUnmappedTopics(Array.isArray(bundle.topics) ? bundle.topics : [])
+    setUnmappedTopicGroups(Array.isArray(bundle.topics_grouped) ? bundle.topics_grouped : [])
+    setProgress(Array.isArray(bundle.progress) ? bundle.progress : [])
+    setMappedRows(Array.isArray(bundle.mapped) ? bundle.mapped : [])
   }, [])
 
   useEffect(() => {

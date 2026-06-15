@@ -4,7 +4,6 @@ import { fetchQuestionTaxonomyForUser } from "./question-taxonomy"
 import { flattenFolderTopics } from "./study-cycle-topic-utils"
 import {
   fetchTecSubjectTree,
-  listTecSubjectSummaries,
 } from "./tec-subject-tree"
 import type { TecSubjectNode } from "./tec-subject-tree-types"
 import { mirrorTecTreeToContentIndex } from "./tec-subject-tree"
@@ -481,10 +480,15 @@ export async function listAllTecSubjectsOverview(
     .eq("user_id", userId)
   const subjectNames = new Map((subjects ?? []).map((s) => [s.id, s.name]))
 
-  const summaries = await listTecSubjectSummaries(userId)
-  const hasTreeMap = new Map(
-    summaries.map((s) => [normKey(s.tec_subject), s.has_tree])
-  )
+  const { data: treeRows } = await supabaseServer
+    .from("tec_subject_nodes")
+    .select("tec_subject")
+    .eq("user_id", userId)
+  const hasTreeMap = new Map<string, boolean>()
+  for (const r of treeRows ?? []) {
+    const key = normKey(r.tec_subject)
+    if (key) hasTreeMap.set(key, true)
+  }
 
   const mappedTopics = new Set(
     mappings
@@ -542,6 +546,171 @@ export async function listAllTecSubjectsOverview(
       }
     })
     .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+}
+
+export type MappingBundle = {
+  subjects_overview: TecSubjectOverview[]
+  topics: TecTopicGroup[]
+  topics_grouped: { tec_subject: string; topics: TecTopicGroup[] }[]
+  progress: {
+    tec_subject: string
+    total_topics: number
+    mapped_topics: number
+    subject_mapped: boolean
+  }[]
+  mapped: Awaited<ReturnType<typeof listMappedTopics>>
+}
+
+/** Uma ida ao banco de taxonomia + monta todos os dados da tela de mapeamento. */
+export async function loadMappingBundle(userId: string): Promise<MappingBundle> {
+  const [questions, mappings, subjectsRes, treeRows, topicsRes] = await Promise.all([
+    fetchQuestionTaxonomyForUser(userId),
+    loadMappings(userId),
+    supabaseServer.from("subjects").select("id, name").eq("user_id", userId),
+    supabaseServer.from("tec_subject_nodes").select("tec_subject").eq("user_id", userId),
+    supabaseServer.from("topics").select("id, name, subject_id").eq("user_id", userId),
+  ])
+
+  const subjectNames = new Map((subjectsRes.data ?? []).map((s) => [s.id, s.name]))
+  const topicNames = new Map((topicsRes.data ?? []).map((t) => [t.id, t.name]))
+  const hasTreeSet = new Set(
+    (treeRows.data ?? []).map((r) => normKey(r.tec_subject)).filter(Boolean)
+  )
+
+  const subjectLevelByTec = new Map<string, { subject_id: string }>()
+  for (const m of mappings.filter((x) => isSubjectLevelMapping(x.tec_topic))) {
+    subjectLevelByTec.set(normKey(m.tec_subject), { subject_id: m.subject_id })
+  }
+
+  const mappedTopicKeys = new Set(
+    mappings
+      .filter((m) => !isSubjectLevelMapping(m.tec_topic))
+      .map((m) => `${normKey(m.tec_subject)}|||${normKey(m.tec_topic)}`)
+  )
+
+  const subjectGroups = new Map<
+    string,
+    { count: number; sample_statement: string; topics: Set<string> }
+  >()
+
+  for (const q of questions) {
+    const sub = normKey(q.tec_subject ?? "")
+    if (!sub) continue
+    const g = subjectGroups.get(sub) ?? {
+      count: 0,
+      sample_statement: "",
+      topics: new Set<string>(),
+    }
+    g.count++
+    if (!g.sample_statement && q.statement) {
+      g.sample_statement = q.statement.slice(0, 280)
+    }
+    const top = normKey(q.tec_topic ?? "")
+    if (top && assessTecFacetQuality(top) !== "hidden") {
+      g.topics.add(top)
+    }
+    subjectGroups.set(sub, g)
+  }
+
+  const subjects_overview = [...subjectGroups.entries()]
+    .map(([tec_subject, g]) => {
+      const mapped_subject_id = subjectLevelByTec.get(tec_subject)?.subject_id ?? null
+      return {
+        tec_subject,
+        question_count: g.count,
+        sample_statement: g.sample_statement,
+        topics_preview: [...g.topics].slice(0, 5),
+        subject_mapped: Boolean(mapped_subject_id),
+        mapped_subject_id,
+        mapped_subject_name: mapped_subject_id
+          ? subjectNames.get(mapped_subject_id) ?? null
+          : null,
+        mapped_topics: [...g.topics].filter((t) =>
+          mappedTopicKeys.has(`${tec_subject}|||${t}`)
+        ).length,
+        total_topics: g.topics.size,
+        has_tree: hasTreeSet.has(tec_subject),
+      }
+    })
+    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+
+  const topicGroups = new Map<string, TecTopicGroup>()
+  for (const q of questions) {
+    const sub = normKey(q.tec_subject ?? "")
+    const top = normKey(q.tec_topic ?? "")
+    if (!sub || !top || assessTecFacetQuality(top) === "hidden") continue
+    const key = `${sub}|||${top}`
+    if (mappedTopicKeys.has(key)) continue
+
+    const g = topicGroups.get(key) ?? {
+      tec_subject: sub,
+      tec_topic: top,
+      count: 0,
+      sample_statement: "",
+      mapped_subject_id: null,
+      mapped_subject_name: null,
+    }
+    g.count++
+    if (!g.sample_statement && q.statement) {
+      g.sample_statement = q.statement.slice(0, 280)
+    }
+    topicGroups.set(key, g)
+  }
+
+  const topics = [...topicGroups.values()]
+    .map((g) => {
+      const sid = subjectLevelByTec.get(normKey(g.tec_subject))?.subject_id ?? null
+      return {
+        ...g,
+        mapped_subject_id: sid,
+        mapped_subject_name: sid ? subjectNames.get(sid) ?? null : null,
+      }
+    })
+    .sort(
+      (a, b) =>
+        a.tec_subject.localeCompare(b.tec_subject, "pt-BR") ||
+        a.tec_topic.localeCompare(b.tec_topic, "pt-BR")
+    )
+
+  const groupedMap = new Map<string, TecTopicGroup[]>()
+  for (const t of topics) {
+    const list = groupedMap.get(t.tec_subject) ?? []
+    list.push(t)
+    groupedMap.set(t.tec_subject, list)
+  }
+
+  const topics_grouped = [...groupedMap.entries()]
+    .map(([tec_subject, list]) => ({
+      tec_subject,
+      topics: list.sort((a, b) => a.tec_topic.localeCompare(b.tec_topic, "pt-BR")),
+    }))
+    .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+
+  const progress = subjects_overview.map((s) => ({
+    tec_subject: s.tec_subject,
+    total_topics: s.total_topics,
+    mapped_topics: s.mapped_topics,
+    subject_mapped: s.subject_mapped,
+  }))
+
+  const mapped = mappings
+    .map((m) => ({
+      id: m.id,
+      tec_subject: m.tec_subject,
+      tec_topic: m.tec_topic ?? "",
+      is_subject_level: isSubjectLevelMapping(m.tec_topic),
+      subject_id: m.subject_id,
+      subject_name: subjectNames.get(m.subject_id) ?? null,
+      topic_id: m.topic_id,
+      topic_name: m.topic_id ? topicNames.get(m.topic_id) ?? null : null,
+    }))
+    .sort(
+      (a, b) =>
+        a.tec_subject.localeCompare(b.tec_subject, "pt-BR") ||
+        (a.tec_topic ?? "").localeCompare(b.tec_topic ?? "", "pt-BR")
+    )
+
+  return { subjects_overview, topics, topics_grouped, progress, mapped }
 }
 
 function findNodeInTree(nodes: TecSubjectNode[], id: string): TecSubjectNode | null {

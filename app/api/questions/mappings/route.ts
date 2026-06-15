@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { invalidateQuestionTaxonomyCache } from "@/lib/question-taxonomy"
 import { supabaseServer } from "@/lib/supabase-server"
 import {
   listUnmappedTecSubjects,
@@ -7,6 +8,7 @@ import {
   listMappedTopics,
   listAllTecSubjectsOverview,
   getMappingProgress,
+  loadMappingBundle,
   bulkMapTopicsByName,
   bulkMapFolderToSubject,
   bulkMapTopicsToSubject,
@@ -54,6 +56,11 @@ export async function GET(req: Request) {
   if (mode === "subjects_overview") {
     const items = await listAllTecSubjectsOverview(user_id)
     return NextResponse.json(items)
+  }
+
+  if (mode === "bundle") {
+    const bundle = await loadMappingBundle(user_id)
+    return NextResponse.json(bundle)
   }
 
   if (mode === "1") {
@@ -184,6 +191,8 @@ export async function POST(req: Request) {
       { error: e instanceof Error ? e.message : "Erro ao salvar" },
       { status: 400 }
     )
+  } finally {
+    invalidateQuestionTaxonomyCache(user_id)
   }
 }
 
