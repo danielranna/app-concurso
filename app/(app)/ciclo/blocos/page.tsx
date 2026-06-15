@@ -86,7 +86,7 @@ export default function CicloBlocosPage() {
       }
       setLoading(false)
     })
-  }, [router, loadBlocks, loadTopicTree])
+  }, [router, loadBlocks, loadTopicTree, searchParams])
 
   useEffect(() => {
     if (userId && selectedSubjectId) {
