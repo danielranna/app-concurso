@@ -7,6 +7,7 @@ import {
 } from "@/lib/study-cycle-db"
 import { loadContentBlocksForCycle } from "@/lib/study-cycle-content-blocks-db"
 import { defaultWeekdayLimits } from "@/lib/study-cycle-planner"
+import { collectCycleSetupIssues } from "@/lib/study-cycle-setup-validation"
 import type { ManualCycleSaveInput, WeekdayLimits } from "@/lib/study-cycle-types"
 
 export async function POST(req: Request) {
@@ -49,14 +50,12 @@ export async function POST(req: Request) {
         blocks: contentBlocks.filter((b) => b.subject_id === s.subject_id),
       }))
 
-      const missing = subjectPlans.filter((s) => !s.blocks.length)
-      if (missing.length) {
-        return NextResponse.json(
-          {
-            error: `Matérias sem blocos: ${missing.map((m) => m.subject_name ?? m.subject_id).join(", ")}`,
-          },
-          { status: 400 }
-        )
+      const setup_issues = collectCycleSetupIssues(subjectPlans)
+      if (setup_issues.length) {
+        return NextResponse.json({
+          setup_issues,
+          error: "Resolva os itens pendentes em Blocos antes de continuar.",
+        })
       }
 
       const limits =
@@ -94,23 +93,15 @@ export async function POST(req: Request) {
         blocks: contentBlocks.filter((b) => b.subject_id === s.subject_id),
       }))
 
-      for (const sp of subjectPlans) {
-        if (!sp.blocks.length) {
-          return NextResponse.json(
-            { error: `Matéria "${sp.subject_name ?? sp.subject_id}" não tem blocos` },
-            { status: 400 }
-          )
-        }
-        for (const b of sp.blocks) {
-          if (!b.topics.length && !b.study_note?.trim()) {
-            return NextResponse.json(
-              {
-                error: `Bloco "${b.name}": adicione assuntos ou descreva o que vai estudar em Blocos.`,
-              },
-              { status: 400 }
-            )
-          }
-        }
+      const setup_issues = collectCycleSetupIssues(subjectPlans)
+      if (setup_issues.length) {
+        return NextResponse.json(
+          {
+            setup_issues,
+            error: "Resolva os itens pendentes em Blocos antes de gerar o calendário.",
+          },
+          { status: 400 }
+        )
       }
 
       const limits =

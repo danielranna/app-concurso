@@ -9,6 +9,8 @@ import type { CycleStats } from "@/lib/study-cycle-deadline-planner"
 import type { StudyCycle, WeekdayLimits } from "@/lib/study-cycle-types"
 import { defaultWeekdayLimits } from "@/lib/study-cycle-planner"
 import CycleStatsPanel from "@/components/ciclo/CycleStatsPanel"
+import CycleSetupIssuesModal from "@/components/ciclo/CycleSetupIssuesModal"
+import type { CycleSetupIssue } from "@/lib/study-cycle-setup-validation"
 
 type PlanningMode = "time_driven" | "deadline_driven"
 
@@ -27,6 +29,8 @@ export default function CicloPlanejarPage() {
   const [loading, setLoading] = useState(true)
   const [previewing, setPreviewing] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [setupIssues, setSetupIssues] = useState<CycleSetupIssue[]>([])
+  const [showSetupModal, setShowSetupModal] = useState(false)
 
   const load = useCallback(async (uid: string) => {
     setLoading(true)
@@ -76,8 +80,14 @@ export default function CicloPlanejarPage() {
         }),
       })
       const data = await res.json()
-      if (data.stats) setStats(data.stats)
-      else setStats(null)
+      if (data.setup_issues?.length) {
+        setSetupIssues(data.setup_issues)
+        setStats(null)
+      } else {
+        setSetupIssues([])
+        if (data.stats) setStats(data.stats)
+        else setStats(null)
+      }
     } finally {
       setPreviewing(false)
     }
@@ -108,7 +118,12 @@ export default function CicloPlanejarPage() {
       })
       const data = await res.json()
       if (data.error) {
-        alert(data.error)
+        if (data.setup_issues?.length) {
+          setSetupIssues(data.setup_issues)
+          setShowSetupModal(true)
+        } else {
+          alert(data.error)
+        }
         if (data.stats) setStats(data.stats)
       } else {
         router.push("/ciclo/semana")
@@ -157,6 +172,22 @@ export default function CicloPlanejarPage() {
           <Link href="/ciclo/blocos" className="underline">
             Blocos
           </Link>
+        </div>
+      )}
+
+      {setupIssues.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <span>
+            {setupIssues.length} pendência{setupIssues.length !== 1 ? "s" : ""} em
+            Blocos — resolva antes de gerar.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowSetupModal(true)}
+            className="font-medium text-teal-800 underline hover:text-teal-950"
+          >
+            Ver lista
+          </button>
         </div>
       )}
 
@@ -277,6 +308,12 @@ export default function CicloPlanejarPage() {
             Usar modo prazo para gerar automaticamente →
           </button>
         </div>
+      )}
+      {showSetupModal && setupIssues.length > 0 && (
+        <CycleSetupIssuesModal
+          issues={setupIssues}
+          onClose={() => setShowSetupModal(false)}
+        />
       )}
     </div>
   )

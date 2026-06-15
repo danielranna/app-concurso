@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
   ArrowLeft,
@@ -26,6 +26,7 @@ import TecTopicTree, {
 
 export default function CicloBlocosPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [userId, setUserId] = useState<string | null>(null)
   const [cycleSubjects, setCycleSubjects] = useState<StudyCycleSubject[]>([])
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null)
@@ -74,9 +75,14 @@ export default function CicloBlocosPage() {
       setCycleSubjects(subs)
       setCycleId(ciclo.cycle?.id ?? null)
       if (subs.length) {
-        setSelectedSubjectId(subs[0].subject_id)
+        const fromQuery = searchParams.get("subject_id")
+        const initial =
+          fromQuery && subs.some((s) => s.subject_id === fromQuery)
+            ? fromQuery
+            : subs[0].subject_id
+        setSelectedSubjectId(initial)
         await loadBlocks(user.id, ciclo.cycle?.id)
-        await loadTopicTree(user.id, subs[0].subject_id)
+        await loadTopicTree(user.id, initial)
       }
       setLoading(false)
     })
