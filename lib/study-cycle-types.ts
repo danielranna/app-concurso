@@ -24,6 +24,7 @@ export type StudyCycleBlock = {
   day_index: number
   subject_id: string
   content_node_id: string | null
+  content_block_id?: string | null
   block_type: StudyCycleBlockType
   sort_order: number
   label: string
@@ -31,10 +32,34 @@ export type StudyCycleBlock = {
     question_count?: number
     minutes?: number
     notebook_id?: string
+    mini_cycle_index?: number
+    block_pass?: number
   }
   subject_name?: string
   content_node_name?: string
+  content_block_name?: string
 }
+
+export type StudyCycleContentBlockTopic = {
+  id?: string
+  content_block_id?: string
+  tec_subject: string
+  tec_topic: string
+  sort_order: number
+}
+
+export type StudyCycleContentBlock = {
+  id: string
+  cycle_id: string
+  subject_id: string
+  name: string
+  sort_order: number
+  estimated_minutes: number
+  topics: StudyCycleContentBlockTopic[]
+  subject_name?: string
+}
+
+export type PlanningMode = "time_driven" | "deadline_driven"
 
 export type StudyCycleDay = {
   id?: string
@@ -49,6 +74,7 @@ export type StudyCycleSubject = {
   subject_id: string
   sort_order: number
   times_in_cycle: number
+  weight?: number
   subject_name?: string
 }
 
@@ -58,6 +84,9 @@ export type StudyCycle = {
   status: StudyCycleStatus
   name: string
   subjects_per_day: number
+  planning_mode?: PlanningMode
+  target_weeks?: number | null
+  default_block_minutes?: number
   started_at: string | null
   paused_at: string | null
   current_day_index: number
@@ -66,6 +95,7 @@ export type StudyCycle = {
   weekday_limits: WeekdayLimits[]
   days: StudyCycleDay[]
   cycle_blocks: StudyCycleBlock[]
+  content_blocks?: StudyCycleContentBlock[]
 }
 
 export type ManualCycleDayInput = {
@@ -77,5 +107,9 @@ export type ManualCycleDayInput = {
 export type ManualCycleSaveInput = {
   name?: string
   weekday_limits?: WeekdayLimits[]
+  planning_mode?: PlanningMode
+  target_weeks?: number
+  default_block_minutes?: number
+  subjects?: { subject_id: string; sort_order: number; weight: number }[]
   days: ManualCycleDayInput[]
 }

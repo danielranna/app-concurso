@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { Loader2, Calendar, Settings, PenLine } from "lucide-react"
+import { Loader2, Calendar, Settings, PenLine, CheckCircle2, Circle } from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
 import type { PrioritySource } from "@/lib/priority-source"
 import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
@@ -78,6 +78,18 @@ export default function CicloOverviewPage() {
   const cycle = data?.cycle
   const prefs = data?.preferences
 
+  const hasSubjects = (cycle?.subjects?.length ?? 0) > 0
+  const hasBlocks = (cycle?.content_blocks?.length ?? 0) > 0
+  const hasPlan = (cycle?.days?.length ?? 0) > 0
+  const isActive = cycle?.status === "active" && prefs?.cycle_enabled
+
+  const setupSteps = [
+    { done: hasSubjects, label: "Matérias e peso", href: "/ciclo/materias" },
+    { done: hasBlocks, label: "Blocos de assuntos", href: "/ciclo/blocos" },
+    { done: hasPlan, label: "Calendário gerado", href: "/ciclo/planejar" },
+    { done: isActive, label: "Ciclo ativo", href: "/ciclo/semana" },
+  ]
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
@@ -97,11 +109,36 @@ export default function CicloOverviewPage() {
 
       <CycleToggle
         cycleEnabled={prefs?.cycle_enabled ?? false}
-        hasCycle={Boolean(cycle?.days?.length)}
+        hasCycle={hasPlan}
         loading={toggling}
         onPause={() => handleToggle("pause")}
         onResume={() => handleToggle("resume")}
       />
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Setup do ciclo
+        </h2>
+        <ol className="mt-3 space-y-2">
+          {setupSteps.map((step) => (
+            <li key={step.href}>
+              <Link
+                href={step.href}
+                className="flex items-center gap-2 text-sm hover:text-teal-700"
+              >
+                {step.done ? (
+                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                ) : (
+                  <Circle className="h-4 w-4 text-slate-300" />
+                )}
+                <span className={step.done ? "text-slate-800" : "text-slate-500"}>
+                  {step.label}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
 
       {cycle && cycle.days.length > 0 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-4">
@@ -126,6 +163,14 @@ export default function CicloOverviewPage() {
               <dt className="text-xs text-slate-500">Dia do ciclo</dt>
               <dd className="text-sm font-medium text-slate-800">
                 {cycle.current_day_index + 1} / {cycle.total_days}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Modo</dt>
+              <dd className="text-sm font-medium text-slate-800">
+                {cycle.planning_mode === "deadline_driven"
+                  ? `Prazo (${cycle.target_weeks ?? "?"} sem)`
+                  : "Tempo livre"}
               </dd>
             </div>
             <div>
@@ -156,36 +201,52 @@ export default function CicloOverviewPage() {
       ) : (
         <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-6 text-center">
           <p className="text-sm text-slate-600">
-            Monte seu ciclo manualmente: organize o índice em Conteúdo, depois
-            adicione dias e blocos em Planejar.
+            Configure matérias, monte blocos de assuntos e gere o calendário
+            automaticamente.
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
-              href="/ciclo/conteudo"
+              href="/ciclo/materias"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
             >
-              Conteúdo
+              1. Matérias
+            </Link>
+            <Link
+              href="/ciclo/blocos"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              2. Blocos
             </Link>
             <Link
               href="/ciclo/planejar"
               className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
               <PenLine className="h-4 w-4" />
-              Planejar ciclo
+              3. Planejar
             </Link>
           </div>
         </section>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Link
-          href="/ciclo/conteudo"
+          href="/ciclo/materias"
           className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
         >
           <PenLine className="h-5 w-5 text-teal-600" />
           <div>
-            <p className="text-sm font-medium text-slate-900">Conteúdo</p>
-            <p className="text-xs text-slate-500">Índice e hierarquia</p>
+            <p className="text-sm font-medium text-slate-900">Matérias</p>
+            <p className="text-xs text-slate-500">Peso no mini-ciclo</p>
+          </div>
+        </Link>
+        <Link
+          href="/ciclo/blocos"
+          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
+        >
+          <PenLine className="h-5 w-5 text-teal-600" />
+          <div>
+            <p className="text-sm font-medium text-slate-900">Blocos</p>
+            <p className="text-xs text-slate-500">Agrupar assuntos</p>
           </div>
         </Link>
         <Link
@@ -195,7 +256,7 @@ export default function CicloOverviewPage() {
           <PenLine className="h-5 w-5 text-teal-600" />
           <div>
             <p className="text-sm font-medium text-slate-900">Planejar</p>
-            <p className="text-xs text-slate-500">Montar ou editar ciclo</p>
+            <p className="text-xs text-slate-500">Gerar calendário</p>
           </div>
         </Link>
         <Link

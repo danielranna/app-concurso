@@ -2,6 +2,7 @@ import type { DailyStudyBlock } from "./coach-types"
 import type { StudyCycleBlock } from "./study-cycle-types"
 import { pickQuestionIdsFromPerformance } from "./notebook-from-performance"
 import { getContentNode } from "./content-index-db"
+import { getContentBlock } from "./study-cycle-content-blocks-db"
 
 export async function buildDailyBlocksFromCycleBlocks(
   userId: string,
@@ -30,7 +31,36 @@ export async function buildDailyBlocksFromCycleBlocks(
       const limit = Number(cb.params.question_count ?? 20)
       let questionIds: string[] = []
 
-      if (notebookId) {
+      if (cb.content_block_id) {
+        const contentBlock = await getContentBlock(userId, cb.content_block_id)
+        if (contentBlock?.topics.length) {
+          const tecTopics = contentBlock.topics
+            .map((t) => t.tec_topic)
+            .filter(Boolean)
+          nodeName = contentBlock.name
+          if (tecTopics.length) {
+            questionIds = await pickQuestionIdsFromPerformance(userId, {
+              subject_id: cb.subject_id,
+              tec_topics: tecTopics,
+              wrong_only: true,
+              min_wrong_attempts: 1,
+              limit,
+            })
+            if (questionIds.length < limit) {
+              const pending = await pickQuestionIdsFromPerformance(userId, {
+                subject_id: cb.subject_id,
+                tec_topics: tecTopics,
+                wrong_only: false,
+                limit: limit - questionIds.length,
+              })
+              questionIds = [
+                ...questionIds,
+                ...pending.filter((id) => !questionIds.includes(id)),
+              ]
+            }
+          }
+        }
+      } else if (notebookId) {
         questionIds = await pickQuestionIdsFromPerformance(userId, {
           subject_id: cb.subject_id,
           source_notebook_id: notebookId,
@@ -74,6 +104,7 @@ export async function buildDailyBlocksFromCycleBlocks(
             question_ids: questionIds,
             notebook_id: notebookId,
             content_node_id: cb.content_node_id,
+            content_block_id: cb.content_block_id,
             cycle_block: true,
           },
         })
@@ -88,6 +119,7 @@ export async function buildDailyBlocksFromCycleBlocks(
           params: {
             block_key: blockKey,
             content_node_id: cb.content_node_id,
+            content_block_id: cb.content_block_id,
             notebook_id: notebookId,
             cycle_block: true,
           },

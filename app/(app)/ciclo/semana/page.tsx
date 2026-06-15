@@ -6,13 +6,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, ExternalLink, Loader2, PenLine } from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
-
-const BLOCK_TYPE_LABELS: Record<string, string> = {
-  questions: "Questões",
-  flashcards: "Flashcards",
-  read: "Leitura",
-  error_review: "Erros",
-}
+import WeekGrid from "@/components/ciclo/WeekGrid"
 
 export default function CicloSemanaPage() {
   const router = useRouter()
@@ -20,6 +14,7 @@ export default function CicloSemanaPage() {
   const [cycle, setCycle] = useState<StudyCycle | null>(null)
   const [cycleEnabled, setCycleEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [view, setView] = useState<"grid" | "list">("grid")
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -59,14 +54,29 @@ export default function CicloSemanaPage() {
           href="/ciclo/planejar"
           className="inline-block text-teal-700 underline"
         >
-          Planejar ciclo manualmente
+          Planejar ciclo
         </Link>
       </div>
     )
   }
 
+  const enrichedCycle: StudyCycle = {
+    ...cycle,
+    days: cycle.days.map((day) => ({
+      ...day,
+      blocks: (day.blocks?.length ? day.blocks : cycle.cycle_blocks.filter(
+          (b) => b.day_index === day.day_index
+        )).map((b) => ({
+        ...b,
+        subject_name:
+          b.subject_name ??
+          cycle.subjects.find((s) => s.subject_id === b.subject_id)?.subject_name,
+      })),
+    })),
+  }
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <Link
         href="/ciclo"
         className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
@@ -80,10 +90,29 @@ export default function CicloSemanaPage() {
           <h1 className="text-2xl font-bold text-slate-900">Grade do ciclo</h1>
           <p className="mt-1 text-sm text-slate-600">
             {cycle.total_days} dias · dia atual {cycle.current_day_index + 1}
+            {cycle.planning_mode === "deadline_driven" && cycle.target_weeks
+              ? ` · prazo ${cycle.target_weeks} sem`
+              : ""}
             {cycleEnabled ? " · ciclo ativo" : " · pausado"}
           </p>
         </div>
         <div className="flex gap-2">
+          <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setView("grid")}
+              className={`rounded px-2 py-1 ${view === "grid" ? "bg-slate-100 font-medium" : ""}`}
+            >
+              Semana
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              className={`rounded px-2 py-1 ${view === "list" ? "bg-slate-100 font-medium" : ""}`}
+            >
+              Lista
+            </button>
+          </div>
           <Link
             href="/ciclo/planejar"
             className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
@@ -103,65 +132,51 @@ export default function CicloSemanaPage() {
         </div>
       </div>
 
-      <div className="space-y-4">
-        {cycle.days.map((day) => {
-          const isCurrent = day.day_index === cycle.current_day_index
-          const blocks = day.blocks?.length
-            ? day.blocks
-            : cycle.cycle_blocks.filter((b) => b.day_index === day.day_index)
-
-          return (
-            <section
-              key={day.day_index}
-              className={`rounded-xl border p-4 ${
-                isCurrent
-                  ? "border-teal-300 bg-teal-50/40"
-                  : "border-slate-200 bg-white"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <h2 className="font-semibold text-slate-900">
-                  Dia {day.day_index + 1}
-                </h2>
-                {isCurrent && (
-                  <span className="rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
-                    Hoje
-                  </span>
-                )}
-              </div>
-
-              {blocks.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">Sem blocos</p>
-              ) : (
+      {view === "grid" ? (
+        <WeekGrid cycle={enrichedCycle} />
+      ) : (
+        <div className="space-y-4">
+          {enrichedCycle.days.map((day) => {
+            const isCurrent = day.day_index === cycle.current_day_index
+            return (
+              <section
+                key={day.day_index}
+                className={`rounded-xl border p-4 ${
+                  isCurrent
+                    ? "border-teal-300 bg-teal-50/40"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <h2 className="font-semibold text-slate-900">
+                    Dia {day.day_index + 1}
+                  </h2>
+                  {isCurrent && (
+                    <span className="rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">
+                      Hoje
+                    </span>
+                  )}
+                </div>
                 <ol className="mt-3 space-y-2">
-                  {blocks
-                    .sort((a, b) => a.sort_order - b.sort_order)
-                    .map((b, i) => (
-                      <li
-                        key={b.id ?? i}
-                        className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg bg-white/80 px-3 py-2 text-sm border border-slate-100"
-                      >
-                        <span className="font-medium text-slate-800">
-                          {b.label ||
-                            b.content_node_name ||
-                            b.subject_name ||
-                            "Bloco"}
+                  {day.blocks.map((b, i) => (
+                    <li
+                      key={b.id ?? i}
+                      className="rounded-lg border border-slate-100 bg-white/80 px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{b.label}</span>
+                      {b.subject_name && (
+                        <span className="ml-2 text-xs text-slate-500">
+                          {b.subject_name}
                         </span>
-                        <span className="text-xs text-slate-500">
-                          {BLOCK_TYPE_LABELS[b.block_type] ?? b.block_type}
-                          {b.params.question_count
-                            ? ` · ${b.params.question_count} questões`
-                            : ""}
-                          {b.subject_name ? ` · ${b.subject_name}` : ""}
-                        </span>
-                      </li>
-                    ))}
+                      )}
+                    </li>
+                  ))}
                 </ol>
-              )}
-            </section>
-          )
-        })}
-      </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
