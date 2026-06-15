@@ -46,7 +46,9 @@ export default function CicloPlanejarPage() {
       if (c?.target_weeks) setTargetWeeks(c.target_weeks)
       if (c?.default_block_minutes) setBlockMinutes(c.default_block_minutes)
       if (c?.weekday_limits?.length) setWeekdayLimits(c.weekday_limits)
-      if (c?.subjects_per_day) setSubjectsPerDay(c.subjects_per_day)
+      setSubjectsPerDay(
+        ciclo.preferences?.subjects_per_cycle_day ?? c?.subjects_per_day ?? 2
+      )
     } finally {
       setLoading(false)
     }
@@ -79,6 +81,7 @@ export default function CicloPlanejarPage() {
           action: "preview",
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
+          subjects_per_day: subjectsPerDay,
         }),
       })
       const data = await res.json()
@@ -93,7 +96,7 @@ export default function CicloPlanejarPage() {
     } finally {
       setPreviewing(false)
     }
-  }, [userId, mode, targetWeeks, blockMinutes])
+  }, [userId, mode, targetWeeks, blockMinutes, subjectsPerDay])
 
   useEffect(() => {
     if (!loading && userId && mode === "deadline_driven") {
@@ -260,7 +263,8 @@ export default function CicloPlanejarPage() {
             <Link href="/ciclo/configuracoes" className="text-teal-700 underline">
               Configurações
             </Link>
-            .
+            . Máximo de {subjectsPerDay} matérias distintas por dia (ajuste em
+            Configurações).
           </p>
 
           <CycleStatsPanel stats={stats} loading={previewing} />

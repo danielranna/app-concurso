@@ -117,6 +117,7 @@ export function computeCycleStats(input: {
   weekday_limits: WeekdayLimits[]
   target_weeks: number
   default_block_minutes?: number
+  subjects_per_day?: number
 }): CycleStats {
   const { subjects, weekday_limits, target_weeks } = input
   const defaultMinutes = input.default_block_minutes ?? 45
@@ -142,7 +143,8 @@ export function computeCycleStats(input: {
   const simulatedDays = distributeSessionsToDays(
     queue,
     weekday_limits,
-    defaultMinutes
+    defaultMinutes,
+    input.subjects_per_day
   )
   const calendarDaysNeeded = simulatedDays.length
   const suggestedWeeks =
@@ -336,10 +338,16 @@ function plannedSessionToCycleBlock(
 export function distributeSessionsToDays(
   queue: PlannedSession[],
   weekday_limits: WeekdayLimits[],
-  defaultBlockMinutes: number
+  defaultBlockMinutes: number,
+  subjectsPerDay?: number
 ): ManualCycleDayInput[] {
   const active = activeWeekdays(weekday_limits)
   if (!active.length || !queue.length) return []
+
+  const maxSubjectsPerDay =
+    subjectsPerDay != null && subjectsPerDay > 0
+      ? Math.max(1, subjectsPerDay)
+      : Number.POSITIVE_INFINITY
 
   const days: ManualCycleDayInput[] = []
   let dayIndex = 0
@@ -351,6 +359,7 @@ export function distributeSessionsToDays(
     const maxMinutes = wd.minutes
     let usedMinutes = 0
     const blocks: Omit<StudyCycleBlock, "id" | "cycle_id">[] = []
+    const subjectsInDay = new Set<string>()
     let sortOrder = 0
 
     while (sessionIdx < queue.length) {
@@ -358,10 +367,20 @@ export function distributeSessionsToDays(
       const blockMinutes = session.estimated_minutes || defaultBlockMinutes
       if (blocks.length > 0 && usedMinutes + blockMinutes > maxMinutes) break
 
+      const isNewSubject = !subjectsInDay.has(session.subject_id)
+      if (
+        blocks.length > 0 &&
+        isNewSubject &&
+        subjectsInDay.size >= maxSubjectsPerDay
+      ) {
+        break
+      }
+
       blocks.push(
         plannedSessionToCycleBlock(session, dayIndex, sortOrder++, defaultBlockMinutes)
       )
 
+      subjectsInDay.add(session.subject_id)
       usedMinutes += blockMinutes
       sessionIdx++
 
@@ -394,13 +413,15 @@ export function generateFullCycle(input: GenerateCycleInput): GenerateCycleResul
     weekday_limits: input.weekday_limits,
     target_weeks: input.target_weeks,
     default_block_minutes: defaultMinutes,
+    subjects_per_day: input.subjects_per_day,
   })
 
   const queue = buildFullSessionQueue(input.subjects)
   const days = distributeSessionsToDays(
     queue,
     input.weekday_limits,
-    defaultMinutes
+    defaultMinutes,
+    input.subjects_per_day
   )
 
   return {
@@ -441,12 +462,14 @@ export function previewCycleStats(
   subjects: SubjectPlanInput[],
   weekday_limits: WeekdayLimits[],
   target_weeks: number,
-  default_block_minutes?: number
+  default_block_minutes?: number,
+  subjects_per_day?: number
 ): CycleStats {
   return computeCycleStats({
     subjects,
     weekday_limits,
     target_weeks,
     default_block_minutes,
+    subjects_per_day,
   })
 }

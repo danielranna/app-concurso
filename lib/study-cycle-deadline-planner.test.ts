@@ -119,4 +119,27 @@ describe("generateFullCycle", () => {
       expect(totalMin).toBeLessThanOrEqual(90 + 45)
     }
   })
+
+  it("caps distinct subjects per day", () => {
+    const limits = defaultWeekdayLimits().map((w) =>
+      w.weekday === 1
+        ? { ...w, active: true, minutes: 600 }
+        : { ...w, active: false, minutes: 0 }
+    )
+    const subjects: SubjectPlanInput[] = Array.from({ length: 9 }, (_, i) => ({
+      subject_id: `s${i}`,
+      subject_name: `Mat ${i}`,
+      weight: 1,
+      blocks: [makeBlock(`b${i}`, `s${i}`, `Bloco ${i}`, 0)],
+    }))
+    const queue = buildFullSessionQueue(subjects)
+    const days = distributeSessionsToDays(queue, limits, 45, 6)
+
+    expect(days.length).toBeGreaterThan(1)
+    for (const day of days) {
+      const distinct = new Set(day.blocks.map((b) => b.subject_id)).size
+      expect(distinct).toBeLessThanOrEqual(6)
+    }
+    expect(days.reduce((s, d) => s + d.blocks.length, 0)).toBe(9)
+  })
 })

@@ -112,6 +112,6 @@ export type ManualCycleSaveInput = {
   planning_mode?: PlanningMode
   target_weeks?: number
   default_block_minutes?: number
-  subjects?: { subject_id: string; sort_order: number; weight: number }[]
+  subjects_per_day?: number
   days: ManualCycleDayInput[]
 }

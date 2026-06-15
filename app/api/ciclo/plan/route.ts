@@ -3,6 +3,7 @@ import { generateFullCycle, previewCycleStats } from "@/lib/study-cycle-deadline
 import {
   activateCycle,
   getActiveOrDraftCycle,
+  getCyclePreferences,
   saveManualCycle,
 } from "@/lib/study-cycle-db"
 import { loadContentBlocksForCycle } from "@/lib/study-cycle-content-blocks-db"
@@ -31,6 +32,21 @@ export async function POST(req: Request) {
   }
 
   try {
+    const prefs =
+      action === "preview" || action === "generate" || action === "generate_and_activate"
+        ? await getCyclePreferences(user_id)
+        : null
+
+    const resolveSubjectsPerDay = (
+      cycle: NonNullable<Awaited<ReturnType<typeof getActiveOrDraftCycle>>>
+    ) =>
+      Number(
+        subjects_per_day ??
+          prefs?.subjects_per_cycle_day ??
+          cycle.subjects_per_day ??
+          2
+      )
+
     if (action === "preview") {
       const cycle = await getActiveOrDraftCycle(user_id)
       if (!cycle?.subjects?.length) {
@@ -67,7 +83,8 @@ export async function POST(req: Request) {
         subjectPlans,
         limits,
         Number(target_weeks ?? cycle.target_weeks ?? 8),
-        Number(default_block_minutes ?? cycle.default_block_minutes ?? 45)
+        Number(default_block_minutes ?? cycle.default_block_minutes ?? 45),
+        resolveSubjectsPerDay(cycle)
       )
 
       return NextResponse.json({ stats })
@@ -111,13 +128,14 @@ export async function POST(req: Request) {
 
       const weeks = Number(target_weeks ?? cycle.target_weeks ?? 8)
       const blockMinutes = Number(default_block_minutes ?? cycle.default_block_minutes ?? 45)
+      const resolvedSubjectsPerDay = resolveSubjectsPerDay(cycle)
 
       const generated = generateFullCycle({
         subjects: subjectPlans,
         weekday_limits: limits,
         target_weeks: weeks,
         default_block_minutes: blockMinutes,
-        subjects_per_day: subjects_per_day ?? cycle.subjects_per_day ?? 2,
+        subjects_per_day: resolvedSubjectsPerDay,
         planning_mode: planning_mode ?? "deadline_driven",
       })
 
@@ -134,6 +152,7 @@ export async function POST(req: Request) {
         planning_mode: "deadline_driven",
         target_weeks: weeks,
         default_block_minutes: blockMinutes,
+        subjects_per_day: resolvedSubjectsPerDay,
         subjects: cycle.subjects.map((s, i) => ({
           subject_id: s.subject_id,
           sort_order: s.sort_order ?? i,
