@@ -6,6 +6,7 @@ import {
   decodeTecTopicPair,
   type TecTaxonomyGroup,
 } from "./tec-facets"
+import { getTecTopicsForSubject } from "./study-cycle-content-blocks-db"
 
 export type { TecTaxonomyGroup }
 
@@ -137,21 +138,19 @@ export async function applyMappingFilter(
   const isSubjectLevel = (t: string | null) => !t || t.trim() === ""
 
   if (filters.subject_id) {
-    const subjectTec = [
-      ...new Set(
-        mappings
-          .filter(
-            (m) =>
-              isSubjectLevel(m.tec_topic) && m.subject_id === filters.subject_id
-          )
-          .map((m) => m.tec_subject)
-          .filter(Boolean)
-      ),
-    ] as string[]
+    const topics = await getTecTopicsForSubject(userId, filters.subject_id)
+    if (!topics.length) {
+      return { ...filters, tec_subject: ["__none__"], tec_topic: undefined, tec_topic_pairs: undefined }
+    }
 
     const out: BankFilters = {
       ...filters,
-      tec_subject: subjectTec.length ? subjectTec : ["__none__"],
+      tec_subject: undefined,
+      tec_topic: undefined,
+      tec_topic_pairs: topics.map((t) => ({
+        tec_subject: t.tec_subject,
+        tec_topic: t.tec_topic,
+      })),
     }
 
     if (filters.topic_id) {
@@ -162,13 +161,18 @@ export async function applyMappingFilter(
               (m) =>
                 !isSubjectLevel(m.tec_topic) &&
                 m.topic_id === filters.topic_id &&
-                subjectTec.includes(m.tec_subject)
+                m.subject_id === filters.subject_id
             )
             .map((m) => m.tec_topic)
             .filter(Boolean)
         ),
       ] as string[]
-      out.tec_topic = topicTec.length ? topicTec : ["__none__"]
+      out.tec_topic_pairs = (out.tec_topic_pairs ?? []).filter((p) =>
+        topicTec.includes(p.tec_topic)
+      )
+      if (!out.tec_topic_pairs.length) {
+        out.tec_topic_pairs = [{ tec_subject: "__none__", tec_topic: "__none__" }]
+      }
     }
 
     return out

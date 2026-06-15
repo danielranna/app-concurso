@@ -252,20 +252,37 @@ export async function getTecTopicsForSubject(
 ): Promise<{ tec_subject: string; tec_topic: string; question_count?: number }[]> {
   const { data: mappings } = await supabaseServer
     .from("tec_taxonomy_mappings")
-    .select("tec_subject, tec_topic")
+    .select("tec_subject, tec_topic, subject_id")
     .eq("user_id", userId)
-    .eq("subject_id", subjectId)
 
   if (!mappings?.length) return []
 
-  const subjectMappings = mappings.filter((m) => !m.tec_topic)
-  const topicMappings = mappings.filter((m) => m.tec_topic)
+  const isSubjectLevel = (t: string | null | undefined) => !t || t.trim() === ""
 
+  const explicitTopicMappings = mappings.filter(
+    (m) => !isSubjectLevel(m.tec_topic) && m.subject_id === subjectId
+  )
+
+  const redirectedAway = new Set(
+    mappings
+      .filter((m) => !isSubjectLevel(m.tec_topic) && m.subject_id !== subjectId)
+      .map((m) => `${m.tec_subject.trim()}\0${(m.tec_topic ?? "").trim()}`)
+  )
+
+  const seen = new Set<string>()
   const topics: { tec_subject: string; tec_topic: string }[] = []
 
-  for (const tm of topicMappings) {
-    topics.push({ tec_subject: tm.tec_subject, tec_topic: tm.tec_topic })
+  for (const tm of explicitTopicMappings) {
+    const key = `${tm.tec_subject.trim()}\0${(tm.tec_topic ?? "").trim()}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      topics.push({ tec_subject: tm.tec_subject, tec_topic: tm.tec_topic ?? "" })
+    }
   }
+
+  const subjectMappings = mappings.filter(
+    (m) => isSubjectLevel(m.tec_topic) && m.subject_id === subjectId
+  )
 
   for (const sm of subjectMappings) {
     const { data: questions } = await supabaseServer
@@ -274,14 +291,13 @@ export async function getTecTopicsForSubject(
       .eq("tec_subject", sm.tec_subject)
       .not("tec_topic", "is", null)
 
-    const seen = new Set<string>()
     for (const q of questions ?? []) {
       const t = (q.tec_topic ?? "").trim()
-      if (!t || seen.has(t)) continue
-      seen.add(t)
-      if (!topics.some((x) => x.tec_subject === sm.tec_subject && x.tec_topic === t)) {
-        topics.push({ tec_subject: sm.tec_subject, tec_topic: t })
-      }
+      if (!t) continue
+      const key = `${sm.tec_subject.trim()}\0${t}`
+      if (redirectedAway.has(key) || seen.has(key)) continue
+      seen.add(key)
+      topics.push({ tec_subject: sm.tec_subject, tec_topic: t })
     }
   }
 

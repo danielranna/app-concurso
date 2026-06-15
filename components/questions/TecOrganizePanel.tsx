@@ -11,6 +11,16 @@ import {
 } from "lucide-react"
 import type { NotebookIndexPreview } from "@/lib/tec-notebook-index-import"
 import type { TecSubjectNode, TecSubjectSummary } from "@/lib/tec-subject-tree-types"
+import { flattenFolderTopics } from "@/lib/study-cycle-topic-utils"
+
+type SubjectOption = { id: string; name: string }
+
+type MapModalState = {
+  kind: "folder" | "topics"
+  folderId?: string
+  folderName: string
+  topicCount: number
+}
 
 type FolderOption = {
   id: string
@@ -123,6 +133,7 @@ function TecTreeNode({
   selectedIds,
   onToggle,
   onCreateSubfolder,
+  onMapFolder,
   defaultOpen = false,
 }: {
   node: TecSubjectNode
@@ -130,6 +141,7 @@ function TecTreeNode({
   selectedIds: Set<string>
   onToggle: (nodeId: string, checked: boolean) => void
   onCreateSubfolder: (parentId: string) => void
+  onMapFolder?: (node: TecSubjectNode) => void
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -175,17 +187,30 @@ function TecTreeNode({
           {node.question_count} ({node.percent?.toFixed(1) ?? 0}%)
         </span>
         {isFolder && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault()
-              onCreateSubfolder(node.id)
-            }}
-            className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-white"
-            title="Criar subpasta"
-          >
-            + sub
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                onMapFolder?.(node)
+              }}
+              className="shrink-0 rounded border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-800 hover:bg-violet-100"
+              title="Vincular pasta à matéria"
+            >
+              matéria
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                onCreateSubfolder(node.id)
+              }}
+              className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-white"
+              title="Criar subpasta"
+            >
+              + sub
+            </button>
+          </>
         )}
       </label>
       {isFolder && open && node.children?.map((c) => (
@@ -196,6 +221,7 @@ function TecTreeNode({
           selectedIds={selectedIds}
           onToggle={onToggle}
           onCreateSubfolder={onCreateSubfolder}
+          onMapFolder={onMapFolder}
           defaultOpen={false}
         />
       ))}
@@ -227,6 +253,11 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
   const [matchUngroupedOnly, setMatchUngroupedOnly] = useState(true)
   const [confirmedMatchIds, setConfirmedMatchIds] = useState<Set<string>>(new Set())
   const [matchesOpen, setMatchesOpen] = useState(true)
+  const [subjects, setSubjects] = useState<SubjectOption[]>([])
+  const [mapModal, setMapModal] = useState<MapModalState | null>(null)
+  const [mapSubjectId, setMapSubjectId] = useState("")
+  const [mapMode, setMapMode] = useState<"per_topic" | "single_topic">("per_topic")
+  const [mapSaving, setMapSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ungroupedRef = useRef<HTMLDivElement>(null)
 
@@ -248,7 +279,10 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
 
   useEffect(() => {
     reloadSummaries()
-  }, [reloadSummaries])
+    fetch(`/api/subjects?user_id=${userId}`)
+      .then((r) => r.json())
+      .then((data) => setSubjects(Array.isArray(data) ? data : []))
+  }, [reloadSummaries, userId])
 
   useEffect(() => {
     setSelectedIds(new Set())
@@ -305,6 +339,89 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
 
   function clearSelection() {
     setSelectedIds(new Set())
+  }
+
+  function openMapFolder(node: TecSubjectNode) {
+    const count = flattenFolderTopics(node).length
+    setMapModal({
+      kind: "folder",
+      folderId: node.id,
+      folderName: node.name,
+      topicCount: count,
+    })
+    setMapSubjectId("")
+    setMapMode("per_topic")
+  }
+
+  function openMapSelectedTopics() {
+    setMapModal({
+      kind: "topics",
+      folderName: `${selectedTopicNodes.length} assunto(s) selecionado(s)`,
+      topicCount: selectedTopicNodes.length,
+    })
+    setMapSubjectId("")
+    setMapMode("per_topic")
+  }
+
+  async function saveFolderMap() {
+    if (!selected || !mapModal || !mapSubjectId) return
+    setMapSaving(true)
+    try {
+      let res: Response
+      if (mapModal.kind === "folder" && mapModal.folderId) {
+        res = await fetch("/api/questions/mappings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "bulk_folder",
+            user_id: userId,
+            tec_subject: selected,
+            folder_node_id: mapModal.folderId,
+            subject_id: mapSubjectId,
+            mode: mapMode,
+            single_topic_name: mapMode === "single_topic" ? mapModal.folderName : undefined,
+          }),
+        })
+      } else {
+        const topics = selectedTopicNodes
+          .map((n) => ({
+            tec_subject: selected,
+            tec_topic: (n.tec_topic ?? n.name ?? "").trim(),
+          }))
+          .filter((t) => t.tec_topic)
+        res = await fetch("/api/questions/mappings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "bulk_topics",
+            user_id: userId,
+            tec_subject: selected,
+            subject_id: mapSubjectId,
+            mode: mapMode,
+            topics,
+            single_topic_name:
+              mapMode === "single_topic" ? mapModal.folderName.split(" ")[0] : undefined,
+          }),
+        })
+      }
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Erro ao vincular")
+      const destName = subjects.find((s) => s.id === mapSubjectId)?.name ?? "matéria"
+      setMessage({
+        text: `${data.mapped ?? mapModal.topicCount} assunto(s) vinculado(s) → ${destName}${
+          data.skipped ? ` (${data.skipped} ignorados)` : ""
+        }`,
+        tone: "ok",
+      })
+      setMapModal(null)
+      await reloadTree(true)
+    } catch (e) {
+      setMessage({
+        text: e instanceof Error ? e.message : "Erro ao vincular",
+        tone: "err",
+      })
+    }
+    setMapSaving(false)
   }
 
   async function seedTopics() {
@@ -769,6 +886,15 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                 {selectedTopicNodes.length > 0 && (
                   <button
                     type="button"
+                    onClick={openMapSelectedTopics}
+                    className="rounded border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-900"
+                  >
+                    Vincular à matéria
+                  </button>
+                )}
+                {selectedTopicNodes.length > 0 && (
+                  <button
+                    type="button"
                     onClick={deleteSelectedTopics}
                     disabled={deleting}
                     className="inline-flex items-center gap-1 rounded border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-800 disabled:opacity-50"
@@ -861,6 +987,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                           selectedIds={selectedIds}
                           onToggle={toggleNode}
                           onCreateSubfolder={startSubfolder}
+                          onMapFolder={openMapFolder}
                           defaultOpen={false}
                         />
                       ))}
@@ -872,6 +999,81 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
               <p className="mt-2 text-xs text-slate-400">
                 Total matéria: {tree.total_questions} questões
               </p>
+            )}
+
+            {mapModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                <div className="w-full max-w-md rounded-xl border bg-white p-5 shadow-lg">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Vincular à matéria
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {mapModal.topicCount} assunto(s)
+                    {mapModal.kind === "folder" ? ` na pasta “${mapModal.folderName}”` : ""}
+                  </p>
+
+                  <label className="mt-4 block text-sm font-medium">Sua matéria destino</label>
+                  <select
+                    value={mapSubjectId}
+                    onChange={(e) => setMapSubjectId(e.target.value)}
+                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  >
+                    <option value="">Selecione</option>
+                    {subjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <fieldset className="mt-4 space-y-2">
+                    <legend className="text-sm font-medium">Modo</legend>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="mapMode"
+                        checked={mapMode === "per_topic"}
+                        onChange={() => setMapMode("per_topic")}
+                      />
+                      Um tema por assunto
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="mapMode"
+                        checked={mapMode === "single_topic"}
+                        onChange={() => setMapMode("single_topic")}
+                      />
+                      Um tema com nome da pasta
+                    </label>
+                  </fieldset>
+
+                  {mapSubjectId && (
+                    <p className="mt-3 rounded bg-violet-50 px-3 py-2 text-xs text-violet-900">
+                      Preview: {mapModal.topicCount} assunto(s) →{" "}
+                      {subjects.find((s) => s.id === mapSubjectId)?.name}
+                    </p>
+                  )}
+
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMapModal(null)}
+                      className="rounded border px-4 py-2 text-sm"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveFolderMap}
+                      disabled={!mapSubjectId || mapSaving || mapModal.topicCount === 0}
+                      className="rounded bg-violet-700 px-4 py-2 text-sm text-white disabled:opacity-50"
+                    >
+                      {mapSaving ? "Salvando…" : "Vincular"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}

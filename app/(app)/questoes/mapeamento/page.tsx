@@ -7,12 +7,20 @@ import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Trash2 } from "lucide-react"
 import TecOrganizePanel from "@/components/questions/TecOrganizePanel"
 
-type TecSubjectGroup = {
+type TecSubjectOverview = {
   tec_subject: string
-  count: number
+  question_count: number
   sample_statement: string
   topics_preview: string[]
+  subject_mapped: boolean
+  mapped_subject_id: string | null
+  mapped_subject_name: string | null
+  mapped_topics: number
+  total_topics: number
+  has_tree: boolean
 }
+
+type SubjectFilter = "all" | "pending" | "mapped"
 
 type TecTopicGroup = {
   tec_subject: string
@@ -39,6 +47,7 @@ type MappedRow = {
   id: string
   tec_subject: string
   tec_topic: string
+  is_subject_level?: boolean
   subject_name: string | null
   topic_name: string | null
 }
@@ -53,14 +62,16 @@ export default function MapeamentoPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>("subjects")
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [unmappedSubjects, setUnmappedSubjects] = useState<TecSubjectGroup[]>([])
+  const [subjectsOverview, setSubjectsOverview] = useState<TecSubjectOverview[]>([])
+  const [subjectFilter, setSubjectFilter] = useState<SubjectFilter>("all")
   const [unmappedTopics, setUnmappedTopics] = useState<TecTopicGroup[]>([])
   const [unmappedTopicGroups, setUnmappedTopicGroups] = useState<TecTopicGroupBlock[]>(
     []
   )
-  const [selectedSubject, setSelectedSubject] = useState<TecSubjectGroup | null>(null)
+  const [selectedSubject, setSelectedSubject] = useState<TecSubjectOverview | null>(null)
   const [selectedTopic, setSelectedTopic] = useState<TecTopicGroup | null>(null)
   const [yourSubjectId, setYourSubjectId] = useState("")
+  const [targetSubjectId, setTargetSubjectId] = useState("")
   const [yourTopicId, setYourTopicId] = useState("")
   const [topics, setTopics] = useState<Topic[]>([])
   const [saving, setSaving] = useState(false)
@@ -69,9 +80,9 @@ export default function MapeamentoPage() {
   const [mappedRows, setMappedRows] = useState<MappedRow[]>([])
 
   const reload = useCallback(async (uid: string) => {
-    const [s, t, g, p, m] = await Promise.all([
-      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=subjects`).then((r) =>
-        r.json()
+    const [overview, t, g, p, m] = await Promise.all([
+      fetch(`/api/questions/mappings?user_id=${uid}&unmapped=subjects_overview`).then(
+        (r) => r.json()
       ),
       fetch(`/api/questions/mappings?user_id=${uid}&unmapped=topics`).then((r) =>
         r.json()
@@ -86,7 +97,7 @@ export default function MapeamentoPage() {
         r.json()
       ),
     ])
-    setUnmappedSubjects(Array.isArray(s) ? s : [])
+    setSubjectsOverview(Array.isArray(overview) ? overview : [])
     setUnmappedTopics(Array.isArray(t) ? t : [])
     setUnmappedTopicGroups(Array.isArray(g) ? g : [])
     setProgress(Array.isArray(p) ? p : [])
@@ -108,20 +119,15 @@ export default function MapeamentoPage() {
   }, [router, reload])
 
   useEffect(() => {
-    if (!userId || !yourSubjectId) {
+    const sid = targetSubjectId || yourSubjectId
+    if (!userId || !sid) {
       setTopics([])
       return
     }
-    fetch(`/api/topics?user_id=${userId}&subject_id=${yourSubjectId}`)
+    fetch(`/api/topics?user_id=${userId}&subject_id=${sid}`)
       .then((r) => r.json())
       .then(setTopics)
-  }, [userId, yourSubjectId])
-
-  useEffect(() => {
-    if (selectedTopic?.mapped_subject_id) {
-      setYourSubjectId(selectedTopic.mapped_subject_id)
-    }
-  }, [selectedTopic])
+  }, [userId, yourSubjectId, targetSubjectId])
 
   async function saveSubjectLink() {
     if (!userId || !selectedSubject || !yourSubjectId) return
@@ -144,7 +150,7 @@ export default function MapeamentoPage() {
       return
     }
     setMessage(
-      `“${selectedSubject.tec_subject}” vinculada — ${selectedSubject.count} questões usam essa matéria. Assuntos com tema de mesmo nome na sua matéria serão reconhecidos automaticamente.`
+      `“${selectedSubject.tec_subject}” vinculada — ${selectedSubject.question_count} questões usam essa matéria. Assuntos com tema de mesmo nome na sua matéria serão reconhecidos automaticamente.`
     )
     setSelectedSubject(null)
     setYourSubjectId("")
@@ -154,6 +160,11 @@ export default function MapeamentoPage() {
 
   async function saveTopicLink(createNew: boolean) {
     if (!userId || !selectedTopic) return
+    const destSubjectId = targetSubjectId || yourSubjectId
+    if (!destSubjectId) {
+      setMessage("Selecione a matéria de destino.")
+      return
+    }
     setSaving(true)
     setMessage(null)
     const body = createNew
@@ -162,6 +173,7 @@ export default function MapeamentoPage() {
           user_id: userId,
           tec_subject: selectedTopic.tec_subject,
           tec_topic: selectedTopic.tec_topic,
+          subject_id: destSubjectId,
         }
       : {
           type: "topic",
@@ -169,6 +181,7 @@ export default function MapeamentoPage() {
           tec_subject: selectedTopic.tec_subject,
           tec_topic: selectedTopic.tec_topic,
           topic_id: yourTopicId,
+          subject_id: destSubjectId,
         }
     const res = await fetch("/api/questions/mappings", {
       method: "POST",
@@ -184,9 +197,17 @@ export default function MapeamentoPage() {
     setMessage(`Assunto “${selectedTopic.tec_topic}” associado.`)
     setSelectedTopic(null)
     setYourTopicId("")
+    setTargetSubjectId("")
     await reload(userId)
     setSaving(false)
   }
+
+  const pendingSubjectCount = subjectsOverview.filter((s) => !s.subject_mapped).length
+  const filteredSubjects = subjectsOverview.filter((s) => {
+    if (subjectFilter === "pending") return !s.subject_mapped
+    if (subjectFilter === "mapped") return s.subject_mapped
+    return true
+  })
 
   async function bulkMapByName(tecSubject: string) {
     if (!userId) return
@@ -243,7 +264,7 @@ export default function MapeamentoPage() {
               : "border-transparent text-slate-500"
           }`}
         >
-          Matérias TEC ({unmappedSubjects.length})
+          Matérias TEC ({pendingSubjectCount} pendentes)
         </button>
         <button
           type="button"
@@ -314,11 +335,21 @@ export default function MapeamentoPage() {
               className="flex items-center justify-between gap-3 rounded-lg border bg-white px-4 py-3 text-sm"
             >
               <div className="min-w-0">
-                <p className="text-xs text-slate-500">{row.tec_subject}</p>
-                <p className="font-medium">{row.tec_topic}</p>
-                <p className="text-xs text-slate-400">
-                  → {row.subject_name} / {row.topic_name}
-                </p>
+                {row.is_subject_level ? (
+                  <>
+                    <p className="text-xs text-slate-500">Matéria TEC</p>
+                    <p className="font-medium">{row.tec_subject}</p>
+                    <p className="text-xs text-slate-400">→ {row.subject_name}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-500">{row.tec_subject}</p>
+                    <p className="font-medium">{row.tec_topic}</p>
+                    <p className="text-xs text-slate-400">
+                      → {row.subject_name} / {row.topic_name}
+                    </p>
+                  </>
+                )}
               </div>
               <button
                 type="button"
@@ -344,15 +375,40 @@ export default function MapeamentoPage() {
           )}
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <ul className="max-h-[70vh] space-y-2 overflow-y-auto">
+            <div className="min-w-0">
+              {tab === "subjects" && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["all", "Todas"],
+                      ["pending", "Pendentes"],
+                      ["mapped", "Vinculadas"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSubjectFilter(key)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${
+                        subjectFilter === key
+                          ? "bg-slate-900 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <ul className="max-h-[70vh] space-y-2 overflow-y-auto">
               {tab === "subjects" &&
-                unmappedSubjects.map((u) => (
+                filteredSubjects.map((u) => (
                   <li key={u.tec_subject}>
                     <button
                       type="button"
                       onClick={() => {
                         setSelectedSubject(u)
-                        setYourSubjectId("")
+                        setYourSubjectId(u.mapped_subject_id ?? "")
                       }}
                       className={`w-full rounded-lg border px-4 py-3 text-left text-sm ${
                         selectedSubject?.tec_subject === u.tec_subject
@@ -360,20 +416,53 @@ export default function MapeamentoPage() {
                           : "bg-white hover:bg-slate-50"
                       }`}
                     >
-                      <p className="font-semibold text-blue-800">{u.tec_subject}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-blue-800">{u.tec_subject}</p>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            u.subject_mapped
+                              ? "bg-green-100 text-green-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {u.subject_mapped ? "Vinculada" : "Pendente"}
+                        </span>
+                        {u.has_tree && (
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] text-violet-800">
+                            Organizada
+                          </span>
+                        )}
+                      </div>
+                      {u.mapped_subject_name && (
+                        <p className="mt-1 text-xs text-slate-600">
+                          → {u.mapped_subject_name}
+                        </p>
+                      )}
                       {u.sample_statement && (
                         <p className="mt-1 line-clamp-2 text-slate-600">{u.sample_statement}</p>
                       )}
                       <p className="mt-2 text-xs text-slate-400">
-                        {u.count} questões
-                        {u.topics_preview.length > 0 &&
-                          ` · ${u.topics_preview.length}+ assuntos`}
+                        {u.question_count} questões
+                        {u.total_topics > 0 &&
+                          ` · ${u.mapped_topics}/${u.total_topics} assuntos`}
                       </p>
+                      {u.total_topics > 0 && (
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-blue-500"
+                            style={{
+                              width: `${Math.round((u.mapped_topics / u.total_topics) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      )}
                     </button>
                   </li>
                 ))}
-              {tab === "subjects" && unmappedSubjects.length === 0 && (
-                <p className="text-sm text-green-700">Todas as matérias TEC já foram vinculadas.</p>
+              {tab === "subjects" && filteredSubjects.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  Nenhuma matéria neste filtro.
+                </p>
               )}
 
               {tab === "topics" &&
@@ -412,7 +501,7 @@ export default function MapeamentoPage() {
                             onClick={() => {
                               setSelectedTopic(u)
                               setYourTopicId("")
-                              if (u.mapped_subject_id) setYourSubjectId(u.mapped_subject_id)
+                              setTargetSubjectId(u.mapped_subject_id ?? "")
                             }}
                             className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
                               selectedTopic?.tec_topic === u.tec_topic &&
@@ -432,7 +521,8 @@ export default function MapeamentoPage() {
               {tab === "topics" && unmappedTopics.length === 0 && (
                 <p className="text-sm text-green-700">Todos os assuntos TEC já foram vinculados.</p>
               )}
-            </ul>
+              </ul>
+            </div>
 
             <div className="rounded-xl border bg-white p-4 lg:sticky lg:top-4 lg:self-start">
               {tab === "subjects" && selectedSubject && (
@@ -441,8 +531,9 @@ export default function MapeamentoPage() {
                     {selectedSubject.tec_subject}
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
-                    Todas as {selectedSubject.count} questões com esta matéria no TEC irão para a
-                    matéria que você escolher abaixo.
+                    Todas as {selectedSubject.question_count} questões com esta matéria no TEC irão
+                    para a matéria que você escolher abaixo.
+                    {selectedSubject.subject_mapped && " Você pode alterar o vínculo existente."}
                   </p>
                   <label className="mt-4 block text-sm font-medium">Sua matéria</label>
                   <select
@@ -475,16 +566,29 @@ export default function MapeamentoPage() {
                   <p className="mt-1 text-sm text-slate-500">
                     {selectedTopic.count} questões com este assunto.
                   </p>
-                  {!selectedTopic.mapped_subject_id ? (
-                    <p className="mt-4 text-sm text-amber-800">
-                      Primeiro vincule a matéria TEC “{selectedTopic.tec_subject}” na aba
-                      Matérias.
-                    </p>
-                  ) : (
+                  <label className="mt-4 block text-sm font-medium">Enviar para matéria</label>
+                  <select
+                    value={targetSubjectId}
+                    onChange={(e) => {
+                      setTargetSubjectId(e.target.value)
+                      setYourTopicId("")
+                    }}
+                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                  >
+                    <option value="">Selecione</option>
+                    {subjects.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.id === selectedTopic.mapped_subject_id ? " (padrão TEC)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Use quando o assunto TEC pertence a uma matéria sua diferente da matéria TEC
+                    pai (ex.: Reforma Tributária dentro de Direito Tributário).
+                  </p>
+                  {targetSubjectId && (
                     <>
-                      <p className="mt-2 text-sm text-slate-600">
-                        Matéria sua: <strong>{selectedTopic.mapped_subject_name}</strong>
-                      </p>
                       <label className="mt-4 block text-sm font-medium">
                         Associar a um tema existente
                       </label>

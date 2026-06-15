@@ -5,8 +5,11 @@ import {
   listUnmappedTecTopics,
   listUnmappedTecTopicsGrouped,
   listMappedTopics,
+  listAllTecSubjectsOverview,
   getMappingProgress,
   bulkMapTopicsByName,
+  bulkMapFolderToSubject,
+  bulkMapTopicsToSubject,
   saveSubjectMapping,
   saveTopicMapping,
   createTopicAndMapping,
@@ -48,6 +51,11 @@ export async function GET(req: Request) {
     return NextResponse.json(items)
   }
 
+  if (mode === "subjects_overview") {
+    const items = await listAllTecSubjectsOverview(user_id)
+    return NextResponse.json(items)
+  }
+
   if (mode === "1") {
     const items = await listUnmappedTecSubjects(user_id)
     return NextResponse.json(items)
@@ -84,6 +92,10 @@ export async function POST(req: Request) {
     tec_topic,
     subject_id,
     topic_id,
+    folder_node_id,
+    mode: bulk_mode,
+    single_topic_name,
+    topics,
   } = body
 
   if (!user_id || !tec_subject) {
@@ -109,7 +121,13 @@ export async function POST(req: Request) {
           { status: 400 }
         )
       }
-      const data = await saveTopicMapping(user_id, tec_subject, tec_topic, topic_id)
+      const data = await saveTopicMapping(
+        user_id,
+        tec_subject,
+        tec_topic,
+        topic_id,
+        subject_id || undefined
+      )
       return NextResponse.json(data)
     }
 
@@ -117,8 +135,42 @@ export async function POST(req: Request) {
       if (!tec_topic) {
         return NextResponse.json({ error: "tec_topic obrigatório" }, { status: 400 })
       }
-      const data = await createTopicAndMapping(user_id, tec_subject, tec_topic)
+      const data = await createTopicAndMapping(
+        user_id,
+        tec_subject,
+        tec_topic,
+        subject_id || undefined
+      )
       return NextResponse.json(data)
+    }
+
+    if (type === "bulk_folder") {
+      if (!folder_node_id || !subject_id) {
+        return NextResponse.json(
+          { error: "folder_node_id e subject_id obrigatórios" },
+          { status: 400 }
+        )
+      }
+      const result = await bulkMapFolderToSubject(
+        user_id,
+        tec_subject,
+        folder_node_id,
+        subject_id,
+        bulk_mode === "single_topic" ? "single_topic" : "per_topic",
+        single_topic_name
+      )
+      return NextResponse.json(result)
+    }
+
+    if (type === "bulk_topics" && Array.isArray(topics) && subject_id) {
+      const result = await bulkMapTopicsToSubject(
+        user_id,
+        topics,
+        subject_id,
+        bulk_mode === "single_topic" ? "single_topic" : "per_topic",
+        single_topic_name
+      )
+      return NextResponse.json(result)
     }
 
     if (type === "bulk_by_name") {
