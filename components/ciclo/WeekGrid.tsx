@@ -2,6 +2,7 @@
 
 import type { StudyCycle, StudyCycleBlock } from "@/lib/study-cycle-types"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
+import { groupDaysIntoWeeks } from "@/lib/study-cycle-week-utils"
 
 const SUBJECT_COLORS = [
   "bg-teal-100 border-teal-200 text-teal-900",
@@ -106,39 +107,4 @@ function BlockCard({
       </div>
     </div>
   )
-}
-
-function groupDaysIntoWeeks(
-  days: StudyCycle["days"],
-  weekdayLimits: StudyCycle["weekday_limits"]
-) {
-  const activeWeekdays = weekdayLimits
-    .filter((w) => w.active)
-    .map((w) => w.weekday)
-    .sort((a, b) => a - b)
-
-  const weeks: (StudyCycle["days"][0] & { blocks: StudyCycleBlock[] })[][] = []
-  let currentWeek: StudyCycle["days"] = []
-
-  for (const day of days) {
-    const wd = day.weekday ?? activeWeekdays[0] ?? 1
-    if (
-      currentWeek.length > 0 &&
-      wd <= (currentWeek[currentWeek.length - 1]?.weekday ?? 0)
-    ) {
-      weeks.push(currentWeek)
-      currentWeek = []
-    }
-    currentWeek.push(day)
-  }
-  if (currentWeek.length) weeks.push(currentWeek)
-
-  if (!weeks.length && days.length) {
-    const perWeek = Math.max(1, activeWeekdays.length)
-    for (let i = 0; i < days.length; i += perWeek) {
-      weeks.push(days.slice(i, i + perWeek))
-    }
-  }
-
-  return weeks
 }

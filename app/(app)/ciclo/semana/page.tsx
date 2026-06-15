@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, ExternalLink, Loader2, PenLine } from "lucide-react"
+import { ArrowLeft, Download, ExternalLink, Loader2, PenLine } from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
 import WeekGrid from "@/components/ciclo/WeekGrid"
+import { enrichCycleDays } from "@/lib/study-cycle-week-utils"
+import { downloadCyclePdf } from "@/lib/cycle-pdf-download"
 
 export default function CicloSemanaPage() {
   const router = useRouter()
@@ -15,6 +17,7 @@ export default function CicloSemanaPage() {
   const [cycleEnabled, setCycleEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<"grid" | "list">("grid")
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -38,6 +41,18 @@ export default function CicloSemanaPage() {
     })
   }, [router, load])
 
+  async function downloadPdf() {
+    if (!userId) return
+    setDownloadingPdf(true)
+    try {
+      await downloadCyclePdf(userId)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao baixar PDF")
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -60,20 +75,7 @@ export default function CicloSemanaPage() {
     )
   }
 
-  const enrichedCycle: StudyCycle = {
-    ...cycle,
-    days: cycle.days.map((day) => ({
-      ...day,
-      blocks: (day.blocks?.length ? day.blocks : cycle.cycle_blocks.filter(
-          (b) => b.day_index === day.day_index
-        )).map((b) => ({
-        ...b,
-        subject_name:
-          b.subject_name ??
-          cycle.subjects.find((s) => s.subject_id === b.subject_id)?.subject_name,
-      })),
-    })),
-  }
+  const enrichedCycle: StudyCycle = enrichCycleDays(cycle)
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -120,6 +122,19 @@ export default function CicloSemanaPage() {
             <PenLine className="h-3.5 w-3.5" />
             Editar
           </Link>
+          <button
+            type="button"
+            disabled={downloadingPdf}
+            onClick={downloadPdf}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+          >
+            {downloadingPdf ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            Baixar PDF
+          </button>
           {cycleEnabled && (
             <Link
               href="/coach/hoje"

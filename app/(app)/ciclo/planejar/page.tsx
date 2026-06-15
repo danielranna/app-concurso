@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Loader2, Play, Sparkles } from "lucide-react"
+import { ArrowLeft, Download, Loader2, Play, Sparkles } from "lucide-react"
 import type { CycleStats } from "@/lib/study-cycle-deadline-planner"
 import type { StudyCycle, WeekdayLimits } from "@/lib/study-cycle-types"
 import { defaultWeekdayLimits } from "@/lib/study-cycle-planner"
 import CycleStatsPanel from "@/components/ciclo/CycleStatsPanel"
 import CycleSetupIssuesModal from "@/components/ciclo/CycleSetupIssuesModal"
 import type { CycleSetupIssue } from "@/lib/study-cycle-setup-validation"
+import { downloadCyclePdf } from "@/lib/cycle-pdf-download"
 
 type PlanningMode = "time_driven" | "deadline_driven"
 
@@ -31,6 +32,7 @@ export default function CicloPlanejarPage() {
   const [generating, setGenerating] = useState(false)
   const [setupIssues, setSetupIssues] = useState<CycleSetupIssue[]>([])
   const [showSetupModal, setShowSetupModal] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   const load = useCallback(async (uid: string) => {
     setLoading(true)
@@ -133,6 +135,21 @@ export default function CicloPlanejarPage() {
     }
   }
 
+  async function downloadPdf() {
+    if (!userId) return
+    setDownloadingPdf(true)
+    try {
+      await downloadCyclePdf(userId, {
+        targetWeeks,
+        defaultBlockMinutes: blockMinutes,
+      })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao baixar PDF")
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -144,6 +161,8 @@ export default function CicloPlanejarPage() {
   const setupOk =
     (cycle?.subjects?.length ?? 0) > 0 &&
     (cycle?.content_blocks?.length ?? 0) > 0
+
+  const canDownloadPdf = (cycle?.subjects?.length ?? 0) > 0
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -273,6 +292,19 @@ export default function CicloPlanejarPage() {
               )}
               Gerar e ativar
             </button>
+            <button
+              type="button"
+              disabled={downloadingPdf || !canDownloadPdf}
+              onClick={downloadPdf}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            >
+              {downloadingPdf ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Baixar PDF
+            </button>
           </div>
         </>
       ) : (
@@ -306,6 +338,19 @@ export default function CicloPlanejarPage() {
             className="text-sm text-teal-700 underline"
           >
             Usar modo prazo para gerar automaticamente →
+          </button>
+          <button
+            type="button"
+            disabled={downloadingPdf || !canDownloadPdf}
+            onClick={downloadPdf}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+          >
+            {downloadingPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Baixar PDF
           </button>
         </div>
       )}

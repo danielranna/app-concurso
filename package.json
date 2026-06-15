@@ -19,6 +19,7 @@
     "test:flashcard-due": "npx tsx lib/flashcard-due.test.ts"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/supabase-js": "^2.90.1",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
