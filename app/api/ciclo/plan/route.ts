@@ -60,9 +60,9 @@ export async function POST(req: Request) {
       }
 
       const limits =
-        (weekday_limits as WeekdayLimits[]) ??
-        cycle.weekday_limits ??
-        defaultWeekdayLimits()
+        cycle.weekday_limits?.length
+          ? cycle.weekday_limits
+          : (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
 
       const stats = previewCycleStats(
         subjectPlans,
@@ -112,9 +112,9 @@ export async function POST(req: Request) {
       }
 
       const limits =
-        (weekday_limits as WeekdayLimits[]) ??
-        cycle.weekday_limits ??
-        defaultWeekdayLimits()
+        cycle.weekday_limits?.length
+          ? cycle.weekday_limits
+          : (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
 
       const weeks = Number(target_weeks ?? cycle.target_weeks ?? 8)
       const blockMinutes = Number(default_block_minutes ?? cycle.default_block_minutes ?? 45)

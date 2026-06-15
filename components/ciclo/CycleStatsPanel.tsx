@@ -18,12 +18,9 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
   if (!stats) return null
 
   const pct =
-    stats.minutes_per_day_available > 0
-      ? Math.min(
-          100,
-          Math.round(
-            (stats.minutes_per_day_required / stats.minutes_per_day_available) * 100
-          )
+    stats.minutes_total_available > 0
+      ? Math.round(
+          (stats.minutes_total_required / stats.minutes_total_available) * 100
         )
       : 0
 
@@ -31,29 +28,42 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="font-semibold text-slate-900">Resumo do ciclo</h3>
 
+      <p className="text-xs text-slate-500">
+        Configuração da semana: {stats.weekday_minutes_label} ·{" "}
+        {stats.active_days_per_week} dias ativos · ~{stats.minutes_per_week_available}{" "}
+        min/semana
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Sessões totais" value={String(stats.total_sessions)} />
+        <StatCard
+          label="Capacidade no prazo"
+          value={String(stats.sessions_capacity_in_period)}
+          hint={`${stats.total_sessions} necessárias · ~${Math.round(stats.minutes_total_available / 60)} h`}
+        />
         <StatCard
           label="Por mini-ciclo"
           value={String(stats.mini_cycle_sessions)}
           hint={`${stats.mini_cycles_to_complete} mini-ciclos para completar`}
         />
         <StatCard
-          label="Sessões/dia"
-          value={String(stats.sessions_per_day)}
-          hint={`${stats.active_days_in_period} dias ativos no prazo`}
-        />
-        <StatCard
-          label="Minutos/dia"
-          value={`${stats.minutes_per_day_required}`}
-          hint={`Disponível: ~${stats.minutes_per_day_available} min`}
+          label="Prazo sugerido"
+          value={`${stats.suggested_weeks} sem`}
+          hint={
+            stats.feasible
+              ? "Cabe no prazo atual"
+              : `Sugestão: ~${stats.suggested_weeks} semanas (hoje: ${stats.target_weeks})`
+          }
         />
       </div>
 
       <div>
         <div className="mb-1 flex justify-between text-xs text-slate-600">
-          <span>Uso do tempo diário</span>
-          <span>{pct}%</span>
+          <span>Uso do tempo no prazo</span>
+          <span>
+            {Math.round(stats.minutes_total_required / 60)} h /{" "}
+            {Math.round(stats.minutes_total_available / 60)} h ({pct}%)
+          </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-slate-100">
           <div
@@ -65,6 +75,12 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
         </div>
         {stats.warning && (
           <p className="mt-2 text-sm text-red-600">{stats.warning}</p>
+        )}
+        {!stats.feasible && stats.suggested_weeks > 0 && (
+          <p className="mt-1 text-xs text-slate-600">
+            Média de ~{stats.sessions_per_day} sessões/dia ({stats.minutes_per_day_required}{" "}
+            min) vs {stats.minutes_per_day_available} min/dia em média.
+          </p>
         )}
       </div>
 

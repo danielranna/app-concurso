@@ -61,6 +61,10 @@ export default function CicloPlanejarPage() {
     if (!userId || mode !== "deadline_driven") return
     setPreviewing(true)
     try {
+      const ciclo = await fetch(`/api/ciclo?user_id=${userId}`).then((r) => r.json())
+      const freshLimits = ciclo.cycle?.weekday_limits
+      if (freshLimits?.length) setWeekdayLimits(freshLimits)
+
       const res = await fetch("/api/ciclo/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -69,7 +73,6 @@ export default function CicloPlanejarPage() {
           action: "preview",
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
-          weekday_limits: weekdayLimits,
         }),
       })
       const data = await res.json()
@@ -78,7 +81,7 @@ export default function CicloPlanejarPage() {
     } finally {
       setPreviewing(false)
     }
-  }, [userId, mode, targetWeeks, blockMinutes, weekdayLimits])
+  }, [userId, mode, targetWeeks, blockMinutes])
 
   useEffect(() => {
     if (!loading && userId && mode === "deadline_driven") {
@@ -99,7 +102,6 @@ export default function CicloPlanejarPage() {
           action: activate ? "generate_and_activate" : "generate",
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
-          weekday_limits: weekdayLimits,
           planning_mode: mode,
           subjects_per_day: subjectsPerDay,
         }),

@@ -34,6 +34,15 @@ export type CycleStats = {
   sessions_per_day: number
   minutes_per_day_required: number
   minutes_per_day_available: number
+  minutes_per_week_available: number
+  minutes_per_week_required: number
+  minutes_total_required: number
+  minutes_total_available: number
+  sessions_capacity_in_period: number
+  calendar_days_needed: number
+  suggested_weeks: number
+  target_weeks: number
+  weekday_minutes_label: string
   feasible: boolean
   warning?: string
   per_subject: {
@@ -61,14 +70,20 @@ export type GenerateCycleResult = {
   total_days: number
 }
 
-function countActiveDaysPerWeek(weekday_limits: WeekdayLimits[]): number {
-  return weekday_limits.filter((w) => w.active && w.minutes > 0).length
-}
-
-function avgMinutesPerWeek(weekday_limits: WeekdayLimits[]): number {
+function sumMinutesPerWeek(weekday_limits: WeekdayLimits[]): number {
   return weekday_limits
     .filter((w) => w.active && w.minutes > 0)
     .reduce((s, w) => s + w.minutes, 0)
+}
+
+function sessionsCapacityPerWeek(
+  weekday_limits: WeekdayLimits[],
+  blockMinutes: number
+): number {
+  return activeWeekdays(weekday_limits).reduce(
+    (s, w) => s + Math.floor(w.minutes / blockMinutes),
+    0
+  )
 }
 
 function activeWeekdays(weekday_limits: WeekdayLimits[]): WeekdayLimits[] {
@@ -104,24 +119,67 @@ export function computeCycleStats(input: {
 }): CycleStats {
   const { subjects, weekday_limits, target_weeks } = input
   const defaultMinutes = input.default_block_minutes ?? 45
-  const activePerWeek = countActiveDaysPerWeek(weekday_limits)
+  const activeList = activeWeekdays(weekday_limits)
+  const activePerWeek = activeList.length
   const activeDays = activePerWeek * target_weeks
   const totalSessions = computeTotalSessions(subjects)
   const miniCycleSessions = computeMiniCycleSessions(subjects)
   const miniCyclesToComplete = computeMiniCyclesToComplete(subjects)
-  const sessionsPerDay = activeDays > 0 ? Math.ceil(totalSessions / activeDays) : 0
-  const minutesPerDayRequired = sessionsPerDay * defaultMinutes
+
+  const queue = buildFullSessionQueue(subjects)
+  const totalMinutesRequired = queue.reduce(
+    (s, q) => s + (q.estimated_minutes || defaultMinutes),
+    0
+  )
+  const minutesPerWeek = sumMinutesPerWeek(weekday_limits)
+  const totalMinutesAvailable = minutesPerWeek * target_weeks
+  const sessionsPerWeekCapacity = sessionsCapacityPerWeek(
+    weekday_limits,
+    defaultMinutes
+  )
+  const sessionsCapacityInPeriod = sessionsPerWeekCapacity * target_weeks
+  const simulatedDays = distributeSessionsToDays(
+    queue,
+    weekday_limits,
+    defaultMinutes
+  )
+  const calendarDaysNeeded = simulatedDays.length
+  const suggestedWeeks =
+    sessionsPerWeekCapacity > 0
+      ? Math.ceil(totalSessions / sessionsPerWeekCapacity)
+      : target_weeks
+
+  const sessionsPerDay =
+    activeDays > 0 ? Math.ceil(totalSessions / activeDays) : 0
+  const minutesPerDayRequired =
+    activeDays > 0 ? Math.round(totalMinutesRequired / activeDays) : 0
   const minutesPerDayAvailable =
-    activePerWeek > 0 ? Math.round(avgMinutesPerWeek(weekday_limits) / activePerWeek) : 0
+    activePerWeek > 0 ? Math.round(minutesPerWeek / activePerWeek) : 0
+  const minutesPerWeekRequired =
+    target_weeks > 0 ? Math.round(totalMinutesRequired / target_weeks) : 0
+
+  const dayMinutes = activeList.map((w) => w.minutes)
+  const weekdayMinutesLabel =
+    dayMinutes.length === 0
+      ? "—"
+      : dayMinutes.length === 1
+        ? `${dayMinutes[0]} min`
+        : `${Math.min(...dayMinutes)}–${Math.max(...dayMinutes)} min/dia`
 
   let feasible = true
   let warning: string | undefined
   if (activeDays === 0) {
     feasible = false
     warning = "Nenhum dia de estudo ativo na semana."
-  } else if (minutesPerDayRequired > minutesPerDayAvailable * 1.1) {
+  } else if (
+    totalSessions > sessionsCapacityInPeriod ||
+    totalMinutesRequired > totalMinutesAvailable * 1.02
+  ) {
     feasible = false
-    warning = `Você precisa de ~${minutesPerDayRequired} min/dia, mas tem ~${minutesPerDayAvailable} min/dia disponíveis. Aumente o prazo ou os minutos por dia.`
+    warning = `No prazo de ${target_weeks} semanas cabem ~${sessionsCapacityInPeriod} sessões (≈${Math.round(totalMinutesAvailable / 60)} h), mas você precisa de ${totalSessions} (≈${Math.round(totalMinutesRequired / 60)} h). Tente ~${suggestedWeeks} semanas ou reduza blocos/peso.`
+  } else if (calendarDaysNeeded > activeDays) {
+    feasible = false
+    warning = `O calendário precisa de ${calendarDaysNeeded} dias de estudo, mas há ${activeDays} no prazo. Aumente para ~${Math.ceil(calendarDaysNeeded / activePerWeek)} semanas.`
   }
 
   const weeks = Math.max(1, target_weeks)
@@ -148,6 +206,15 @@ export function computeCycleStats(input: {
     sessions_per_day: sessionsPerDay,
     minutes_per_day_required: minutesPerDayRequired,
     minutes_per_day_available: minutesPerDayAvailable,
+    minutes_per_week_available: minutesPerWeek,
+    minutes_per_week_required: minutesPerWeekRequired,
+    minutes_total_required: totalMinutesRequired,
+    minutes_total_available: totalMinutesAvailable,
+    sessions_capacity_in_period: sessionsCapacityInPeriod,
+    calendar_days_needed: calendarDaysNeeded,
+    suggested_weeks: suggestedWeeks,
+    target_weeks,
+    weekday_minutes_label: weekdayMinutesLabel,
     feasible,
     warning,
     per_subject,
