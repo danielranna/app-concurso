@@ -1,5 +1,6 @@
 import { supabaseServer } from "./supabase-server"
 import { assessTecFacetQuality } from "./tec-facets"
+import { fetchQuestionTaxonomyForUser } from "./question-taxonomy"
 import { flattenFolderTopics } from "./study-cycle-topic-utils"
 import {
   fetchTecSubjectTree,
@@ -59,9 +60,7 @@ export async function loadMappings(userId: string) {
 export async function listUnmappedTecSubjects(
   userId: string
 ): Promise<TecSubjectGroup[]> {
-  const { data: questions } = await supabaseServer
-    .from("questions")
-    .select("tec_subject, tec_topic, statement")
+  const questions = await fetchQuestionTaxonomyForUser(userId)
 
   const mappings = await loadMappings(userId)
   const mappedSubjects = new Set(
@@ -75,7 +74,7 @@ export async function listUnmappedTecSubjects(
     { count: number; sample_statement: string; topics: Set<string> }
   >()
 
-  for (const q of questions ?? []) {
+  for (const q of questions) {
     const sub = normKey(q.tec_subject ?? "")
     if (!sub || mappedSubjects.has(sub)) continue
     const g = groups.get(sub) ?? {
@@ -103,9 +102,7 @@ export async function listUnmappedTecSubjects(
 
 /** Assuntos TEC ainda sem vínculo com o seu tema (matéria TEC já pode estar vinculada). */
 export async function listUnmappedTecTopics(userId: string): Promise<TecTopicGroup[]> {
-  const { data: questions } = await supabaseServer
-    .from("questions")
-    .select("tec_subject, tec_topic, statement")
+  const questions = await fetchQuestionTaxonomyForUser(userId)
 
   const mappings = await loadMappings(userId)
   const mappedTopicKeys = new Set(
@@ -130,7 +127,7 @@ export async function listUnmappedTecTopics(userId: string): Promise<TecTopicGro
     { tec_subject: string; tec_topic: string; count: number; sample_statement: string }
   >()
 
-  for (const q of questions ?? []) {
+  for (const q of questions) {
     const sub = normKey(q.tec_subject ?? "")
     const top = normKey(q.tec_topic ?? "")
     if (!sub || !top) continue
@@ -338,12 +335,10 @@ export async function getMappingProgress(userId: string): Promise<
     subject_mapped: boolean
   }[]
 > {
-  const { data: questions } = await supabaseServer
-    .from("questions")
-    .select("tec_subject, tec_topic")
+  const questions = await fetchQuestionTaxonomyForUser(userId)
 
   const topicSets = new Map<string, Set<string>>()
-  for (const q of questions ?? []) {
+  for (const q of questions) {
     const sub = normKey(q.tec_subject ?? "")
     const top = normKey(q.tec_topic ?? "")
     if (!sub || !top) continue
@@ -472,9 +467,7 @@ export async function listUnmappedPairs(userId: string) {
 export async function listAllTecSubjectsOverview(
   userId: string
 ): Promise<TecSubjectOverview[]> {
-  const { data: questions } = await supabaseServer
-    .from("questions")
-    .select("tec_subject, tec_topic, statement")
+  const questions = await fetchQuestionTaxonomyForUser(userId)
 
   const mappings = await loadMappings(userId)
   const subjectLevelByTec = new Map<string, { subject_id: string }>()
@@ -508,7 +501,7 @@ export async function listAllTecSubjectsOverview(
     }
   >()
 
-  for (const q of questions ?? []) {
+  for (const q of questions) {
     const sub = normKey(q.tec_subject ?? "")
     if (!sub) continue
     const g = groups.get(sub) ?? {
