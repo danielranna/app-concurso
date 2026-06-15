@@ -23,6 +23,7 @@ export type PlannedSession = {
   block_index: number
   pass_number: number
   mini_cycle_index: number
+  study_note?: string | null
 }
 
 export type CycleStats = {
@@ -275,6 +276,7 @@ export function buildFullSessionQueue(subjects: SubjectPlanInput[]): PlannedSess
           block_index: rot.blockPtr % rot.blocks.length,
           pass_number: passNumber,
           mini_cycle_index: miniCycleIndex,
+          study_note: block.study_note,
         })
 
         rot.passCount++
@@ -294,6 +296,43 @@ export function buildFullSessionQueue(subjects: SubjectPlanInput[]): PlannedSess
 }
 
 /** Distribui sessões pelos dias ativos, respeitando minutos disponíveis por dia */
+function isManualSession(session: PlannedSession): boolean {
+  return Boolean(session.study_note?.trim())
+}
+
+function sessionCalendarLabel(session: PlannedSession): string {
+  const note = session.study_note?.trim()
+  if (!note) return session.content_block_name
+  const combined = `${session.content_block_name} — ${note}`
+  return combined.length > 140 ? `${combined.slice(0, 137)}…` : combined
+}
+
+function plannedSessionToCycleBlock(
+  session: PlannedSession,
+  dayIndex: number,
+  sortOrder: number,
+  defaultBlockMinutes: number
+): Omit<StudyCycleBlock, "id" | "cycle_id"> {
+  const blockMinutes = session.estimated_minutes || defaultBlockMinutes
+  const manual = isManualSession(session)
+  return {
+    day_index: dayIndex,
+    subject_id: session.subject_id,
+    content_node_id: null,
+    content_block_id: session.content_block_id,
+    block_type: manual ? "read" : "questions",
+    sort_order: sortOrder,
+    label: sessionCalendarLabel(session),
+    params: {
+      question_count: manual ? undefined : 20,
+      minutes: blockMinutes,
+      mini_cycle_index: session.mini_cycle_index,
+      block_pass: session.pass_number,
+      study_note: manual ? session.study_note?.trim() : undefined,
+    },
+  }
+}
+
 export function distributeSessionsToDays(
   queue: PlannedSession[],
   weekday_limits: WeekdayLimits[],
@@ -319,21 +358,9 @@ export function distributeSessionsToDays(
       const blockMinutes = session.estimated_minutes || defaultBlockMinutes
       if (blocks.length > 0 && usedMinutes + blockMinutes > maxMinutes) break
 
-      blocks.push({
-        day_index: dayIndex,
-        subject_id: session.subject_id,
-        content_node_id: null,
-        content_block_id: session.content_block_id,
-        block_type: "questions",
-        sort_order: sortOrder++,
-        label: session.content_block_name,
-        params: {
-          question_count: 20,
-          minutes: blockMinutes,
-          mini_cycle_index: session.mini_cycle_index,
-          block_pass: session.pass_number,
-        },
-      })
+      blocks.push(
+        plannedSessionToCycleBlock(session, dayIndex, sortOrder++, defaultBlockMinutes)
+      )
 
       usedMinutes += blockMinutes
       sessionIdx++
@@ -343,21 +370,7 @@ export function distributeSessionsToDays(
 
     if (blocks.length === 0 && sessionIdx < queue.length) {
       const session = queue[sessionIdx]
-      blocks.push({
-        day_index: dayIndex,
-        subject_id: session.subject_id,
-        content_node_id: null,
-        content_block_id: session.content_block_id,
-        block_type: "questions",
-        sort_order: 0,
-        label: session.content_block_name,
-        params: {
-          question_count: 20,
-          minutes: session.estimated_minutes || defaultBlockMinutes,
-          mini_cycle_index: session.mini_cycle_index,
-          block_pass: session.pass_number,
-        },
-      })
+      blocks.push(plannedSessionToCycleBlock(session, dayIndex, 0, defaultBlockMinutes))
       sessionIdx++
     }
 

@@ -196,6 +196,17 @@ export default function CicloBlocosPage() {
     )
   }
 
+  async function updateBlockStudyNote(blockId: string, study_note: string) {
+    await fetch("/api/ciclo/content-blocks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ block_id: blockId, study_note: study_note || null }),
+    })
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, study_note: study_note || null } : b))
+    )
+  }
+
   function handleDrop(blockId: string, blockName: string, e: React.DragEvent) {
     e.preventDefault()
     const raw = e.dataTransfer.getData(DRAG_TYPE)
@@ -333,6 +344,7 @@ export default function CicloBlocosPage() {
                   onDelete={() => deleteBlock(block.id)}
                   onRename={(name) => updateBlockName(block.id, name)}
                   onMinutes={(m) => updateBlockMinutes(block.id, m)}
+                  onStudyNote={(note) => updateBlockStudyNote(block.id, note)}
                 />
               ))
             )}
@@ -357,6 +369,7 @@ function BlockCard({
   onDelete,
   onRename,
   onMinutes,
+  onStudyNote,
 }: {
   block: StudyCycleContentBlock
   onDrop: (e: React.DragEvent) => void
@@ -364,13 +377,25 @@ function BlockCard({
   onDelete: () => void
   onRename: (name: string) => void
   onMinutes: (m: number) => void
+  onStudyNote: (note: string) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
+  const [noteDraft, setNoteDraft] = useState(block.study_note ?? "")
+  const isManual = block.topics.length === 0
+  const needsNote = isManual && !block.study_note?.trim()
+
+  useEffect(() => {
+    setNoteDraft(block.study_note ?? "")
+  }, [block.id, block.study_note])
 
   return (
     <div
       className={`rounded-xl border-2 bg-white p-3 transition-colors ${
-        dragOver ? "border-teal-400 bg-teal-50/30" : "border-slate-200"
+        dragOver
+          ? "border-teal-400 bg-teal-50/30"
+          : needsNote
+            ? "border-amber-200"
+            : "border-slate-200"
       }`}
       onDragOver={(e) => {
         e.preventDefault()
@@ -407,12 +432,31 @@ function BlockCard({
         >
           <Trash2 className="h-4 w-4" />
         </button>
+        {isManual && (
+          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+            Manual
+          </span>
+        )}
       </div>
 
-      {block.topics.length === 0 ? (
-        <p className="py-4 text-center text-xs text-slate-400">
-          Solte assuntos ou uma pasta aqui
-        </p>
+      {isManual ? (
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-slate-600">
+            O que você vai estudar neste bloco?
+          </label>
+          <textarea
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onBlur={() => onStudyNote(noteDraft.trim())}
+            rows={3}
+            placeholder="Ex.: Redação dissertativa — 3 temas por semana"
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+          />
+          <p className="text-[11px] text-slate-500">
+            Use para matérias sem questões no banco (ex.: discursiva). Ou solte assuntos
+            aqui se tiver no banco.
+          </p>
+        </div>
       ) : (
         <ul
           className={`flex flex-wrap gap-1 ${

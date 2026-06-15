@@ -134,14 +134,14 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   const body = await req.json()
-  const { block_id, name, sort_order, estimated_minutes } = body
+  const { block_id, name, sort_order, estimated_minutes, study_note } = body
 
   if (!block_id) {
     return NextResponse.json({ error: "block_id obrigatório" }, { status: 400 })
   }
 
   try {
-    await updateContentBlock(block_id, { name, sort_order, estimated_minutes })
+    await updateContentBlock(block_id, { name, sort_order, estimated_minutes, study_note })
     return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

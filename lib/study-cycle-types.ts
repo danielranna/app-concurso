@@ -34,6 +34,7 @@ export type StudyCycleBlock = {
     notebook_id?: string
     mini_cycle_index?: number
     block_pass?: number
+    study_note?: string
   }
   subject_name?: string
   content_node_name?: string
@@ -55,6 +56,7 @@ export type StudyCycleContentBlock = {
   name: string
   sort_order: number
   estimated_minutes: number
+  study_note?: string | null
   topics: StudyCycleContentBlockTopic[]
   subject_name?: string
 }

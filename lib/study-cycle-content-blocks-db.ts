@@ -51,6 +51,7 @@ export async function loadContentBlocksForCycle(
       name: b.name,
       sort_order: b.sort_order,
       estimated_minutes: b.estimated_minutes ?? 45,
+      study_note: (b.study_note as string | null) ?? null,
       topics: topicsByBlock.get(b.id) ?? [],
       subject_name: name,
     }
@@ -86,6 +87,7 @@ export async function getContentBlock(
     name: b.name,
     sort_order: b.sort_order,
     estimated_minutes: b.estimated_minutes ?? 45,
+    study_note: (b.study_note as string | null) ?? null,
     topics: (topics ?? []).map((t) => ({
       id: t.id,
       content_block_id: t.content_block_id,
@@ -120,6 +122,7 @@ export async function createContentBlock(
 
   return {
     ...data,
+    study_note: null,
     topics: [],
   }
 }
@@ -130,6 +133,7 @@ export async function updateContentBlock(
     name?: string
     sort_order?: number
     estimated_minutes?: number
+    study_note?: string | null
   }
 ): Promise<void> {
   const { error } = await supabaseServer
@@ -137,6 +141,13 @@ export async function updateContentBlock(
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", blockId)
   if (error) throw new Error(error.message)
+}
+
+async function clearStudyNoteIfTopicsAdded(blockId: string): Promise<void> {
+  await supabaseServer
+    .from("study_cycle_content_blocks")
+    .update({ study_note: null, updated_at: new Date().toISOString() })
+    .eq("id", blockId)
 }
 
 export async function deleteContentBlock(blockId: string): Promise<void> {
@@ -168,6 +179,7 @@ export async function addTopicToContentBlock(
     .single()
 
   if (error || !data) throw new Error(error?.message ?? "Erro ao adicionar assunto")
+  await clearStudyNoteIfTopicsAdded(blockId)
   return {
     id: data.id,
     content_block_id: data.content_block_id,
@@ -379,6 +391,8 @@ export async function addTopicsToContentBlock(
     .select("*")
 
   if (error) throw new Error(error.message)
+
+  await clearStudyNoteIfTopicsAdded(blockId)
 
   return {
     added: data?.length ?? 0,

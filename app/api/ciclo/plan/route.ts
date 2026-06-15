@@ -102,9 +102,11 @@ export async function POST(req: Request) {
           )
         }
         for (const b of sp.blocks) {
-          if (!b.topics.length) {
+          if (!b.topics.length && !b.study_note?.trim()) {
             return NextResponse.json(
-              { error: `Bloco "${b.name}" não tem assuntos` },
+              {
+                error: `Bloco "${b.name}": adicione assuntos ou descreva o que vai estudar em Blocos.`,
+              },
               { status: 400 }
             )
           }
