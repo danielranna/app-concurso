@@ -1,3 +1,5 @@
+import "server-only"
+
 import { supabaseServer } from "./supabase-server"
 import type { DailyWrongItem } from "./daily-wrong-attempts-types"
 import {

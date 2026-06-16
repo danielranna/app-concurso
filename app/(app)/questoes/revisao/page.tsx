@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { todayDateString } from "@/lib/daily-wrong-attempts"
+import { todayDateString } from "@/lib/daily-wrong-attempts-utils"
 import DailyWrongReviewList from "@/components/questions/DailyWrongReviewList"
 
 export default function QuestoesRevisaoPage() {

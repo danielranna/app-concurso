@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { ExternalLink, Loader2 } from "lucide-react"
-import type { DailyWrongItem } from "@/lib/daily-wrong-attempts"
+import type { DailyWrongItem } from "@/lib/daily-wrong-attempts-types"
 
 type Props = {
   userId: string
