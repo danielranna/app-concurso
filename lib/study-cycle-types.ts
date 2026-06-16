@@ -62,6 +62,8 @@ export type StudyCycleContentBlock = {
   sort_order: number
   estimated_minutes: number
   study_note?: string | null
+  notebook_id?: string | null
+  notebook_name?: string | null
   topics: StudyCycleContentBlockTopic[]
   subject_name?: string
 }

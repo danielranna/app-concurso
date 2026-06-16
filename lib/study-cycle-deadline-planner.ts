@@ -29,6 +29,7 @@ export type PlannedSession = {
   pass_number: number
   mini_cycle_index: number
   study_note?: string | null
+  notebook_id?: string | null
 }
 
 export type CycleStats = {
@@ -361,6 +362,7 @@ export function buildFullSessionQueue(subjects: SubjectPlanInput[]): PlannedSess
           pass_number: passNumber,
           mini_cycle_index: miniCycleIndex,
           study_note: block.study_note,
+          notebook_id: block.notebook_id ?? null,
         })
 
         rot.passCount++
@@ -413,6 +415,7 @@ function plannedSessionToCycleBlock(
       mini_cycle_index: session.mini_cycle_index,
       block_pass: session.pass_number,
       study_note: manual ? session.study_note?.trim() : undefined,
+      notebook_id: session.notebook_id ?? undefined,
     },
   }
 }

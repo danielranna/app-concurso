@@ -6,14 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import {
   ArrowLeft,
+  BookOpen,
   Loader2,
   Plus,
   Trash2,
-  X,
 } from "lucide-react"
 import type {
   StudyCycleContentBlock,
-  StudyCycleContentBlockTopic,
   StudyCycleSubject,
 } from "@/lib/study-cycle-types"
 import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
@@ -23,6 +22,8 @@ import TecTopicTree, {
   dragPayloadToTopics,
   parseDragPayload,
 } from "@/components/ciclo/TecTopicTree"
+import BlockTopicGroups from "@/components/ciclo/BlockTopicGroups"
+import NotebookPickerModal from "@/components/ciclo/NotebookPickerModal"
 
 export default function CicloBlocosPage() {
   const router = useRouter()
@@ -191,14 +192,28 @@ export default function CicloBlocosPage() {
     )
   }
 
-  async function updateBlockMinutes(blockId: string, estimated_minutes: number) {
+  async function updateBlockNotebook(
+    blockId: string,
+    notebook: { id: string; name: string } | null
+  ) {
     await fetch("/api/ciclo/content-blocks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ block_id: blockId, estimated_minutes }),
+      body: JSON.stringify({
+        block_id: blockId,
+        notebook_id: notebook?.id ?? null,
+      }),
     })
     setBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, estimated_minutes } : b))
+      prev.map((b) =>
+        b.id === blockId
+          ? {
+              ...b,
+              notebook_id: notebook?.id ?? null,
+              notebook_name: notebook?.name ?? null,
+            }
+          : b
+      )
     )
   }
 
@@ -345,11 +360,13 @@ export default function CicloBlocosPage() {
                 <BlockCard
                   key={block.id}
                   block={block}
+                  userId={userId!}
+                  subjectName={selectedName}
                   onDrop={(e) => handleDrop(block.id, block.name, e)}
                   onRemoveTopic={removeTopic}
                   onDelete={() => deleteBlock(block.id)}
                   onRename={(name) => updateBlockName(block.id, name)}
-                  onMinutes={(m) => updateBlockMinutes(block.id, m)}
+                  onNotebook={(nb) => updateBlockNotebook(block.id, nb)}
                   onStudyNote={(note) => updateBlockStudyNote(block.id, note)}
                 />
               ))
@@ -370,23 +387,28 @@ export default function CicloBlocosPage() {
 
 function BlockCard({
   block,
+  userId,
+  subjectName,
   onDrop,
   onRemoveTopic,
   onDelete,
   onRename,
-  onMinutes,
+  onNotebook,
   onStudyNote,
 }: {
   block: StudyCycleContentBlock
+  userId: string
+  subjectName: string
   onDrop: (e: React.DragEvent) => void
   onRemoveTopic: (id: string) => void
   onDelete: () => void
   onRename: (name: string) => void
-  onMinutes: (m: number) => void
+  onNotebook: (notebook: { id: string; name: string } | null) => void
   onStudyNote: (note: string) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
   const [noteDraft, setNoteDraft] = useState(block.study_note ?? "")
+  const [pickerOpen, setPickerOpen] = useState(false)
   const isManual = block.topics.length === 0
   const needsNote = isManual && !block.study_note?.trim()
 
@@ -395,99 +417,102 @@ function BlockCard({
   }, [block.id, block.study_note])
 
   return (
-    <div
-      className={`rounded-xl border-2 bg-white p-3 transition-colors ${
-        dragOver
-          ? "border-teal-400 bg-teal-50/30"
-          : needsNote
-            ? "border-amber-200"
-            : "border-slate-200"
-      }`}
-      onDragOver={(e) => {
-        e.preventDefault()
-        setDragOver(true)
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        setDragOver(false)
-        onDrop(e)
-      }}
-    >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={block.name}
-          onChange={(e) => onRename(e.target.value)}
-          className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium"
-        />
-        <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
-          min
+    <>
+      <div
+        className={`rounded-xl border-2 bg-white p-3 transition-colors ${
+          dragOver
+            ? "border-teal-400 bg-teal-50/30"
+            : needsNote
+              ? "border-amber-200"
+              : "border-slate-200"
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragOver(true)
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          setDragOver(false)
+          onDrop(e)
+        }}
+      >
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           <input
-            type="number"
-            min={15}
-            step={15}
-            value={block.estimated_minutes}
-            onChange={(e) => onMinutes(Number(e.target.value))}
-            className="w-14 rounded border border-slate-200 px-1 py-0.5 text-sm"
+            type="text"
+            value={block.name}
+            onChange={(e) => onRename(e.target.value)}
+            className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium"
           />
-        </label>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="shrink-0 text-red-500 hover:text-red-700"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-        {isManual && (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-            Manual
-          </span>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+              block.notebook_id
+                ? "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+            title="Associar caderno de questões"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            {block.notebook_name
+              ? block.notebook_name.length > 18
+                ? `${block.notebook_name.slice(0, 16)}…`
+                : block.notebook_name
+              : "Caderno"}
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="shrink-0 text-red-500 hover:text-red-700"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+          {isManual && (
+            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+              Manual
+            </span>
+          )}
+        </div>
+
+        {isManual ? (
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-slate-600">
+              O que você vai estudar neste bloco?
+            </label>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onBlur={() => onStudyNote(noteDraft.trim())}
+              rows={3}
+              placeholder="Ex.: Redação dissertativa — 3 temas por semana"
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+            />
+            <p className="text-[11px] text-slate-500">
+              Use para matérias sem questões no banco (ex.: discursiva). Ou solte assuntos
+              aqui se tiver no banco.
+            </p>
+          </div>
+        ) : (
+          <BlockTopicGroups
+            topics={block.topics}
+            onRemoveTopic={onRemoveTopic}
+          />
         )}
       </div>
 
-      {isManual ? (
-        <div className="space-y-2">
-          <label className="block text-xs font-medium text-slate-600">
-            O que você vai estudar neste bloco?
-          </label>
-          <textarea
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
-            onBlur={() => onStudyNote(noteDraft.trim())}
-            rows={3}
-            placeholder="Ex.: Redação dissertativa — 3 temas por semana"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-          />
-          <p className="text-[11px] text-slate-500">
-            Use para matérias sem questões no banco (ex.: discursiva). Ou solte assuntos
-            aqui se tiver no banco.
-          </p>
-        </div>
-      ) : (
-        <ul
-          className={`flex flex-wrap gap-1 ${
-            block.topics.length > 8 ? "max-h-24 overflow-y-auto" : ""
-          }`}
-        >
-          {block.topics.map((t: StudyCycleContentBlockTopic) => (
-            <li
-              key={t.id ?? `${t.tec_subject}:${t.tec_topic}`}
-              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
-            >
-              {t.tec_topic || t.tec_subject}
-              {t.id && (
-                <button
-                  type="button"
-                  onClick={() => onRemoveTopic(t.id!)}
-                  className="text-slate-400 hover:text-red-500"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+      <NotebookPickerModal
+        open={pickerOpen}
+        userId={userId}
+        subjectId={block.subject_id}
+        subjectName={subjectName}
+        currentNotebookId={block.notebook_id}
+        currentNotebookName={block.notebook_name}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(nb) => {
+          onNotebook(nb)
+          setPickerOpen(false)
+        }}
+      />
+    </>
   )
 }

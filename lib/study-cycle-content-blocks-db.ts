@@ -15,7 +15,7 @@ export async function loadContentBlocksForCycle(
 ): Promise<StudyCycleContentBlock[]> {
   const { data: blockRows } = await supabaseServer
     .from("study_cycle_content_blocks")
-    .select("*, subjects(name)")
+    .select("*, subjects(name), notebooks(id, name)")
     .eq("cycle_id", cycleId)
     .order("sort_order")
 
@@ -44,6 +44,11 @@ export async function loadContentBlocksForCycle(
   return blockRows.map((b) => {
     const sub = b.subjects as { name?: string } | { name?: string }[] | null
     const name = Array.isArray(sub) ? sub[0]?.name : sub?.name
+    const nb = b.notebooks as
+      | { id?: string; name?: string }
+      | { id?: string; name?: string }[]
+      | null
+    const nbObj = Array.isArray(nb) ? nb[0] : nb
     return {
       id: b.id,
       cycle_id: b.cycle_id,
@@ -52,6 +57,8 @@ export async function loadContentBlocksForCycle(
       sort_order: b.sort_order,
       estimated_minutes: b.estimated_minutes ?? 45,
       study_note: (b.study_note as string | null) ?? null,
+      notebook_id: (b.notebook_id as string | null) ?? nbObj?.id ?? null,
+      notebook_name: nbObj?.name ?? null,
       topics: topicsByBlock.get(b.id) ?? [],
       subject_name: name,
     }
@@ -64,7 +71,7 @@ export async function getContentBlock(
 ): Promise<StudyCycleContentBlock | null> {
   const { data: b } = await supabaseServer
     .from("study_cycle_content_blocks")
-    .select("*, study_cycles!inner(user_id), subjects(name)")
+    .select("*, study_cycles!inner(user_id), subjects(name), notebooks(id, name)")
     .eq("id", blockId)
     .eq("study_cycles.user_id", userId)
     .maybeSingle()
@@ -79,6 +86,11 @@ export async function getContentBlock(
 
   const sub = b.subjects as { name?: string } | { name?: string }[] | null
   const subName = Array.isArray(sub) ? sub[0]?.name : sub?.name
+  const nb = b.notebooks as
+    | { id?: string; name?: string }
+    | { id?: string; name?: string }[]
+    | null
+  const nbObj = Array.isArray(nb) ? nb[0] : nb
 
   return {
     id: b.id,
@@ -88,6 +100,8 @@ export async function getContentBlock(
     sort_order: b.sort_order,
     estimated_minutes: b.estimated_minutes ?? 45,
     study_note: (b.study_note as string | null) ?? null,
+    notebook_id: (b.notebook_id as string | null) ?? nbObj?.id ?? null,
+    notebook_name: nbObj?.name ?? null,
     topics: (topics ?? []).map((t) => ({
       id: t.id,
       content_block_id: t.content_block_id,
@@ -134,6 +148,7 @@ export async function updateContentBlock(
     sort_order?: number
     estimated_minutes?: number
     study_note?: string | null
+    notebook_id?: string | null
   }
 ): Promise<void> {
   const { error } = await supabaseServer

@@ -1,17 +1,25 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
   ListOrdered,
   Loader2,
   SkipForward,
   Sparkles,
 } from "lucide-react"
 import type { PaceAnalytics, QueueState } from "@/lib/study-cycle-queue"
+import {
+  resolveQueueContentBlock,
+  resolveQueueNotebook,
+} from "@/lib/study-cycle-queue-display"
 import type { StudyCycle } from "@/lib/study-cycle-types"
+import BlockTopicGroups from "@/components/ciclo/BlockTopicGroups"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -88,6 +96,8 @@ export default function CycleQueuePanel({
 
   const nextPending = queue.pending.slice(1, 6)
   const recentCompleted = queue.completed.slice(0, 10)
+  const currentContent = resolveQueueContentBlock(cycle, queue.current)
+  const currentNotebook = resolveQueueNotebook(cycle, queue.current)
 
   return (
     <Card className="overflow-hidden">
@@ -141,7 +151,12 @@ export default function CycleQueuePanel({
               <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
                 {queue.current.subject_name ?? "Matéria"}
               </p>
-              <p className="mt-1 text-sm text-slate-600">{queue.current.label}</p>
+              <p className="mt-1 text-sm font-medium text-slate-700">
+                {currentContent?.name ?? queue.current.content_block_name ?? queue.current.label}
+              </p>
+              {queue.current.label !== currentContent?.name && (
+                <p className="mt-0.5 text-xs text-slate-500">{queue.current.label}</p>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Badge variant="outline">
                   ×{weightMap.get(queue.current.subject_id) ?? 1}
@@ -157,6 +172,48 @@ export default function CycleQueuePanel({
                   </Badge>
                 )}
               </div>
+
+              {(currentContent?.study_note?.trim() ||
+                (currentContent?.topics?.length ?? 0) > 0 ||
+                currentNotebook) && (
+                <div className="mt-4 space-y-3 rounded-xl border border-white/80 bg-white/70 p-3">
+                  {currentContent?.study_note?.trim() && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Conteúdo
+                      </p>
+                      <p className="mt-1 text-sm text-slate-700">
+                        {currentContent.study_note}
+                      </p>
+                    </div>
+                  )}
+                  {(currentContent?.topics?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Assuntos do bloco
+                      </p>
+                      <BlockTopicGroups
+                        topics={currentContent!.topics}
+                        compact
+                        defaultOpen={currentContent!.topics.length <= 12}
+                      />
+                    </div>
+                  )}
+                  {currentNotebook && (
+                    <Link
+                      href={`/questoes/cadernos/${currentNotebook.id}`}
+                      className="inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-800 transition-colors hover:bg-teal-100"
+                    >
+                      <BookOpen className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 truncate">
+                        Estudar: {currentNotebook.name}
+                      </span>
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    </Link>
+                  )}
+                </div>
+              )}
+
               <div className="mt-5 flex flex-wrap gap-2">
                 <Button
                   type="button"
