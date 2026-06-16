@@ -1,5 +1,6 @@
 "use client"
 
+import { Check } from "lucide-react"
 import type { StudyCycle, StudyCycleBlock } from "@/lib/study-cycle-types"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
 import { groupDaysIntoWeeks, getDayCellSummary } from "@/lib/study-cycle-week-utils"
@@ -15,9 +16,15 @@ const SUBJECT_COLORS = [
 
 type Props = {
   cycle: StudyCycle
+  completedBlockIds?: Set<string>
+  currentBlockId?: string | null
 }
 
-export default function WeekGrid({ cycle }: Props) {
+export default function WeekGrid({
+  cycle,
+  completedBlockIds,
+  currentBlockId,
+}: Props) {
   const subjectColorMap = new Map<string, string>()
   cycle.subjects.forEach((s, i) => {
     subjectColorMap.set(s.subject_id, SUBJECT_COLORS[i % SUBJECT_COLORS.length])
@@ -67,7 +74,7 @@ export default function WeekGrid({ cycle }: Props) {
                       </div>
                       {day.blocks.map((block, bi) => (
                         <BlockCard
-                          key={bi}
+                          key={block.id ?? bi}
                           block={block}
                           colorClass={
                             subjectColorMap.get(block.subject_id) ??
@@ -75,6 +82,10 @@ export default function WeekGrid({ cycle }: Props) {
                           }
                           weight={weightMap.get(block.subject_id) ?? 1}
                           subjectName={block.subject_name}
+                          isCompleted={
+                            block.id != null && completedBlockIds?.has(block.id)
+                          }
+                          isCurrent={block.id != null && block.id === currentBlockId}
                         />
                       ))}
                     </div>
@@ -96,20 +107,31 @@ function BlockCard({
   colorClass,
   weight,
   subjectName,
+  isCompleted,
+  isCurrent,
 }: {
   block: StudyCycleBlock
   colorClass: string
   weight: number
   subjectName?: string
+  isCompleted?: boolean
+  isCurrent?: boolean
 }) {
   const miniCycle = block.params.mini_cycle_index
   const pass = block.params.block_pass
 
   return (
     <div
-      className={`rounded border px-1.5 py-1 text-[10px] leading-tight ${colorClass}`}
+      className={`relative rounded border px-1.5 py-1 text-[10px] leading-tight ${colorClass} ${
+        isCompleted ? "opacity-50 line-through" : ""
+      } ${isCurrent ? "ring-2 ring-teal-500 ring-offset-1" : ""} ${
+        isCompleted ? "border-emerald-400" : ""
+      }`}
       title={block.label}
     >
+      {isCompleted && (
+        <Check className="absolute right-0.5 top-0.5 h-2.5 w-2.5 text-emerald-700" />
+      )}
       <p className="truncate font-medium">{subjectName ?? block.label}</p>
       <p className="truncate opacity-80">{block.label}</p>
       <div className="mt-0.5 flex flex-wrap gap-0.5">

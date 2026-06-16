@@ -263,27 +263,44 @@ export async function PATCH(req: Request) {
   const { supabaseServer } = await import("@/lib/supabase-server")
 
   if (subjects_per_cycle_day != null) {
-    await supabaseServer.from("coach_study_preferences").upsert({
-      user_id,
-      subjects_per_cycle_day: Number(subjects_per_cycle_day),
-      updated_at: new Date().toISOString(),
-    })
+    const { error: prefsError } = await supabaseServer
+      .from("coach_study_preferences")
+      .upsert({
+        user_id,
+        subjects_per_cycle_day: Number(subjects_per_cycle_day),
+        updated_at: new Date().toISOString(),
+      })
+    if (prefsError) {
+      return NextResponse.json({ error: prefsError.message }, { status: 400 })
+    }
   }
 
   if (weekday_limits && cycle_id) {
     const normalized = normalizeWeekdayLimits(weekday_limits as WeekdayLimits[])
     for (const w of normalized) {
-      await supabaseServer.from("study_cycle_weekday_limits").upsert(
-        {
-          cycle_id,
-          weekday: w.weekday,
-          minutes: w.minutes,
-          active: w.active,
-          max_blocks: w.active ? w.max_blocks : null,
-          daily_limits: w.daily_limits,
-        },
-        { onConflict: "cycle_id,weekday" }
-      )
+      const { error } = await supabaseServer
+        .from("study_cycle_weekday_limits")
+        .upsert(
+          {
+            cycle_id,
+            weekday: w.weekday,
+            minutes: w.minutes,
+            active: w.active,
+            max_blocks: w.active ? w.max_blocks : null,
+            daily_limits: w.daily_limits,
+          },
+          { onConflict: "cycle_id,weekday" }
+        )
+      if (error) {
+        const hint =
+          error.code === "PGRST204"
+            ? " Execute sql-study-cycle-weekday-max-blocks.sql no Supabase."
+            : ""
+        return NextResponse.json(
+          { error: `${error.message}${hint}` },
+          { status: 400 }
+        )
+      }
     }
   }
 

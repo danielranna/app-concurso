@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Download, ExternalLink, Loader2, PenLine } from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
+import type { QueueState } from "@/lib/study-cycle-queue"
 import WeekGrid from "@/components/ciclo/WeekGrid"
 import { enrichCycleDays } from "@/lib/study-cycle-week-utils"
 import { downloadCyclePdf } from "@/lib/cycle-pdf-download"
@@ -18,6 +19,7 @@ export default function CicloSemanaPage() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<"grid" | "list">("grid")
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [queue, setQueue] = useState<QueueState | null>(null)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -26,6 +28,16 @@ export default function CicloSemanaPage() {
       .then((d) => {
         setCycle(d.cycle ?? null)
         setCycleEnabled(d.preferences?.cycle_enabled ?? false)
+        const hasBlocks = (d.cycle?.cycle_blocks?.length ?? 0) > 0
+        if (hasBlocks) {
+          return fetch(`/api/ciclo/queue?user_id=${uid}`)
+            .then((r) => r.json())
+            .then((qd) => {
+              setQueue(qd.queue ?? null)
+              if (qd.cycle) setCycle(qd.cycle)
+            })
+        }
+        setQueue(null)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -76,6 +88,11 @@ export default function CicloSemanaPage() {
   }
 
   const enrichedCycle: StudyCycle = enrichCycleDays(cycle)
+
+  const completedBlockIds = new Set(
+    queue?.completed.map((b) => b.id).filter(Boolean) as string[]
+  )
+  const currentBlockId = queue?.current?.id ?? null
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -148,7 +165,11 @@ export default function CicloSemanaPage() {
       </div>
 
       {view === "grid" ? (
-        <WeekGrid cycle={enrichedCycle} />
+        <WeekGrid
+          cycle={enrichedCycle}
+          completedBlockIds={completedBlockIds}
+          currentBlockId={currentBlockId}
+        />
       ) : (
         <div className="space-y-4">
           {enrichedCycle.days.map((day) => {
@@ -173,19 +194,39 @@ export default function CicloSemanaPage() {
                   )}
                 </div>
                 <ol className="mt-3 space-y-2">
-                  {day.blocks.map((b, i) => (
-                    <li
-                      key={b.id ?? i}
-                      className="rounded-lg border border-slate-100 bg-white/80 px-3 py-2 text-sm"
-                    >
-                      <span className="font-medium">{b.label}</span>
-                      {b.subject_name && (
-                        <span className="ml-2 text-xs text-slate-500">
-                          {b.subject_name}
-                        </span>
-                      )}
-                    </li>
-                  ))}
+                  {day.blocks.map((b, i) => {
+                    const done = b.id != null && completedBlockIds.has(b.id)
+                    const isNow = b.id != null && b.id === currentBlockId
+                    return (
+                      <li
+                        key={b.id ?? i}
+                        className={`rounded-lg border px-3 py-2 text-sm ${
+                          done
+                            ? "border-emerald-200 bg-emerald-50/50 line-through opacity-70"
+                            : isNow
+                              ? "border-teal-300 bg-teal-50 ring-1 ring-teal-400"
+                              : "border-slate-100 bg-white/80"
+                        }`}
+                      >
+                        <span className="font-medium">{b.label}</span>
+                        {b.subject_name && (
+                          <span className="ml-2 text-xs text-slate-500">
+                            {b.subject_name}
+                          </span>
+                        )}
+                        {done && (
+                          <span className="ml-2 text-xs text-emerald-700">
+                            Concluído
+                          </span>
+                        )}
+                        {isNow && !done && (
+                          <span className="ml-2 text-xs font-medium text-teal-700">
+                            Agora
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ol>
               </section>
             )

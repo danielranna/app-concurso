@@ -1,5 +1,6 @@
 import { supabaseServer } from "./supabase-server"
 import { loadContentBlocksForCycle } from "./study-cycle-content-blocks-db"
+import { initialQueuePositions } from "./study-cycle-queue"
 import { defaultWeekdayLimits, normalizeWeekdayLimits } from "./study-cycle-planner"
 import type {
   ManualCycleSaveInput,
@@ -94,6 +95,9 @@ async function loadCycleBlocks(cycleId: string): Promise<StudyCycleBlock[]> {
       params: (r.params ?? {}) as StudyCycleBlock["params"],
       subject_name: subName,
       content_node_name: nodeObj?.name,
+      queue_position: r.queue_position != null ? Number(r.queue_position) : null,
+      status: (r.status as StudyCycleBlock["status"]) ?? "pending",
+      completed_at: r.completed_at ?? null,
     }
   })
 }
@@ -395,19 +399,31 @@ export async function saveManualCycle(
     await supabaseServer.from("study_cycle_days").insert(dayRows)
   }
 
-  const blockRows = input.days.flatMap((d) =>
+  const flatBlocks = input.days.flatMap((d) =>
     d.blocks.map((b, sort_order) => ({
-      cycle_id: cycleId,
       day_index: d.day_index,
-      subject_id: b.subject_id,
-      content_node_id: b.content_node_id,
-      content_block_id: b.content_block_id ?? null,
-      block_type: b.block_type,
       sort_order,
-      label: b.label,
-      params: b.params ?? {},
+      row: {
+        cycle_id: cycleId,
+        day_index: d.day_index,
+        subject_id: b.subject_id,
+        content_node_id: b.content_node_id,
+        content_block_id: b.content_block_id ?? null,
+        block_type: b.block_type,
+        sort_order,
+        label: b.label,
+        params: b.params ?? {},
+      },
     }))
   )
+  const positions = initialQueuePositions(
+    flatBlocks.map((b) => ({ day_index: b.day_index, sort_order: b.sort_order }))
+  )
+  const blockRows = flatBlocks.map((b, i) => ({
+    ...b.row,
+    queue_position: positions[i],
+    status: "pending" as const,
+  }))
   if (blockRows.length) {
     await supabaseServer.from("study_cycle_blocks").insert(blockRows)
   }

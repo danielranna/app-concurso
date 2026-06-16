@@ -106,7 +106,7 @@ export default function CicloConfiguracoesPage() {
         }),
       })
       if (cycle?.id) {
-        await fetch("/api/ciclo/plan", {
+        const res = await fetch("/api/ciclo/plan", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -115,6 +115,14 @@ export default function CicloConfiguracoesPage() {
             weekday_limits: weekdayLimits,
           }),
         })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          alert(
+            data.error ??
+              "Erro ao salvar limites por dia. Verifique as migrations no Supabase."
+          )
+          return
+        }
       }
       setSaved(true)
     } finally {

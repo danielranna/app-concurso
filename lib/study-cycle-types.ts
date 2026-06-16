@@ -41,6 +41,9 @@ export type StudyCycleBlock = {
   subject_name?: string
   content_node_name?: string
   content_block_name?: string
+  queue_position?: number | null
+  status?: "pending" | "completed"
+  completed_at?: string | null
 }
 
 export type StudyCycleContentBlockTopic = {

@@ -9,7 +9,6 @@ const links = [
   { href: "/ciclo/blocos", label: "Blocos" },
   { href: "/ciclo/planejar", label: "Planejar" },
   { href: "/ciclo/semana", label: "Semana" },
-  { href: "/ciclo/conteudo", label: "Conteúdo" },
   { href: "/ciclo/configuracoes", label: "Configurações" },
 ]
 
