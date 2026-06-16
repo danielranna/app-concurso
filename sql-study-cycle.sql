@@ -75,10 +75,14 @@ CREATE TABLE IF NOT EXISTS study_cycle_weekday_limits (
   cycle_id UUID NOT NULL REFERENCES study_cycles(id) ON DELETE CASCADE,
   weekday INTEGER NOT NULL CHECK (weekday >= 0 AND weekday <= 6),
   minutes INTEGER NOT NULL DEFAULT 120,
+  max_blocks INTEGER,
   daily_limits JSONB NOT NULL DEFAULT '{"questions":50,"flashcards":20,"summaries":2,"error_reviews":10}'::jsonb,
   active BOOLEAN NOT NULL DEFAULT true,
   UNIQUE(cycle_id, weekday)
 );
+
+ALTER TABLE study_cycle_weekday_limits
+  ADD COLUMN IF NOT EXISTS max_blocks INTEGER;
 
 CREATE TABLE IF NOT EXISTS study_cycle_days (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

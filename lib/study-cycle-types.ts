@@ -4,6 +4,8 @@ export type WeekdayLimits = {
   weekday: number
   minutes: number
   active: boolean
+  /** Teto de blocos de estudo por dia; null = usar padrão do planner. */
+  max_blocks?: number | null
   daily_limits: {
     questions: number
     flashcards: number

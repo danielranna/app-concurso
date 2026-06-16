@@ -4,7 +4,7 @@ import {
   activateCycle,
   saveManualCycle,
 } from "@/lib/study-cycle-db"
-import { defaultWeekdayLimits } from "@/lib/study-cycle-planner"
+import { defaultWeekdayLimits, normalizeWeekdayLimits } from "@/lib/study-cycle-planner"
 import type { ManualCycleSaveInput, WeekdayLimits } from "@/lib/study-cycle-types"
 
 export async function POST(req: Request) {
@@ -26,7 +26,9 @@ export async function POST(req: Request) {
 
       const input: ManualCycleSaveInput = {
         name,
-        weekday_limits: (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits(),
+        weekday_limits: normalizeWeekdayLimits(
+          (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
+        ),
         days: days.map(
           (
             d: {
@@ -95,13 +97,15 @@ export async function PATCH(req: Request) {
   }
 
   if (weekday_limits && cycle_id) {
-    for (const w of weekday_limits as WeekdayLimits[]) {
+    const normalized = normalizeWeekdayLimits(weekday_limits as WeekdayLimits[])
+    for (const w of normalized) {
       await supabaseServer.from("study_cycle_weekday_limits").upsert(
         {
           cycle_id,
           weekday: w.weekday,
           minutes: w.minutes,
           active: w.active,
+          max_blocks: w.active ? w.max_blocks : null,
           daily_limits: w.daily_limits,
         },
         { onConflict: "cycle_id,weekday" }

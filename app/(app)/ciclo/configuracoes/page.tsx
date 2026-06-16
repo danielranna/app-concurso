@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Loader2, Save } from "lucide-react"
 import type { StudyCycle, WeekdayLimits } from "@/lib/study-cycle-types"
-import { defaultWeekdayLimits, WEEKDAY_LABELS, scaleLimitsForMinutes } from "@/lib/study-cycle-planner"
+import { defaultWeekdayLimits, WEEKDAY_LABELS, scaleLimitsForMinutes, DEFAULT_MAX_BLOCKS } from "@/lib/study-cycle-planner"
 import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
 import type { PrioritySource } from "@/lib/priority-source"
 
@@ -57,16 +57,36 @@ export default function CicloConfiguracoesPage() {
     })
   }, [router, load])
 
-  function updateWeekday(weekday: number, minutes: number, active: boolean) {
+  function updateWeekday(
+    weekday: number,
+    patch: Partial<Pick<WeekdayLimits, "minutes" | "active" | "max_blocks">>
+  ) {
     setWeekdayLimits((prev) =>
       prev.map((w) => {
         if (w.weekday !== weekday) return w
+        const active = patch.active ?? w.active
+        const minutes =
+          patch.minutes != null
+            ? patch.minutes
+            : active
+              ? Math.max(w.minutes, 60)
+              : 0
         const limits = scaleLimitsForMinutes(
           defaultWeekdayLimits().find((d) => d.weekday === weekday)!
             .daily_limits,
           active ? minutes : 0
         )
-        return { ...w, minutes, active, daily_limits: limits }
+        const max_blocks =
+          patch.max_blocks !== undefined
+            ? patch.max_blocks
+            : w.max_blocks ?? (active ? DEFAULT_MAX_BLOCKS : null)
+        return {
+          ...w,
+          minutes: active ? minutes : 0,
+          active,
+          max_blocks: active ? max_blocks : null,
+          daily_limits: limits,
+        }
       })
     )
     setSaved(false)
@@ -154,6 +174,10 @@ export default function CicloConfiguracoesPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Dias da semana</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Se um dia passar do máximo de blocos, o restante continua no próximo dia
+          ativo (o ciclo pode ficar um pouco mais longo).
+        </p>
         <div className="mt-3 space-y-2">
           {weekdayLimits.map((w) => (
             <div
@@ -165,30 +189,48 @@ export default function CicloConfiguracoesPage() {
                   type="checkbox"
                   checked={w.active}
                   onChange={(e) =>
-                    updateWeekday(
-                      w.weekday,
-                      e.target.checked ? Math.max(w.minutes, 60) : 0,
-                      e.target.checked
-                    )
+                    updateWeekday(w.weekday, {
+                      active: e.target.checked,
+                      minutes: e.target.checked ? Math.max(w.minutes, 60) : 0,
+                    })
                   }
                   className="rounded border-slate-300 text-teal-600"
                 />
                 {WEEKDAY_LABELS[w.weekday]}
               </label>
-              <input
-                type="number"
-                min={0}
-                max={720}
-                step={30}
-                disabled={!w.active}
-                value={w.minutes}
-                onChange={(e) =>
-                  updateWeekday(w.weekday, Number(e.target.value), w.active)
-                }
-                className="w-20 rounded border border-slate-200 px-2 py-1 text-sm disabled:opacity-40"
-              />
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                <span>Min</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={720}
+                  step={30}
+                  disabled={!w.active}
+                  value={w.minutes}
+                  onChange={(e) =>
+                    updateWeekday(w.weekday, { minutes: Number(e.target.value) })
+                  }
+                  className="w-16 rounded border border-slate-200 px-2 py-1 text-sm disabled:opacity-40"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                <span>Máx. blocos</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  disabled={!w.active}
+                  value={w.max_blocks ?? DEFAULT_MAX_BLOCKS}
+                  onChange={(e) =>
+                    updateWeekday(w.weekday, {
+                      max_blocks: Math.max(1, Number(e.target.value)),
+                    })
+                  }
+                  className="w-14 rounded border border-slate-200 px-2 py-1 text-sm disabled:opacity-40"
+                />
+              </label>
               <span className="text-xs text-slate-500">
-                min → {w.daily_limits.questions} questões
+                → {w.daily_limits.questions} questões
               </span>
             </div>
           ))}

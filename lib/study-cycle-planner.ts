@@ -24,17 +24,100 @@ export type CyclePlannerResult = {
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 
+export const DEFAULT_MAX_BLOCKS = 6
+
 export { WEEKDAY_LABELS }
+
+function defaultMaxBlocksForWeekday(weekday: number, active: boolean): number | null {
+  if (!active) return null
+  return weekday === 6 ? 6 : DEFAULT_MAX_BLOCKS
+}
+
+export function normalizeWeekdayLimits(
+  limits: WeekdayLimits[],
+  fallback = defaultWeekdayLimits()
+): WeekdayLimits[] {
+  const byWeekday = new Map(limits.map((w) => [w.weekday, w]))
+  return fallback.map((def) => {
+    const w = byWeekday.get(def.weekday) ?? def
+    const active = Boolean(w.active && w.minutes > 0)
+    const rawMax = w.max_blocks ?? def.max_blocks ?? defaultMaxBlocksForWeekday(w.weekday, active)
+    const max_blocks =
+      active && rawMax != null && Number.isFinite(rawMax)
+        ? Math.max(1, Math.floor(Number(rawMax)))
+        : null
+    return {
+      ...def,
+      ...w,
+      active,
+      minutes: active ? w.minutes : 0,
+      max_blocks,
+      daily_limits: w.daily_limits ?? def.daily_limits,
+    }
+  })
+}
+
+export function getMaxBlocksForWeekday(
+  w: WeekdayLimits,
+  subjectsPerDay: number
+): number {
+  if (w.max_blocks != null && w.max_blocks > 0) {
+    return Math.max(1, Math.floor(w.max_blocks))
+  }
+  return Math.max(1, subjectsPerDay)
+}
 
 export function defaultWeekdayLimits(): WeekdayLimits[] {
   return [
-    { weekday: 0, minutes: 0, active: false, daily_limits: defaultDailyLimits(0) },
-    { weekday: 1, minutes: 120, active: true, daily_limits: defaultDailyLimits(120) },
-    { weekday: 2, minutes: 120, active: true, daily_limits: defaultDailyLimits(120) },
-    { weekday: 3, minutes: 120, active: true, daily_limits: defaultDailyLimits(120) },
-    { weekday: 4, minutes: 120, active: true, daily_limits: defaultDailyLimits(120) },
-    { weekday: 5, minutes: 120, active: true, daily_limits: defaultDailyLimits(120) },
-    { weekday: 6, minutes: 180, active: true, daily_limits: defaultDailyLimits(180) },
+    {
+      weekday: 0,
+      minutes: 0,
+      active: false,
+      max_blocks: null,
+      daily_limits: defaultDailyLimits(0),
+    },
+    {
+      weekday: 1,
+      minutes: 120,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(120),
+    },
+    {
+      weekday: 2,
+      minutes: 120,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(120),
+    },
+    {
+      weekday: 3,
+      minutes: 120,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(120),
+    },
+    {
+      weekday: 4,
+      minutes: 120,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(120),
+    },
+    {
+      weekday: 5,
+      minutes: 120,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(120),
+    },
+    {
+      weekday: 6,
+      minutes: 180,
+      active: true,
+      max_blocks: DEFAULT_MAX_BLOCKS,
+      daily_limits: defaultDailyLimits(180),
+    },
   ]
 }
 
@@ -66,13 +149,14 @@ function suggestDoubledSubjects(
 
 /**
  * Distribui matérias em dias ativos da semana (rodízio).
- * Cada dia recebe até `subjects_per_day` matérias.
+ * Cada dia respeita `max_blocks` do weekday; excedente vai para o próximo dia ativo.
  */
 export function suggestCyclePlan(
   input: CyclePlannerInput,
   subjectNames: Map<string, string>
 ): CyclePlannerResult {
-  const activeWeekdays = input.weekday_limits
+  const weekdayLimits = normalizeWeekdayLimits(input.weekday_limits)
+  const activeWeekdays = weekdayLimits
     .filter((w) => w.active && w.minutes > 0)
     .sort((a, b) => a.weekday - b.weekday)
 
@@ -94,14 +178,19 @@ export function suggestCyclePlan(
   const perDay = Math.max(1, input.subjects_per_day)
   const days: CyclePlannerDay[] = []
   let subjectPtr = 0
+  let dayIndex = 0
 
-  for (let dayIndex = 0; subjectPtr < expanded.length; dayIndex++) {
+  while (subjectPtr < expanded.length) {
     const wd = activeWeekdays[dayIndex % activeWeekdays.length]
+    const maxBlocks = getMaxBlocksForWeekday(wd, perDay)
+    const targetBatch = Math.min(perDay, maxBlocks)
     const batch: string[] = []
-    for (let i = 0; i < perDay && subjectPtr < expanded.length; i++) {
+
+    while (batch.length < targetBatch && subjectPtr < expanded.length) {
       batch.push(expanded[subjectPtr])
       subjectPtr++
     }
+
     days.push({
       day_index: dayIndex,
       weekday: wd.weekday,
@@ -110,6 +199,7 @@ export function suggestCyclePlan(
       estimated_minutes: wd.minutes,
       daily_limits: wd.daily_limits,
     })
+    dayIndex++
   }
 
   return {

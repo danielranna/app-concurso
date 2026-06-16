@@ -1,5 +1,5 @@
 import { supabaseServer } from "./supabase-server"
-import { defaultWeekdayLimits } from "./study-cycle-planner"
+import { defaultWeekdayLimits, normalizeWeekdayLimits } from "./study-cycle-planner"
 import type {
   ManualCycleSaveInput,
   StudyCycle,
@@ -150,12 +150,16 @@ async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
     }
   })
 
-  const weekday_limits: WeekdayLimits[] = (wdRows ?? []).map((r) => ({
-    weekday: r.weekday,
-    minutes: r.minutes,
-    active: r.active,
-    daily_limits: r.daily_limits as WeekdayLimits["daily_limits"],
-  }))
+  const weekday_limits: WeekdayLimits[] = normalizeWeekdayLimits(
+    (wdRows ?? []).map((r) => ({
+      weekday: r.weekday,
+      minutes: r.minutes,
+      active: r.active,
+      max_blocks:
+        r.max_blocks != null ? Number(r.max_blocks) : null,
+      daily_limits: r.daily_limits as WeekdayLimits["daily_limits"],
+    }))
+  )
 
   let days: StudyCycleDay[]
   if (cycle_blocks.length > 0) {
@@ -287,7 +291,7 @@ export async function saveManualCycle(
 
   let cycleId = existing?.id
   const total_days = input.days.length
-  const weekday_limits = input.weekday_limits ?? defaultWeekdayLimits()
+  const weekday_limits = normalizeWeekdayLimits(input.weekday_limits ?? defaultWeekdayLimits())
 
   const maxSubjectsPerDay = Math.max(
     ...input.days.map((d) => new Set(d.blocks.map((b) => b.subject_id)).size),
@@ -345,6 +349,7 @@ export async function saveManualCycle(
         weekday: w.weekday,
         minutes: w.minutes,
         active: w.active,
+        max_blocks: w.active ? w.max_blocks : null,
         daily_limits: w.daily_limits,
       }))
     )
