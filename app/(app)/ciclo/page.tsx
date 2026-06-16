@@ -20,10 +20,9 @@ import type { StudyCycle } from "@/lib/study-cycle-types"
 import type { PrioritySource } from "@/lib/priority-source"
 import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
 import CycleToggle from "@/components/ciclo/CycleToggle"
-import CycleQueuePanel from "@/components/ciclo/CycleQueuePanel"
 import CyclePaceChart from "@/components/ciclo/CyclePaceChart"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
-import type { PaceAnalytics, QueueState } from "@/lib/study-cycle-queue"
+import type { PaceAnalytics } from "@/lib/study-cycle-queue"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -88,9 +87,8 @@ export default function CicloOverviewPage() {
   const [data, setData] = useState<CicloOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState(false)
-  const [queue, setQueue] = useState<QueueState | null>(null)
   const [pace, setPace] = useState<PaceAnalytics | null>(null)
-  const [queueLoading, setQueueLoading] = useState(false)
+  const [paceLoading, setPaceLoading] = useState(false)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -100,11 +98,10 @@ export default function CicloOverviewPage() {
         setData(d)
         const hasBlocks = (d.cycle?.cycle_blocks?.length ?? 0) > 0
         if (hasBlocks) {
-          setQueueLoading(true)
+          setPaceLoading(true)
           return fetch(`/api/ciclo/queue?user_id=${uid}`)
             .then((r) => r.json())
             .then((qd) => {
-              setQueue(qd.queue ?? null)
               setPace(qd.pace ?? null)
               if (qd.cycle) {
                 setData((prev) =>
@@ -112,9 +109,8 @@ export default function CicloOverviewPage() {
                 )
               }
             })
-            .finally(() => setQueueLoading(false))
+            .finally(() => setPaceLoading(false))
         }
-        setQueue(null)
         setPace(null)
       })
       .finally(() => setLoading(false))
@@ -343,21 +339,8 @@ export default function CicloOverviewPage() {
         </Card>
       )}
 
-      {hasQueue && queue && userId && cycle && (
-        <div className="space-y-4">
-          <CycleQueuePanel
-            userId={userId}
-            cycle={cycle}
-            queue={queue}
-            loading={queueLoading}
-            onQueueChange={({ queue: q, cycle: c, pace: p }) => {
-              setQueue(q)
-              setData((prev) => (prev ? { ...prev, cycle: c } : prev))
-              if (p) setPace(p)
-            }}
-          />
-          <CyclePaceChart pace={pace} />
-        </div>
+      {hasQueue && cycle && (
+        <CyclePaceChart pace={paceLoading ? null : pace} />
       )}
 
       <div>

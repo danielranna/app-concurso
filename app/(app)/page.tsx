@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import HomeAgenda from "@/components/home/HomeAgenda"
+import HomeCycleQueueWidget from "@/components/home/HomeCycleQueueWidget"
 import HomeFlashcardWidget from "@/components/home/HomeFlashcardWidget"
 import HomeStatsSummary from "@/components/home/HomeStatsSummary"
 import HomeWrongQuestion from "@/components/home/HomeWrongQuestion"
@@ -36,6 +37,8 @@ export default function HomePage() {
       </header>
 
       <HomeAgenda userId={userId} />
+
+      <HomeCycleQueueWidget userId={userId} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <HomeFlashcardWidget userId={userId} />
