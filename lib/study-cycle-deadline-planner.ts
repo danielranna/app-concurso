@@ -1,4 +1,9 @@
-import { scaleLimitsForMinutes } from "./study-cycle-planner"
+import {
+  DEFAULT_MAX_BLOCKS,
+  getMaxBlocksForWeekday,
+  normalizeWeekdayLimits,
+  scaleLimitsForMinutes,
+} from "./study-cycle-planner"
 import type {
   ManualCycleDayInput,
   StudyCycleBlock,
@@ -40,6 +45,7 @@ export type CycleStats = {
   minutes_total_required: number
   minutes_total_available: number
   sessions_capacity_in_period: number
+  sessions_per_week_capacity: number
   calendar_days_needed: number
   suggested_weeks: number
   target_weeks: number
@@ -147,12 +153,24 @@ function sumMinutesPerWeek(weekday_limits: WeekdayLimits[]): number {
 
 function sessionsCapacityPerWeek(
   weekday_limits: WeekdayLimits[],
-  blockMinutes: number
+  subjectsPerDay?: number
 ): number {
+  const fallback = subjectsPerDay ?? DEFAULT_MAX_BLOCKS
   return activeWeekdays(weekday_limits).reduce(
-    (s, w) => s + Math.floor(w.minutes / blockMinutes),
+    (s, w) => s + getMaxBlocksForWeekday(w, fallback),
     0
   )
+}
+
+function weekdayBlocksLabel(
+  activeList: WeekdayLimits[],
+  subjectsPerDay?: number
+): string {
+  const fallback = subjectsPerDay ?? DEFAULT_MAX_BLOCKS
+  const dayBlocks = activeList.map((w) => getMaxBlocksForWeekday(w, fallback))
+  if (dayBlocks.length === 0) return "—"
+  if (dayBlocks.length === 1) return `${dayBlocks[0]} blocos/dia`
+  return `${Math.min(...dayBlocks)}–${Math.max(...dayBlocks)} blocos/dia`
 }
 
 function activeWeekdays(weekday_limits: WeekdayLimits[]): WeekdayLimits[] {
@@ -187,8 +205,9 @@ export function computeCycleStats(input: {
   default_block_minutes?: number
   subjects_per_day?: number
 }): CycleStats {
-  const { subjects, weekday_limits, target_weeks } = input
+  const { subjects, target_weeks } = input
   const defaultMinutes = input.default_block_minutes ?? 45
+  const weekday_limits = normalizeWeekdayLimits(input.weekday_limits)
   const activeList = activeWeekdays(weekday_limits)
   const activePerWeek = activeList.length
   const activeDays = activePerWeek * target_weeks
@@ -205,7 +224,7 @@ export function computeCycleStats(input: {
   const totalMinutesAvailable = minutesPerWeek * target_weeks
   const sessionsPerWeekCapacity = sessionsCapacityPerWeek(
     weekday_limits,
-    defaultMinutes
+    input.subjects_per_day
   )
   const sessionsCapacityInPeriod = sessionsPerWeekCapacity * target_weeks
   const simulatedDays = distributeSessionsToDays(
@@ -229,25 +248,19 @@ export function computeCycleStats(input: {
   const minutesPerWeekRequired =
     target_weeks > 0 ? Math.round(totalMinutesRequired / target_weeks) : 0
 
-  const dayMinutes = activeList.map((w) => w.minutes)
-  const weekdayMinutesLabel =
-    dayMinutes.length === 0
-      ? "—"
-      : dayMinutes.length === 1
-        ? `${dayMinutes[0]} min`
-        : `${Math.min(...dayMinutes)}–${Math.max(...dayMinutes)} min/dia`
+  const weekdayMinutesLabel = weekdayBlocksLabel(
+    activeList,
+    input.subjects_per_day
+  )
 
   let feasible = true
   let warning: string | undefined
   if (activeDays === 0) {
     feasible = false
     warning = "Nenhum dia de estudo ativo na semana."
-  } else if (
-    totalSessions > sessionsCapacityInPeriod ||
-    totalMinutesRequired > totalMinutesAvailable * 1.02
-  ) {
+  } else if (totalSessions > sessionsCapacityInPeriod) {
     feasible = false
-    warning = `No prazo de ${target_weeks} semanas cabem ~${sessionsCapacityInPeriod} sessões (≈${Math.round(totalMinutesAvailable / 60)} h), mas você precisa de ${totalSessions} (≈${Math.round(totalMinutesRequired / 60)} h). Tente ~${suggestedWeeks} semanas ou reduza blocos/peso.`
+    warning = `No prazo de ${target_weeks} semanas cabem ~${sessionsCapacityInPeriod} sessões, mas você precisa de ${totalSessions}. Tente ~${suggestedWeeks} semanas ou reduza blocos/peso.`
   } else if (calendarDaysNeeded > activeDays) {
     feasible = false
     warning = `O calendário precisa de ${calendarDaysNeeded} dias de estudo, mas há ${activeDays} no prazo. Aumente para ~${Math.ceil(calendarDaysNeeded / activePerWeek)} semanas.`
@@ -282,6 +295,7 @@ export function computeCycleStats(input: {
     minutes_total_required: totalMinutesRequired,
     minutes_total_available: totalMinutesAvailable,
     sessions_capacity_in_period: sessionsCapacityInPeriod,
+    sessions_per_week_capacity: sessionsPerWeekCapacity,
     calendar_days_needed: calendarDaysNeeded,
     suggested_weeks: suggestedWeeks,
     target_weeks,
@@ -365,7 +379,7 @@ export function buildFullSessionQueue(subjects: SubjectPlanInput[]): PlannedSess
   }
 }
 
-/** Distribui sessões pelos dias ativos, respeitando minutos disponíveis por dia */
+/** Distribui sessões pelos dias ativos, respeitando max_blocks por dia */
 function isManualSession(session: PlannedSession): boolean {
   return Boolean(session.study_note?.trim())
 }
@@ -409,7 +423,8 @@ export function distributeSessionsToDays(
   defaultBlockMinutes: number,
   subjectsPerDay?: number
 ): ManualCycleDayInput[] {
-  const active = activeWeekdays(weekday_limits)
+  const normalized = normalizeWeekdayLimits(weekday_limits)
+  const active = activeWeekdays(normalized)
   if (!active.length || !queue.length) return []
 
   const maxSubjectsPerDay =
@@ -419,6 +434,8 @@ export function distributeSessionsToDays(
       ? Math.max(1, Math.floor(subjectsPerDay))
       : Number.POSITIVE_INFINITY
 
+  const blockCapFallback = subjectsPerDay ?? DEFAULT_MAX_BLOCKS
+
   const days: ManualCycleDayInput[] = []
   let dayIndex = 0
   let sessionIdx = 0
@@ -426,22 +443,16 @@ export function distributeSessionsToDays(
 
   while (sessionIdx < queue.length) {
     const wd = active[weekDayPtr % active.length]
-    const maxMinutes = wd.minutes
-    let usedMinutes = 0
+    const maxBlocks = getMaxBlocksForWeekday(wd, blockCapFallback)
     const blocks: Omit<StudyCycleBlock, "id" | "cycle_id">[] = []
     const subjectsInDay = new Set<string>()
     let sortOrder = 0
 
-    while (sessionIdx < queue.length) {
+    while (sessionIdx < queue.length && blocks.length < maxBlocks) {
       const session = queue[sessionIdx]
-      const blockMinutes = session.estimated_minutes ?? defaultBlockMinutes
       const isNewSubject = !subjectsInDay.has(session.subject_id)
 
       if (isNewSubject && subjectsInDay.size >= maxSubjectsPerDay) {
-        break
-      }
-
-      if (blocks.length > 0 && usedMinutes + blockMinutes > maxMinutes) {
         break
       }
 
@@ -450,12 +461,7 @@ export function distributeSessionsToDays(
       )
 
       subjectsInDay.add(session.subject_id)
-      usedMinutes += blockMinutes
       sessionIdx++
-
-      if (usedMinutes >= maxMinutes) {
-        break
-      }
     }
 
     if (blocks.length === 0 && sessionIdx < queue.length) {

@@ -160,9 +160,9 @@ export function studyCyclePdfFilename(cycle: StudyCycle, generatedAt: Date): str
 
 function StatsSection({ stats }: { stats: CycleStats }) {
   const pct =
-    stats.minutes_total_available > 0
+    stats.sessions_capacity_in_period > 0
       ? Math.round(
-          (stats.minutes_total_required / stats.minutes_total_available) * 100
+          (stats.total_sessions / stats.sessions_capacity_in_period) * 100
         )
       : 0
 
@@ -171,8 +171,8 @@ function StatsSection({ stats }: { stats: CycleStats }) {
       <Text style={styles.sectionTitle}>Resumo do ciclo</Text>
       <Text style={{ fontSize: 8, color: "#64748b", marginBottom: 8 }}>
         Configuração da semana: {stats.weekday_minutes_label} ·{" "}
-        {stats.active_days_per_week} dias ativos · ~{stats.minutes_per_week_available}{" "}
-        min/semana
+        {stats.active_days_per_week} dias ativos · ~
+        {stats.sessions_per_week_capacity} sessões/semana
       </Text>
       <View style={styles.row}>
         <View style={styles.statBox}>
@@ -184,7 +184,7 @@ function StatsSection({ stats }: { stats: CycleStats }) {
           <Text style={styles.statValue}>{stats.sessions_capacity_in_period}</Text>
           <Text style={styles.statHint}>
             {stats.total_sessions} necessárias · ~
-            {Math.round(stats.minutes_total_available / 60)} h
+            {stats.sessions_per_week_capacity}/semana
           </Text>
         </View>
         <View style={styles.statBox}>
@@ -205,14 +205,19 @@ function StatsSection({ stats }: { stats: CycleStats }) {
         </View>
       </View>
       <Text style={{ fontSize: 8, marginTop: 4 }}>
-        Uso do tempo: {Math.round(stats.minutes_total_required / 60)} h /{" "}
-        {Math.round(stats.minutes_total_available / 60)} h ({pct}%)
+        Uso das sessões: {stats.total_sessions} / {stats.sessions_capacity_in_period}{" "}
+        ({pct}%)
       </Text>
       {stats.warning ? <Text style={styles.warning}>{stats.warning}</Text> : null}
       {!stats.feasible && stats.suggested_weeks > 0 ? (
         <Text style={{ fontSize: 8, marginTop: 4 }}>
-          Média de ~{stats.sessions_per_day} sessões/dia ({stats.minutes_per_day_required}{" "}
-          min) vs {stats.minutes_per_day_available} min/dia em média.
+          Média de ~{stats.sessions_per_day} sessões/dia vs ~
+          {stats.active_days_per_week > 0
+            ? Math.round(
+                stats.sessions_per_week_capacity / stats.active_days_per_week
+              )
+            : 0}{" "}
+          sessões/dia em média.
         </Text>
       ) : null}
       {stats.per_subject.length > 0 ? (

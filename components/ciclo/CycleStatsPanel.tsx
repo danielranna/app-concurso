@@ -18,9 +18,9 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
   if (!stats) return null
 
   const pct =
-    stats.minutes_total_available > 0
+    stats.sessions_capacity_in_period > 0
       ? Math.round(
-          (stats.minutes_total_required / stats.minutes_total_available) * 100
+          (stats.total_sessions / stats.sessions_capacity_in_period) * 100
         )
       : 0
 
@@ -30,8 +30,8 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
 
       <p className="text-xs text-slate-500">
         Configuração da semana: {stats.weekday_minutes_label} ·{" "}
-        {stats.active_days_per_week} dias ativos · ~{stats.minutes_per_week_available}{" "}
-        min/semana
+        {stats.active_days_per_week} dias ativos · ~
+        {stats.sessions_per_week_capacity} sessões/semana
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -39,7 +39,7 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
         <StatCard
           label="Capacidade no prazo"
           value={String(stats.sessions_capacity_in_period)}
-          hint={`${stats.total_sessions} necessárias · ~${Math.round(stats.minutes_total_available / 60)} h`}
+          hint={`${stats.total_sessions} necessárias · ~${stats.sessions_per_week_capacity}/semana`}
         />
         <StatCard
           label="Por mini-ciclo"
@@ -59,10 +59,9 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
 
       <div>
         <div className="mb-1 flex justify-between text-xs text-slate-600">
-          <span>Uso do tempo no prazo</span>
+          <span>Uso das sessões no prazo</span>
           <span>
-            {Math.round(stats.minutes_total_required / 60)} h /{" "}
-            {Math.round(stats.minutes_total_available / 60)} h ({pct}%)
+            {stats.total_sessions} / {stats.sessions_capacity_in_period} ({pct}%)
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-slate-100">
@@ -78,8 +77,13 @@ export default function CycleStatsPanel({ stats, loading }: Props) {
         )}
         {!stats.feasible && stats.suggested_weeks > 0 && (
           <p className="mt-1 text-xs text-slate-600">
-            Média de ~{stats.sessions_per_day} sessões/dia ({stats.minutes_per_day_required}{" "}
-            min) vs {stats.minutes_per_day_available} min/dia em média.
+            Média de ~{stats.sessions_per_day} sessões/dia vs ~
+            {stats.active_days_per_week > 0
+              ? Math.round(
+                  stats.sessions_per_week_capacity / stats.active_days_per_week
+                )
+              : 0}{" "}
+            sessões/dia em média.
           </p>
         )}
       </div>
