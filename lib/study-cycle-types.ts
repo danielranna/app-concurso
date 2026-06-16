@@ -1,5 +1,20 @@
 export type StudyCycleStatus = "draft" | "active" | "paused" | "completed"
 
+/** Exibido como "Arquivado" na UI quando status === completed */
+export function cycleStatusLabel(status: StudyCycleStatus): string {
+  switch (status) {
+    case "active":
+      return "Ativo"
+    case "paused":
+      return "Pausado"
+    case "completed":
+      return "Arquivado"
+    case "draft":
+    default:
+      return "Rascunho"
+  }
+}
+
 export type WeekdayLimits = {
   weekday: number
   minutes: number
@@ -64,6 +79,7 @@ export type StudyCycleContentBlock = {
   study_note?: string | null
   notebook_id?: string | null
   notebook_name?: string | null
+  phase_label?: string | null
   topics: StudyCycleContentBlockTopic[]
   subject_name?: string
 }
@@ -93,6 +109,7 @@ export type StudyCycle = {
   status: StudyCycleStatus
   name: string
   subjects_per_day: number
+  description?: string | null
   planning_mode?: PlanningMode
   target_weeks?: number | null
   default_block_minutes?: number
@@ -114,7 +131,9 @@ export type ManualCycleDayInput = {
 }
 
 export type ManualCycleSaveInput = {
+  cycle_id?: string
   name?: string
+  reset_day_index?: boolean
   weekday_limits?: WeekdayLimits[]
   planning_mode?: PlanningMode
   target_weeks?: number

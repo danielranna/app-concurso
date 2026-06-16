@@ -23,6 +23,12 @@ import CycleToggle from "@/components/ciclo/CycleToggle"
 import CyclePaceChart from "@/components/ciclo/CyclePaceChart"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
 import type { PaceAnalytics } from "@/lib/study-cycle-queue"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
+import { withCycleId } from "@/lib/cycle-plan-context"
+import type { CyclePlanSummary } from "@/lib/study-cycle-plans"
+import type { SetupDrift } from "@/lib/study-cycle-plans"
+import CyclePlansLibrary from "@/components/ciclo/CyclePlansLibrary"
+import SetupDriftBanner from "@/components/ciclo/SetupDriftBanner"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -40,49 +46,15 @@ type CicloOverview = {
     subjects_per_cycle_day: number
   }
   cycle: StudyCycle | null
+  active_cycle_id: string | null
+  plans: CyclePlanSummary[]
+  drift: SetupDrift | null
   priority_source: PrioritySource
 }
 
-const quickLinks = [
-  {
-    href: "/ciclo/materias",
-    icon: BookOpen,
-    title: "Matérias",
-    desc: "Peso no mini-ciclo",
-    accent: "from-violet-50 to-indigo-50 text-indigo-600",
-  },
-  {
-    href: "/ciclo/blocos",
-    icon: Layers,
-    title: "Blocos",
-    desc: "Agrupar assuntos",
-    accent: "from-sky-50 to-blue-50 text-sky-600",
-  },
-  {
-    href: "/ciclo/planejar",
-    icon: PenLine,
-    title: "Planejar",
-    desc: "Gerar calendário",
-    accent: "from-teal-50 to-emerald-50 text-teal-600",
-  },
-  {
-    href: "/ciclo/semana",
-    icon: Calendar,
-    title: "Semana",
-    desc: "Ver grade do ciclo",
-    accent: "from-amber-50 to-orange-50 text-amber-600",
-  },
-  {
-    href: "/ciclo/configuracoes",
-    icon: Settings,
-    title: "Configurações",
-    desc: "Blocos por dia",
-    accent: "from-slate-50 to-zinc-50 text-slate-600",
-  },
-]
-
 export default function CicloOverviewPage() {
   const router = useRouter()
+  const { cycleId, setCycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [data, setData] = useState<CicloOverview | null>(null)
   const [loading, setLoading] = useState(true)
@@ -90,9 +62,10 @@ export default function CicloOverviewPage() {
   const [pace, setPace] = useState<PaceAnalytics | null>(null)
   const [paceLoading, setPaceLoading] = useState(false)
 
-  const load = useCallback((uid: string) => {
+  const load = useCallback((uid: string, cid?: string | null) => {
     setLoading(true)
-    return fetch(`/api/ciclo?user_id=${uid}`)
+    const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
+    return fetch(`/api/ciclo?user_id=${uid}${q}`)
       .then((r) => r.json())
       .then((d) => {
         setData(d)
@@ -123,9 +96,13 @@ export default function CicloOverviewPage() {
         return
       }
       setUserId(user.id)
-      load(user.id)
+      load(user.id, cycleId)
     })
-  }, [router, load])
+  }, [router, load, cycleId])
+
+  useEffect(() => {
+    if (userId && cycleId) load(userId, cycleId)
+  }, [userId, cycleId, load])
 
   async function handleToggle(action: "pause" | "resume") {
     if (!userId) return
@@ -141,7 +118,7 @@ export default function CicloOverviewPage() {
         alert(err.error ?? "Erro")
         return
       }
-      await load(userId)
+      await load(userId, cycleId)
     } finally {
       setToggling(false)
     }
@@ -164,11 +141,49 @@ export default function CicloOverviewPage() {
   const hasQueue = (cycle?.cycle_blocks?.length ?? 0) > 0
   const isActive = cycle?.status === "active" && prefs?.cycle_enabled
 
+  const quickLinks = [
+    {
+      href: withCycleId("/ciclo/materias", cycleId),
+      icon: BookOpen,
+      title: "Matérias",
+      desc: "Peso no mini-ciclo",
+      accent: "from-violet-50 to-indigo-50 text-indigo-600",
+    },
+    {
+      href: withCycleId("/ciclo/blocos", cycleId),
+      icon: Layers,
+      title: "Blocos",
+      desc: "Agrupar assuntos",
+      accent: "from-sky-50 to-blue-50 text-sky-600",
+    },
+    {
+      href: withCycleId("/ciclo/planejar", cycleId),
+      icon: PenLine,
+      title: "Planejar",
+      desc: "Gerar calendário",
+      accent: "from-teal-50 to-emerald-50 text-teal-600",
+    },
+    {
+      href: withCycleId("/ciclo/semana", cycleId),
+      icon: Calendar,
+      title: "Semana",
+      desc: "Ver grade do ciclo",
+      accent: "from-amber-50 to-orange-50 text-amber-600",
+    },
+    {
+      href: withCycleId("/ciclo/configuracoes", cycleId),
+      icon: Settings,
+      title: "Configurações",
+      desc: "Blocos por dia",
+      accent: "from-slate-50 to-zinc-50 text-slate-600",
+    },
+  ]
+
   const setupSteps = [
-    { done: hasSubjects, label: "Matérias", href: "/ciclo/materias" },
-    { done: hasBlocks, label: "Blocos", href: "/ciclo/blocos" },
-    { done: hasPlan, label: "Calendário", href: "/ciclo/planejar" },
-    { done: isActive, label: "Ativo", href: "/ciclo/semana" },
+    { done: hasSubjects, label: "Matérias", href: withCycleId("/ciclo/materias", cycleId) },
+    { done: hasBlocks, label: "Blocos", href: withCycleId("/ciclo/blocos", cycleId) },
+    { done: hasPlan, label: "Calendário", href: withCycleId("/ciclo/planejar", cycleId) },
+    { done: isActive, label: "Ativo", href: withCycleId("/ciclo/semana", cycleId) },
   ]
 
   const statusLabel =
@@ -207,6 +222,30 @@ export default function CicloOverviewPage() {
         <PrioritySourceBanner
           source={data.priority_source}
           studyMode={prefs.study_mode}
+        />
+      )}
+
+      {userId && data?.plans && (
+        <CyclePlansLibrary
+          userId={userId}
+          plans={data.plans}
+          selectedCycleId={cycleId ?? data.cycle?.id ?? null}
+          activeCycleId={data.active_cycle_id}
+          loading={loading}
+          onRefresh={() => load(userId, cycleId)}
+          onSelect={(id) => {
+            setCycleId(id)
+            load(userId, id)
+          }}
+        />
+      )}
+
+      {userId && cycleId && data?.drift?.has_drift && (
+        <SetupDriftBanner
+          userId={userId}
+          cycleId={cycleId}
+          drift={data.drift}
+          onSynced={() => load(userId, cycleId)}
         />
       )}
 

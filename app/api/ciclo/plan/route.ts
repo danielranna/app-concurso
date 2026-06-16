@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 import { generateFullCycle, previewCycleStats, resolveSubjectsPerDayLimit } from "@/lib/study-cycle-deadline-planner"
 import {
   activateCycle,
-  getActiveOrDraftCycle,
+  getCycleById,
   getCyclePreferences,
+  resolveCycleForUser,
   saveManualCycle,
 } from "@/lib/study-cycle-db"
 import { loadContentBlocksForCycle } from "@/lib/study-cycle-content-blocks-db"
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
     planning_mode,
     subjects_per_day,
     activate: shouldActivate,
+    reset_day_index,
   } = body
 
   if (!user_id) {
@@ -44,7 +46,7 @@ export async function POST(req: Request) {
       )
 
     if (action === "preview") {
-      const cycle = await getActiveOrDraftCycle(user_id)
+      const cycle = await resolveCycleForUser(user_id, cycle_id)
       if (!cycle?.subjects?.length) {
         return NextResponse.json(
           { error: "Configure matérias no ciclo primeiro" },
@@ -88,7 +90,7 @@ export async function POST(req: Request) {
     }
 
     if (action === "generate" || action === "generate_and_activate") {
-      const cycle = await getActiveOrDraftCycle(user_id)
+      const cycle = await resolveCycleForUser(user_id, cycle_id)
       if (!cycle?.subjects?.length) {
         return NextResponse.json(
           { error: "Configure matérias no ciclo primeiro" },
@@ -151,7 +153,9 @@ export async function POST(req: Request) {
       }
 
       const input: ManualCycleSaveInput = {
+        cycle_id: cycle.id,
         name: name ?? cycle.name ?? "Meu ciclo",
+        reset_day_index: reset_day_index !== false ? true : false,
         weekday_limits: limits,
         planning_mode: "deadline_driven",
         target_weeks: weeks,
@@ -168,7 +172,9 @@ export async function POST(req: Request) {
       const saved = await saveManualCycle(user_id, input)
 
       if (action === "generate_and_activate" || shouldActivate) {
-        const active = await activateCycle(user_id, saved.id)
+        const active = await activateCycle(user_id, saved.id, {
+          reset_day_index: reset_day_index !== false,
+        })
         return NextResponse.json({
           cycle: active,
           stats: generated.stats,
@@ -193,7 +199,9 @@ export async function POST(req: Request) {
       }
 
       const input: ManualCycleSaveInput = {
+        cycle_id,
         name,
+        reset_day_index: reset_day_index !== false ? true : false,
         planning_mode: planning_mode ?? "time_driven",
         target_weeks,
         default_block_minutes,
@@ -233,7 +241,9 @@ export async function POST(req: Request) {
       const cycle = await saveManualCycle(user_id, input)
 
       if (action === "save_and_activate") {
-        const active = await activateCycle(user_id, cycle.id)
+        const active = await activateCycle(user_id, cycle.id, {
+          reset_day_index: reset_day_index !== false,
+        })
         return NextResponse.json({ cycle: active, cycle_enabled: true })
       }
 
@@ -241,7 +251,9 @@ export async function POST(req: Request) {
     }
 
     if (action === "activate" && cycle_id) {
-      const active = await activateCycle(user_id, cycle_id)
+      const active = await activateCycle(user_id, cycle_id, {
+        reset_day_index: reset_day_index !== false,
+      })
       return NextResponse.json({ cycle: active, cycle_enabled: true })
     }
 

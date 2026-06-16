@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Loader2, Save } from "lucide-react"
 import type { StudyCycleSubject } from "@/lib/study-cycle-types"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
+import { withCycleId } from "@/lib/cycle-plan-context"
 
 type Subject = { id: string; name: string }
 
@@ -13,6 +15,7 @@ const WEIGHT_OPTIONS = [1, 2, 3, 4, 5]
 
 export default function CicloMateriasPage() {
   const router = useRouter()
+  const { cycleId: urlCycleId, setCycleId: setUrlCycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [allSubjects, setAllSubjects] = useState<Subject[]>([])
   const [selected, setSelected] = useState<Map<string, number>>(new Map())
@@ -21,16 +24,20 @@ export default function CicloMateriasPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async (uid: string, cid?: string | null) => {
     setLoading(true)
     try {
+      const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
       const [subList, ciclo] = await Promise.all([
         fetch(`/api/subjects?user_id=${uid}`).then((r) => r.json()),
-        fetch(`/api/ciclo?user_id=${uid}`).then((r) => r.json()),
+        fetch(`/api/ciclo?user_id=${uid}${q}`).then((r) => r.json()),
       ])
       setAllSubjects(Array.isArray(subList) ? subList : [])
       const cycle = ciclo.cycle
-      if (cycle?.id) setCycleId(cycle.id)
+      if (cycle?.id) {
+        setCycleId(cycle.id)
+        setUrlCycleId(cycle.id)
+      }
       const map = new Map<string, number>()
       for (const s of (cycle?.subjects ?? []) as StudyCycleSubject[]) {
         map.set(s.subject_id, s.weight ?? s.times_in_cycle ?? 1)
@@ -39,7 +46,7 @@ export default function CicloMateriasPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [setUrlCycleId])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -48,9 +55,13 @@ export default function CicloMateriasPage() {
         return
       }
       setUserId(user.id)
-      load(user.id)
+      load(user.id, urlCycleId)
     })
-  }, [router, load])
+  }, [router, load, urlCycleId])
+
+  useEffect(() => {
+    if (userId && urlCycleId) load(userId, urlCycleId)
+  }, [userId, urlCycleId, load])
 
   function toggleSubject(id: string) {
     setSelected((prev) => {
@@ -210,7 +221,7 @@ export default function CicloMateriasPage() {
         )}
         {saved && (
           <Link
-            href="/ciclo/blocos"
+            href={withCycleId("/ciclo/blocos", cycleId)}
             className="text-sm text-teal-700 underline"
           >
             Próximo: montar blocos →

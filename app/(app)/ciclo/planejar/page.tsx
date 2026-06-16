@@ -10,13 +10,19 @@ import type { StudyCycle, WeekdayLimits } from "@/lib/study-cycle-types"
 import { defaultWeekdayLimits } from "@/lib/study-cycle-planner"
 import CycleStatsPanel from "@/components/ciclo/CycleStatsPanel"
 import CycleSetupIssuesModal from "@/components/ciclo/CycleSetupIssuesModal"
+import SetupDriftBanner from "@/components/ciclo/SetupDriftBanner"
+import RegenerateConfirmModal from "@/components/ciclo/RegenerateConfirmModal"
 import type { CycleSetupIssue } from "@/lib/study-cycle-setup-validation"
+import type { SetupDrift } from "@/lib/study-cycle-plans"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
+import { withCycleId } from "@/lib/cycle-plan-context"
 import { downloadCyclePdf } from "@/lib/cycle-pdf-download"
 
 type PlanningMode = "time_driven" | "deadline_driven"
 
 export default function CicloPlanejarPage() {
   const router = useRouter()
+  const { cycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [cycle, setCycle] = useState<StudyCycle | null>(null)
   const [mode, setMode] = useState<PlanningMode>("deadline_driven")
@@ -33,11 +39,16 @@ export default function CicloPlanejarPage() {
   const [setupIssues, setSetupIssues] = useState<CycleSetupIssue[]>([])
   const [showSetupModal, setShowSetupModal] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [drift, setDrift] = useState<SetupDrift | null>(null)
+  const [showRegenModal, setShowRegenModal] = useState(false)
+  const [pendingActivate, setPendingActivate] = useState(false)
+  const [resetDayOnRegen, setResetDayOnRegen] = useState(true)
 
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async (uid: string, cid?: string | null) => {
     setLoading(true)
     try {
-      const ciclo = await fetch(`/api/ciclo?user_id=${uid}`).then((r) =>
+      const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
+      const ciclo = await fetch(`/api/ciclo?user_id=${uid}${q}`).then((r) =>
         r.json()
       )
       const c: StudyCycle | null = ciclo.cycle ?? null
@@ -47,6 +58,7 @@ export default function CicloPlanejarPage() {
       if (c?.default_block_minutes) setBlockMinutes(c.default_block_minutes)
       if (c?.weekday_limits?.length) setWeekdayLimits(c.weekday_limits)
       setSubjectsPerDay(ciclo.preferences?.subjects_per_cycle_day ?? 2)
+      setDrift(ciclo.drift ?? null)
     } finally {
       setLoading(false)
     }
@@ -59,15 +71,20 @@ export default function CicloPlanejarPage() {
         return
       }
       setUserId(user.id)
-      load(user.id)
+      load(user.id, cycleId)
     })
-  }, [router, load])
+  }, [router, load, cycleId])
+
+  useEffect(() => {
+    if (userId && cycleId) load(userId, cycleId)
+  }, [userId, cycleId, load])
 
   const fetchPreview = useCallback(async () => {
     if (!userId || mode !== "deadline_driven") return
     setPreviewing(true)
     try {
-      const ciclo = await fetch(`/api/ciclo?user_id=${userId}`).then((r) => r.json())
+      const q = cycleId ? `&cycle_id=${encodeURIComponent(cycleId)}` : ""
+      const ciclo = await fetch(`/api/ciclo?user_id=${userId}${q}`).then((r) => r.json())
       const freshLimits = ciclo.cycle?.weekday_limits
       if (freshLimits?.length) setWeekdayLimits(freshLimits)
 
@@ -76,6 +93,7 @@ export default function CicloPlanejarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
+          cycle_id: cycleId ?? cycle?.id,
           action: "preview",
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
@@ -94,7 +112,7 @@ export default function CicloPlanejarPage() {
     } finally {
       setPreviewing(false)
     }
-  }, [userId, mode, targetWeeks, blockMinutes, subjectsPerDay])
+  }, [userId, cycleId, cycle?.id, mode, targetWeeks, blockMinutes, subjectsPerDay])
 
   useEffect(() => {
     if (!loading && userId && mode === "deadline_driven") {
@@ -103,11 +121,12 @@ export default function CicloPlanejarPage() {
     }
   }, [loading, userId, mode, fetchPreview])
 
-  async function generate(activate: boolean) {
+  async function runGenerate(activate: boolean, resetDay: boolean) {
     if (!userId) return
     setGenerating(true)
     try {
-      const ciclo = await fetch(`/api/ciclo?user_id=${userId}`).then((r) =>
+      const q = cycleId ? `&cycle_id=${encodeURIComponent(cycleId)}` : ""
+      const ciclo = await fetch(`/api/ciclo?user_id=${userId}${q}`).then((r) =>
         r.json()
       )
       const freshSubjectsPerDay =
@@ -119,11 +138,13 @@ export default function CicloPlanejarPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
+          cycle_id: cycleId ?? cycle?.id,
           action: activate ? "generate_and_activate" : "generate",
           target_weeks: targetWeeks,
           default_block_minutes: blockMinutes,
           planning_mode: mode,
           subjects_per_day: freshSubjectsPerDay,
+          reset_day_index: resetDay,
         }),
       })
       const data = await res.json()
@@ -136,11 +157,22 @@ export default function CicloPlanejarPage() {
         }
         if (data.stats) setStats(data.stats)
       } else {
-        router.push("/ciclo/semana")
+        router.push(withCycleId("/ciclo/semana", cycleId ?? cycle?.id))
       }
     } finally {
       setGenerating(false)
+      setShowRegenModal(false)
     }
+  }
+
+  function generate(activate: boolean) {
+    const hasSchedule = (cycle?.cycle_blocks?.length ?? 0) > 0
+    if (hasSchedule) {
+      setPendingActivate(activate)
+      setShowRegenModal(true)
+      return
+    }
+    runGenerate(activate, true)
   }
 
   async function downloadPdf() {
@@ -192,14 +224,27 @@ export default function CicloPlanejarPage() {
       {!setupOk && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           Complete o setup:{" "}
-          <Link href="/ciclo/materias" className="underline">
+          <Link href={withCycleId("/ciclo/materias", cycleId)} className="underline">
             Matérias
           </Link>{" "}
           →{" "}
-          <Link href="/ciclo/blocos" className="underline">
+          <Link href={withCycleId("/ciclo/blocos", cycleId)} className="underline">
             Blocos
           </Link>
         </div>
+      )}
+
+      {userId && (cycleId ?? cycle?.id) && drift?.has_drift && (
+        <SetupDriftBanner
+          userId={userId}
+          cycleId={cycleId ?? cycle!.id}
+          drift={drift}
+          onSynced={() => load(userId, cycleId ?? cycle?.id)}
+          onRegenerate={() => {
+            setPendingActivate(false)
+            setShowRegenModal(true)
+          }}
+        />
       )}
 
       {setupIssues.length > 0 && (
@@ -369,6 +414,16 @@ export default function CicloPlanejarPage() {
           onClose={() => setShowSetupModal(false)}
         />
       )}
+      <RegenerateConfirmModal
+        open={showRegenModal}
+        pendingCount={drift?.pending_schedule_blocks ?? cycle?.cycle_blocks?.filter((b) => b.status !== "completed").length ?? 0}
+        completedCount={drift?.completed_schedule_blocks ?? cycle?.cycle_blocks?.filter((b) => b.status === "completed").length ?? 0}
+        resetDayIndex={resetDayOnRegen}
+        onResetDayIndexChange={setResetDayOnRegen}
+        loading={generating}
+        onClose={() => setShowRegenModal(false)}
+        onConfirm={() => runGenerate(pendingActivate, resetDayOnRegen)}
+      />
     </div>
   )
 }

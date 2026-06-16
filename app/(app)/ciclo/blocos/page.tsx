@@ -24,10 +24,18 @@ import TecTopicTree, {
 } from "@/components/ciclo/TecTopicTree"
 import BlockTopicGroups from "@/components/ciclo/BlockTopicGroups"
 import NotebookPickerModal from "@/components/ciclo/NotebookPickerModal"
+import SetupDriftBanner from "@/components/ciclo/SetupDriftBanner"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
+import { withCycleId } from "@/lib/cycle-plan-context"
+import type { SetupDrift } from "@/lib/study-cycle-plans"
+import { Badge } from "@/components/ui/badge"
+
+const PHASE_PRESETS = ["Parte 01", "Parte 02", "Parte 03"]
 
 export default function CicloBlocosPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { cycleId: urlCycleId, setCycleId: setUrlCycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [cycleSubjects, setCycleSubjects] = useState<StudyCycleSubject[]>([])
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null)
@@ -38,6 +46,8 @@ export default function CicloBlocosPage() {
   const [loading, setLoading] = useState(true)
   const [loadingTopics, setLoadingTopics] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [drift, setDrift] = useState<SetupDrift | null>(null)
+  const [phaseFilter, setPhaseFilter] = useState<string>("all")
 
   const loadBlocks = useCallback(async (uid: string, cid?: string | null) => {
     const q = cid ? `user_id=${uid}&cycle_id=${cid}` : `user_id=${uid}`
@@ -69,12 +79,17 @@ export default function CicloBlocosPage() {
         return
       }
       setUserId(user.id)
-      const ciclo = await fetch(`/api/ciclo?user_id=${user.id}`).then((r) =>
+      const cid = urlCycleId
+      const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
+      const ciclo = await fetch(`/api/ciclo?user_id=${user.id}${q}`).then((r) =>
         r.json()
       )
       const subs: StudyCycleSubject[] = ciclo.cycle?.subjects ?? []
       setCycleSubjects(subs)
-      setCycleId(ciclo.cycle?.id ?? null)
+      const resolvedId = ciclo.cycle?.id ?? null
+      setCycleId(resolvedId)
+      if (resolvedId) setUrlCycleId(resolvedId)
+      setDrift(ciclo.drift ?? null)
       if (subs.length) {
         const fromQuery = searchParams.get("subject_id")
         const initial =
@@ -82,12 +97,22 @@ export default function CicloBlocosPage() {
             ? fromQuery
             : subs[0].subject_id
         setSelectedSubjectId(initial)
-        await loadBlocks(user.id, ciclo.cycle?.id)
+        await loadBlocks(user.id, resolvedId)
         await loadTopicTree(user.id, initial)
       }
       setLoading(false)
     })
-  }, [router, loadBlocks, loadTopicTree, searchParams])
+  }, [router, loadBlocks, loadTopicTree, searchParams, urlCycleId, setUrlCycleId])
+
+  useEffect(() => {
+    if (userId && urlCycleId) {
+      const q = `&cycle_id=${encodeURIComponent(urlCycleId)}`
+      fetch(`/api/ciclo?user_id=${userId}${q}`)
+        .then((r) => r.json())
+        .then((d) => setDrift(d.drift ?? null))
+      loadBlocks(userId, urlCycleId)
+    }
+  }, [userId, urlCycleId, loadBlocks])
 
   useEffect(() => {
     if (userId && selectedSubjectId) {
@@ -95,7 +120,21 @@ export default function CicloBlocosPage() {
     }
   }, [userId, selectedSubjectId, loadTopicTree])
 
-  const subjectBlocks = blocks.filter((b) => b.subject_id === selectedSubjectId)
+  const subjectBlocks = blocks.filter((b) => {
+    if (b.subject_id !== selectedSubjectId) return false
+    if (phaseFilter === "all") return true
+    if (phaseFilter === "none") return !b.phase_label
+    return b.phase_label === phaseFilter
+  })
+
+  const phaseOptions = useMemo(() => {
+    const labels = new Set<string>()
+    for (const b of blocks) {
+      if (b.phase_label) labels.add(b.phase_label)
+    }
+    for (const p of PHASE_PRESETS) labels.add(p)
+    return [...labels].sort()
+  }, [blocks])
 
   const assignedKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -217,6 +256,17 @@ export default function CicloBlocosPage() {
     )
   }
 
+  async function updateBlockPhaseLabel(blockId: string, phase_label: string | null) {
+    await fetch("/api/ciclo/content-blocks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ block_id: blockId, phase_label: phase_label || null }),
+    })
+    setBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, phase_label: phase_label || null } : b))
+    )
+  }
+
   async function updateBlockStudyNote(blockId: string, study_note: string) {
     await fetch("/api/ciclo/content-blocks", {
       method: "PATCH",
@@ -251,7 +301,7 @@ export default function CicloBlocosPage() {
     return (
       <div className="mx-auto max-w-lg space-y-4 text-center">
         <p className="text-slate-600">Selecione matérias primeiro.</p>
-        <Link href="/ciclo/materias" className="text-teal-700 underline">
+        <Link href={withCycleId("/ciclo/materias", cycleId)} className="text-teal-700 underline">
           Ir para Matérias
         </Link>
       </div>
@@ -264,7 +314,7 @@ export default function CicloBlocosPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <Link
-        href="/ciclo/materias"
+        href={withCycleId("/ciclo/materias", cycleId)}
         className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -283,6 +333,59 @@ export default function CicloBlocosPage() {
           {toast}
         </div>
       )}
+
+      {userId && cycleId && drift?.has_drift && (
+        <SetupDriftBanner
+          userId={userId}
+          cycleId={cycleId}
+          drift={drift}
+          onSynced={() => {
+            fetch(`/api/ciclo?user_id=${userId}&cycle_id=${cycleId}`)
+              .then((r) => r.json())
+              .then((d) => setDrift(d.drift ?? null))
+          }}
+        />
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500">Fase:</span>
+        <button
+          type="button"
+          onClick={() => setPhaseFilter("all")}
+          className={`rounded-full px-2.5 py-0.5 text-xs ${
+            phaseFilter === "all"
+              ? "bg-teal-100 font-medium text-teal-900"
+              : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          Todas
+        </button>
+        <button
+          type="button"
+          onClick={() => setPhaseFilter("none")}
+          className={`rounded-full px-2.5 py-0.5 text-xs ${
+            phaseFilter === "none"
+              ? "bg-teal-100 font-medium text-teal-900"
+              : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          Sem fase
+        </button>
+        {phaseOptions.map((label) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setPhaseFilter(label)}
+            className={`rounded-full px-2.5 py-0.5 text-xs ${
+              phaseFilter === label
+                ? "bg-teal-100 font-medium text-teal-900"
+                : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="grid h-[min(70vh,calc(100vh-11rem))] min-h-[24rem] gap-4 lg:grid-cols-12">
         {/* Matérias */}
@@ -369,13 +472,14 @@ export default function CicloBlocosPage() {
                   onRename={(name) => updateBlockName(block.id, name)}
                   onNotebook={(nb) => updateBlockNotebook(block.id, nb)}
                   onStudyNote={(note) => updateBlockStudyNote(block.id, note)}
+                  onPhaseLabel={(label) => updateBlockPhaseLabel(block.id, label)}
                 />
               ))
             )}
           </div>
 
           <Link
-            href="/ciclo/planejar"
+            href={withCycleId("/ciclo/planejar", cycleId)}
             className="mt-2 shrink-0 inline-block text-sm text-teal-700 underline"
           >
             Próximo: planejar ciclo →
@@ -397,6 +501,7 @@ function BlockCard({
   onRename,
   onNotebook,
   onStudyNote,
+  onPhaseLabel,
 }: {
   block: StudyCycleContentBlock
   userId: string
@@ -408,6 +513,7 @@ function BlockCard({
   onRename: (name: string) => void
   onNotebook: (notebook: { id: string; name: string } | null) => void
   onStudyNote: (note: string) => void
+  onPhaseLabel: (label: string | null) => void
 }) {
   const [dragOver, setDragOver] = useState(false)
   const [noteDraft, setNoteDraft] = useState(block.study_note ?? "")
@@ -470,6 +576,28 @@ function BlockCard({
           >
             <Trash2 className="h-4 w-4" />
           </button>
+          <select
+            value={block.phase_label ?? ""}
+            onChange={(e) => onPhaseLabel(e.target.value || null)}
+            className="shrink-0 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+            title="Fase do plano (ex.: Parte 01)"
+          >
+            <option value="">Sem fase</option>
+            {PHASE_PRESETS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+            {block.phase_label &&
+              !PHASE_PRESETS.includes(block.phase_label) && (
+                <option value={block.phase_label}>{block.phase_label}</option>
+              )}
+          </select>
+          {block.phase_label && (
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              {block.phase_label}
+            </Badge>
+          )}
           {isManual && (
             <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
               Manual

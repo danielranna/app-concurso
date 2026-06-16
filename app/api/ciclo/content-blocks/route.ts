@@ -12,7 +12,7 @@ import {
   saveCycleSubjects,
   updateContentBlock,
 } from "@/lib/study-cycle-content-blocks-db"
-import { getActiveOrDraftCycle } from "@/lib/study-cycle-db"
+import { getActiveOrDraftCycle, resolveCycleForUser } from "@/lib/study-cycle-db"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
 
     let cid = cycle_id
     if (!cid) {
-      const cycle = await getActiveOrDraftCycle(user_id)
+      const cycle = await resolveCycleForUser(user_id, null)
       cid = cycle?.id ?? null
     }
     if (!cid) {
@@ -81,8 +81,15 @@ export async function POST(req: Request) {
   }
 
   try {
+    async function resolveCid(): Promise<string> {
+      if (cycle_id) return cycle_id
+      const cycle = await resolveCycleForUser(user_id, null)
+      if (cycle?.id) return cycle.id
+      return ensureDraftCycle(user_id)
+    }
+
     if (action === "save_subjects") {
-      const cid = cycle_id ?? (await ensureDraftCycle(user_id))
+      const cid = await resolveCid()
       if (!Array.isArray(subjects)) {
         return NextResponse.json({ error: "subjects obrigatório" }, { status: 400 })
       }
@@ -90,7 +97,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, cycle_id: cid })
     }
 
-    const cid = cycle_id ?? (await ensureDraftCycle(user_id))
+    const cid = await resolveCid()
 
     if (action === "create_block") {
       if (!subject_id) {
@@ -134,7 +141,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   const body = await req.json()
-  const { block_id, name, sort_order, estimated_minutes, study_note, notebook_id } = body
+  const { block_id, name, sort_order, estimated_minutes, study_note, notebook_id, phase_label } = body
 
   if (!block_id) {
     return NextResponse.json({ error: "block_id obrigatório" }, { status: 400 })
@@ -147,6 +154,7 @@ export async function PATCH(req: Request) {
       estimated_minutes,
       study_note,
       notebook_id,
+      phase_label,
     })
     return NextResponse.json({ ok: true })
   } catch (e) {

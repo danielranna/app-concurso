@@ -1,5 +1,4 @@
 import { supabaseServer } from "./supabase-server"
-import { getActiveOrDraftCycle } from "./study-cycle-db"
 import type { StudyCycle } from "./study-cycle-types"
 
 export async function completeQueueItemDb(
@@ -65,6 +64,30 @@ export async function skipQueueItemDb(
   if (e2) throw new Error(e2.message)
 }
 
-export async function loadCycleWithQueue(userId: string): Promise<StudyCycle | null> {
-  return getActiveOrDraftCycle(userId)
+export async function reopenQueueItemDb(
+  cycleId: string,
+  blockId: string
+): Promise<void> {
+  const { error } = await supabaseServer
+    .from("study_cycle_blocks")
+    .update({
+      status: "pending",
+      completed_at: null,
+    })
+    .eq("id", blockId)
+    .eq("cycle_id", cycleId)
+    .eq("status", "completed")
+
+  if (error) throw new Error(error.message)
+}
+
+export async function loadCycleWithQueue(
+  userId: string,
+  cycleId?: string | null
+): Promise<StudyCycle | null> {
+  const { getActiveCycle, resolveCycleForUser } = await import("./study-cycle-db")
+  if (cycleId) return resolveCycleForUser(userId, cycleId)
+  const active = await getActiveCycle(userId)
+  if (active) return active
+  return resolveCycleForUser(userId, null)
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   completeQueueItemDb,
   loadCycleWithQueue,
+  reopenQueueItemDb,
   skipQueueItemDb,
 } from "@/lib/study-cycle-queue-db"
 import {
@@ -52,6 +53,8 @@ export async function POST(req: Request) {
       await completeQueueItemDb(cycle.id, block_id)
     } else if (action === "skip") {
       await skipQueueItemDb(cycle.id, block_id)
+    } else if (action === "reopen") {
+      await reopenQueueItemDb(cycle.id, block_id)
     } else {
       return NextResponse.json({ error: "action inválida" }, { status: 400 })
     }

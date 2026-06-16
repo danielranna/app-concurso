@@ -12,6 +12,7 @@ import {
   Loader2,
   SkipForward,
   Sparkles,
+  Undo2,
 } from "lucide-react"
 import type { PaceAnalytics, QueueState } from "@/lib/study-cycle-queue"
 import {
@@ -53,6 +54,7 @@ export default function CycleQueuePanel({
   onQueueChange,
 }: Props) {
   const [acting, setActing] = useState(false)
+  const [reopeningId, setReopeningId] = useState<string | null>(null)
   const [showPending, setShowPending] = useState(false)
   const [showCompleted, setShowCompleted] = useState(false)
   const [topicTrees, setTopicTrees] = useState<TecSubjectTreeResponse[]>([])
@@ -93,6 +95,35 @@ export default function CycleQueuePanel({
       }
     } finally {
       setActing(false)
+    }
+  }
+
+  async function reopenCompleted(blockId: string) {
+    setReopeningId(blockId)
+    try {
+      const res = await fetch("/api/ciclo/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          action: "reopen",
+          block_id: blockId,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error ?? "Erro")
+        return
+      }
+      if (data.queue && data.cycle) {
+        onQueueChange({
+          queue: data.queue,
+          cycle: data.cycle,
+          pace: data.pace ?? undefined,
+        })
+      }
+    } finally {
+      setReopeningId(null)
     }
   }
 
@@ -336,14 +367,29 @@ export default function CycleQueuePanel({
                   <li
                     key={item.id}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-500",
-                      "line-through opacity-75"
+                      "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-500"
                     )}
                   >
                     <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                    <span className="truncate">
+                    <span className="min-w-0 flex-1 truncate line-through opacity-75">
                       {item.subject_name} — {item.label}
                     </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-xs"
+                      disabled={!item.id || reopeningId === item.id}
+                      onClick={() => item.id && reopenCompleted(item.id)}
+                      title="Desfazer conclusão"
+                    >
+                      {reopeningId === item.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Undo2 className="h-3 w-3" />
+                      )}
+                      Desfazer
+                    </Button>
                   </li>
                 ))}
               </ul>

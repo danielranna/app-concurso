@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server"
 import {
   activateCycle,
-  getActiveOrDraftCycle,
+  getActiveCycle,
+  getCycleById,
   getCyclePreferences,
   getSubjectIdsWithNotebooks,
   pauseCycle,
+  resolveCycleForUser,
   resumeCycle,
 } from "@/lib/study-cycle-db"
+import { detectSetupDrift, listUserCyclePlans } from "@/lib/study-cycle-plans"
 import { resolvePrioritySource, PRIORITY_SOURCE_LABELS } from "@/lib/priority-source"
 
 export async function GET(req: Request) {
@@ -16,17 +19,26 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  const [prefs, cycle, defaultSubjectIds] = await Promise.all([
+  const cycle_id = searchParams.get("cycle_id")
+
+  const [prefs, cycle, defaultSubjectIds, plans] = await Promise.all([
     getCyclePreferences(user_id),
-    getActiveOrDraftCycle(user_id),
+    resolveCycleForUser(user_id, cycle_id),
     getSubjectIdsWithNotebooks(user_id),
+    listUserCyclePlans(user_id),
   ])
+
+  const activeCycle = await getActiveCycle(user_id)
+  const drift = cycle ? await detectSetupDrift(cycle) : null
 
   const prioritySource = resolvePrioritySource(prefs.study_mode)
 
   return NextResponse.json({
     preferences: prefs,
     cycle,
+    active_cycle_id: activeCycle?.id ?? null,
+    plans,
+    drift,
     default_subject_ids: defaultSubjectIds,
     priority_source: prioritySource,
     priority_source_label: PRIORITY_SOURCE_LABELS[prioritySource],
@@ -43,11 +55,11 @@ export async function PATCH(req: Request) {
 
   try {
     if (action === "pause") {
-      await pauseCycle(user_id)
+      await pauseCycle(user_id, cycle_id)
       return NextResponse.json({ ok: true, cycle_enabled: false })
     }
     if (action === "resume") {
-      const cycle = await resumeCycle(user_id)
+      const cycle = await resumeCycle(user_id, cycle_id)
       return NextResponse.json({ ok: true, cycle_enabled: true, cycle })
     }
     if (action === "activate") {

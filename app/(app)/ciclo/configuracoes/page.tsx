@@ -9,9 +9,11 @@ import type { StudyCycle, WeekdayLimits } from "@/lib/study-cycle-types"
 import { defaultWeekdayLimits, WEEKDAY_LABELS, scaleLimitsForMinutes, DEFAULT_MAX_BLOCKS } from "@/lib/study-cycle-planner"
 import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
 import type { PrioritySource } from "@/lib/priority-source"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
 
 export default function CicloConfiguracoesPage() {
   const router = useRouter()
+  const { cycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [cycle, setCycle] = useState<StudyCycle | null>(null)
   const [subjectsPerDay, setSubjectsPerDay] = useState(2)
@@ -24,10 +26,11 @@ export default function CicloConfiguracoesPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const load = useCallback((uid: string) => {
+  const load = useCallback((uid: string, cid?: string | null) => {
     setLoading(true)
+    const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
     return Promise.all([
-      fetch(`/api/ciclo?user_id=${uid}`).then((r) => r.json()),
+      fetch(`/api/ciclo?user_id=${uid}${q}`).then((r) => r.json()),
       fetch(`/api/coach/preferences?user_id=${uid}`).then((r) => r.json()),
     ])
       .then(([ciclo, prefs]) => {
@@ -53,9 +56,13 @@ export default function CicloConfiguracoesPage() {
         return
       }
       setUserId(user.id)
-      load(user.id)
+      load(user.id, cycleId)
     })
-  }, [router, load])
+  }, [router, load, cycleId])
+
+  useEffect(() => {
+    if (userId && cycleId) load(userId, cycleId)
+  }, [userId, cycleId, load])
 
   function updateWeekday(
     weekday: number,

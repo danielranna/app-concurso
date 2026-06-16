@@ -16,6 +16,7 @@ type CycleRow = {
   user_id: string
   status: string
   name: string
+  description?: string | null
   subjects_per_day: number
   planning_mode?: string | null
   target_weeks?: number | null
@@ -207,6 +208,7 @@ function rowToCycle(
     user_id: row.user_id,
     status: row.status as StudyCycle["status"],
     name: row.name,
+    description: row.description ?? null,
     subjects_per_day: row.subjects_per_day,
     planning_mode: (row.planning_mode ?? "time_driven") as StudyCycle["planning_mode"],
     target_weeks: row.target_weeks ?? null,
@@ -221,6 +223,52 @@ function rowToCycle(
     cycle_blocks: rel.cycle_blocks,
     content_blocks: rel.content_blocks,
   }
+}
+
+export async function getCycleById(
+  userId: string,
+  cycleId: string
+): Promise<StudyCycle | null> {
+  const { data: row } = await supabaseServer
+    .from("study_cycles")
+    .select("*")
+    .eq("id", cycleId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (!row) return null
+  const rel = await loadCycleRelations(row.id, row.total_days ?? 0)
+  return rowToCycle(row as CycleRow, rel)
+}
+
+export async function getActiveCycle(
+  userId: string
+): Promise<StudyCycle | null> {
+  const { data: row } = await supabaseServer
+    .from("study_cycles")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!row) return null
+  const rel = await loadCycleRelations(row.id, row.total_days ?? 0)
+  return rowToCycle(row as CycleRow, rel)
+}
+
+export async function resolveCycleForUser(
+  userId: string,
+  cycleId?: string | null
+): Promise<StudyCycle | null> {
+  if (cycleId) {
+    const byId = await getCycleById(userId, cycleId)
+    if (byId) return byId
+  }
+  const active = await getActiveCycle(userId)
+  if (active) return active
+  return getActiveOrDraftCycle(userId)
 }
 
 export async function getActiveOrDraftCycle(
@@ -243,8 +291,8 @@ export async function getActiveOrDraftCycle(
 export async function getTodayCycleDay(
   userId: string
 ): Promise<{ cycle: StudyCycle; day: StudyCycleDay } | null> {
-  const cycle = await getActiveOrDraftCycle(userId)
-  if (!cycle || cycle.status !== "active" || !cycle.days.length) return null
+  const cycle = await getActiveCycle(userId)
+  if (!cycle || !cycle.days.length) return null
 
   const idx = cycle.current_day_index % cycle.days.length
   const day = cycle.days[idx]
@@ -296,16 +344,31 @@ export async function saveManualCycle(
     ...new Set(input.days.flatMap((d) => d.blocks.map((b) => b.subject_id))),
   ]
 
-  const { data: existing } = await supabaseServer
-    .from("study_cycles")
-    .select("id, status")
-    .eq("user_id", userId)
-    .in("status", ["draft", "paused", "active"])
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  let cycleId = input.cycle_id
+  let preservedDayIndex = 0
 
-  let cycleId = existing?.id
+  if (cycleId) {
+    const { data: row } = await supabaseServer
+      .from("study_cycles")
+      .select("id, current_day_index")
+      .eq("user_id", userId)
+      .eq("id", cycleId)
+      .maybeSingle()
+    if (!row) throw new Error("Plano não encontrado")
+    preservedDayIndex = row.current_day_index ?? 0
+  } else {
+    const { data: fallback } = await supabaseServer
+      .from("study_cycles")
+      .select("id, current_day_index")
+      .eq("user_id", userId)
+      .in("status", ["draft", "paused", "active"])
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    cycleId = fallback?.id
+    preservedDayIndex = fallback?.current_day_index ?? 0
+  }
+
   const total_days = input.days.length
   const weekday_limits = normalizeWeekdayLimits(input.weekday_limits ?? defaultWeekdayLimits())
 
@@ -317,12 +380,18 @@ export async function saveManualCycle(
   )
 
   if (cycleId) {
+    const dayIndex =
+      input.reset_day_index === false
+        ? Math.min(preservedDayIndex, Math.max(0, total_days - 1))
+        : 0
+
     await supabaseServer
       .from("study_cycles")
       .update({
         name: input.name ?? "Meu ciclo",
         subjects_per_day: maxSubjectsPerDay,
         total_days,
+        current_day_index: dayIndex,
         planning_mode: input.planning_mode ?? "time_driven",
         target_weeks: input.target_weeks ?? null,
         default_block_minutes: input.default_block_minutes ?? 45,
@@ -428,74 +497,105 @@ export async function saveManualCycle(
     await supabaseServer.from("study_cycle_blocks").insert(blockRows)
   }
 
-  const cycle = await getActiveOrDraftCycle(userId)
+  const cycle = cycleId
+    ? await getCycleById(userId, cycleId)
+    : await getActiveOrDraftCycle(userId)
   if (!cycle) throw new Error("Ciclo não encontrado após salvar")
   return cycle
 }
 
 export async function activateCycle(
   userId: string,
-  cycleId: string
+  cycleId: string,
+  options?: { reset_day_index?: boolean }
 ): Promise<StudyCycle> {
   await supabaseServer
     .from("study_cycles")
-    .update({ status: "completed", updated_at: new Date().toISOString() })
+    .update({
+      status: "completed",
+      updated_at: new Date().toISOString(),
+    })
     .eq("user_id", userId)
     .eq("status", "active")
 
+  const patch: Record<string, unknown> = {
+    status: "active",
+    started_at: new Date().toISOString(),
+    paused_at: null,
+    updated_at: new Date().toISOString(),
+  }
+  if (options?.reset_day_index !== false) {
+    patch.current_day_index = 0
+  }
+
   const { error } = await supabaseServer
     .from("study_cycles")
-    .update({
-      status: "active",
-      started_at: new Date().toISOString(),
-      paused_at: null,
-      current_day_index: 0,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", cycleId)
     .eq("user_id", userId)
 
   if (error) throw new Error(error.message)
   await setCycleEnabled(userId, true)
 
-  const cycle = await getActiveOrDraftCycle(userId)
+  const cycle = await getCycleById(userId, cycleId)
   if (!cycle) throw new Error("Ciclo não encontrado")
   return cycle
 }
 
-export async function pauseCycle(userId: string): Promise<void> {
-  const cycle = await getActiveOrDraftCycle(userId)
-  if (cycle?.status === "active") {
-    await supabaseServer
-      .from("study_cycles")
-      .update({
-        status: "paused",
-        paused_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", cycle.id)
-  }
+export async function pauseCycle(
+  userId: string,
+  cycleId?: string
+): Promise<void> {
+  let query = supabaseServer
+    .from("study_cycles")
+    .update({
+      status: "paused",
+      paused_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("status", "active")
+
+  if (cycleId) query = query.eq("id", cycleId)
+
+  await query
   await setCycleEnabled(userId, false)
 }
 
-export async function resumeCycle(userId: string): Promise<StudyCycle | null> {
-  const cycle = await getActiveOrDraftCycle(userId)
-  if (!cycle) return null
+export async function resumeCycle(
+  userId: string,
+  cycleId?: string
+): Promise<StudyCycle | null> {
+  let targetId = cycleId
+  if (!targetId) {
+    const cycle = await getActiveOrDraftCycle(userId)
+    targetId = cycle?.id
+  }
+  if (!targetId) return null
 
-  if (cycle.status === "paused" || cycle.status === "draft") {
+  const { data: row } = await supabaseServer
+    .from("study_cycles")
+    .select("status, started_at")
+    .eq("id", targetId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (!row) return null
+
+  if (row.status === "paused" || row.status === "draft") {
     await supabaseServer
       .from("study_cycles")
       .update({
         status: "active",
-        started_at: cycle.started_at ?? new Date().toISOString(),
+        started_at: row.started_at ?? new Date().toISOString(),
         paused_at: null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", cycle.id)
+      .eq("id", targetId)
   }
 
   await setCycleEnabled(userId, true)
-  return getActiveOrDraftCycle(userId)
+  return getCycleById(userId, targetId)
 }
 
 export async function getSubjectIdsWithNotebooks(

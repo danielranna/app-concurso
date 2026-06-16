@@ -10,9 +10,12 @@ import type { QueueState } from "@/lib/study-cycle-queue"
 import WeekGrid from "@/components/ciclo/WeekGrid"
 import { enrichCycleDays } from "@/lib/study-cycle-week-utils"
 import { downloadCyclePdf } from "@/lib/cycle-pdf-download"
+import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
+import { withCycleId } from "@/lib/cycle-plan-context"
 
 export default function CicloSemanaPage() {
   const router = useRouter()
+  const { cycleId } = useCyclePlanId()
   const [userId, setUserId] = useState<string | null>(null)
   const [cycle, setCycle] = useState<StudyCycle | null>(null)
   const [cycleEnabled, setCycleEnabled] = useState(false)
@@ -21,9 +24,10 @@ export default function CicloSemanaPage() {
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [queue, setQueue] = useState<QueueState | null>(null)
 
-  const load = useCallback((uid: string) => {
+  const load = useCallback((uid: string, cid?: string | null) => {
     setLoading(true)
-    return fetch(`/api/ciclo?user_id=${uid}`)
+    const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
+    return fetch(`/api/ciclo?user_id=${uid}${q}`)
       .then((r) => r.json())
       .then((d) => {
         setCycle(d.cycle ?? null)
@@ -49,9 +53,13 @@ export default function CicloSemanaPage() {
         return
       }
       setUserId(user.id)
-      load(user.id)
+      load(user.id, cycleId)
     })
-  }, [router, load])
+  }, [router, load, cycleId])
+
+  useEffect(() => {
+    if (userId && cycleId) load(userId, cycleId)
+  }, [userId, cycleId, load])
 
   async function downloadPdf() {
     if (!userId) return

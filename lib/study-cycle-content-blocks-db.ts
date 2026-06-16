@@ -59,6 +59,7 @@ export async function loadContentBlocksForCycle(
       study_note: (b.study_note as string | null) ?? null,
       notebook_id: (b.notebook_id as string | null) ?? nbObj?.id ?? null,
       notebook_name: nbObj?.name ?? null,
+      phase_label: (b.phase_label as string | null) ?? null,
       topics: topicsByBlock.get(b.id) ?? [],
       subject_name: name,
     }
@@ -102,6 +103,7 @@ export async function getContentBlock(
     study_note: (b.study_note as string | null) ?? null,
     notebook_id: (b.notebook_id as string | null) ?? nbObj?.id ?? null,
     notebook_name: nbObj?.name ?? null,
+    phase_label: (b.phase_label as string | null) ?? null,
     topics: (topics ?? []).map((t) => ({
       id: t.id,
       content_block_id: t.content_block_id,
@@ -149,6 +151,7 @@ export async function updateContentBlock(
     estimated_minutes?: number
     study_note?: string | null
     notebook_id?: string | null
+    phase_label?: string | null
   }
 ): Promise<void> {
   const { error } = await supabaseServer
