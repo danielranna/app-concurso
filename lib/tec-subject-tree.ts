@@ -5,6 +5,7 @@ import {
   type DbTopicCandidate,
 } from "./tec-notebook-index-import"
 import { supabaseServer } from "./supabase-server"
+import { fetchQuestionTaxonomyForUser } from "./question-taxonomy"
 import type {
   TecSubjectNode,
   TecSubjectSummary,
@@ -130,12 +131,10 @@ export async function refreshTecNodeCounts(
 export async function listTecSubjectSummaries(
   userId: string
 ): Promise<TecSubjectSummary[]> {
-  const { data: qRows } = await supabaseServer
-    .from("questions")
-    .select("tec_subject, tec_topic")
+  const qRows = await fetchQuestionTaxonomyForUser(userId)
 
   const bySubject = new Map<string, { topics: Set<string>; count: number }>()
-  for (const r of qRows ?? []) {
+  for (const r of qRows) {
     const sub = r.tec_subject?.trim()
     if (!sub) continue
     const g = bySubject.get(sub) ?? { topics: new Set<string>(), count: 0 }

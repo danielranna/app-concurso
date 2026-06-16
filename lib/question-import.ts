@@ -114,12 +114,23 @@ export async function upsertGlobalQuestion(
 
   const { data: existing } = await supabaseServer
     .from("questions")
-    .select("id, tec_id")
+    .select("id, tec_id, tec_subject, tec_topic")
     .eq("tec_id", q.tec_id)
     .maybeSingle()
 
   if (existing) {
     if (!q.replace_in_bank) {
+      const needsSubject = Boolean(q.tec_subject?.trim() && !existing.tec_subject?.trim())
+      const needsTopic = Boolean(q.tec_topic?.trim() && !existing.tec_topic?.trim())
+      if (needsSubject || needsTopic) {
+        await supabaseServer
+          .from("questions")
+          .update({
+            ...(needsSubject ? { tec_subject: q.tec_subject } : {}),
+            ...(needsTopic ? { tec_topic: q.tec_topic } : {}),
+          })
+          .eq("id", existing.id)
+      }
       return {
         question_id: existing.id,
         tec_id: q.tec_id,

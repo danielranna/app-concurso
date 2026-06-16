@@ -1,21 +1,189 @@
 import { NextResponse } from "next/server"
-import { supabaseServer } from "@/lib/supabase-server"
+import { generateFullCycle, previewCycleStats, resolveSubjectsPerDayLimit } from "@/lib/study-cycle-deadline-planner"
 import {
   activateCycle,
+  getActiveOrDraftCycle,
+  getCyclePreferences,
   saveManualCycle,
 } from "@/lib/study-cycle-db"
+import { loadContentBlocksForCycle } from "@/lib/study-cycle-content-blocks-db"
+import { collectCycleSetupIssues } from "@/lib/study-cycle-setup-validation"
 import { defaultWeekdayLimits, normalizeWeekdayLimits } from "@/lib/study-cycle-planner"
 import type { ManualCycleSaveInput, WeekdayLimits } from "@/lib/study-cycle-types"
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, action, name, days, weekday_limits, cycle_id } = body
+  const {
+    user_id,
+    action,
+    name,
+    days,
+    weekday_limits,
+    cycle_id,
+    target_weeks,
+    default_block_minutes,
+    planning_mode,
+    subjects_per_day,
+    activate: shouldActivate,
+  } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
   try {
+    const prefs =
+      action === "preview" || action === "generate" || action === "generate_and_activate"
+        ? await getCyclePreferences(user_id)
+        : null
+
+    const resolveSubjectsPerDay = () =>
+      resolveSubjectsPerDayLimit(
+        subjects_per_day,
+        prefs?.subjects_per_cycle_day
+      )
+
+    if (action === "preview") {
+      const cycle = await getActiveOrDraftCycle(user_id)
+      if (!cycle?.subjects?.length) {
+        return NextResponse.json(
+          { error: "Configure matérias no ciclo primeiro" },
+          { status: 400 }
+        )
+      }
+      const contentBlocks = cycle.content_blocks?.length
+        ? cycle.content_blocks
+        : await loadContentBlocksForCycle(cycle.id)
+
+      const subjectPlans = cycle.subjects.map((s) => ({
+        subject_id: s.subject_id,
+        subject_name: s.subject_name,
+        weight: s.weight ?? s.times_in_cycle ?? 1,
+        blocks: contentBlocks.filter((b) => b.subject_id === s.subject_id),
+      }))
+
+      const setup_issues = collectCycleSetupIssues(subjectPlans)
+      if (setup_issues.length) {
+        return NextResponse.json({
+          setup_issues,
+          error: "Resolva os itens pendentes em Blocos antes de continuar.",
+        })
+      }
+
+      const limits = normalizeWeekdayLimits(
+        cycle.weekday_limits?.length
+          ? cycle.weekday_limits
+          : (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
+      )
+
+      const stats = previewCycleStats(
+        subjectPlans,
+        limits,
+        Number(target_weeks ?? cycle.target_weeks ?? 8),
+        Number(default_block_minutes ?? cycle.default_block_minutes ?? 45),
+        resolveSubjectsPerDay()
+      )
+
+      return NextResponse.json({ stats })
+    }
+
+    if (action === "generate" || action === "generate_and_activate") {
+      const cycle = await getActiveOrDraftCycle(user_id)
+      if (!cycle?.subjects?.length) {
+        return NextResponse.json(
+          { error: "Configure matérias no ciclo primeiro" },
+          { status: 400 }
+        )
+      }
+
+      const contentBlocks = cycle.content_blocks?.length
+        ? cycle.content_blocks
+        : await loadContentBlocksForCycle(cycle.id)
+
+      const subjectPlans = cycle.subjects.map((s) => ({
+        subject_id: s.subject_id,
+        subject_name: s.subject_name,
+        weight: s.weight ?? s.times_in_cycle ?? 1,
+        blocks: contentBlocks.filter((b) => b.subject_id === s.subject_id),
+      }))
+
+      const setup_issues = collectCycleSetupIssues(subjectPlans)
+      if (setup_issues.length) {
+        return NextResponse.json(
+          {
+            setup_issues,
+            error: "Resolva os itens pendentes em Blocos antes de gerar o calendário.",
+          },
+          { status: 400 }
+        )
+      }
+
+      const limits = normalizeWeekdayLimits(
+        cycle.weekday_limits?.length
+          ? cycle.weekday_limits
+          : (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
+      )
+
+      const weeks = Number(target_weeks ?? cycle.target_weeks ?? 8)
+      const blockMinutes = Number(default_block_minutes ?? cycle.default_block_minutes ?? 45)
+      const resolvedSubjectsPerDay = resolveSubjectsPerDay()
+
+      let generated
+      try {
+        generated = generateFullCycle({
+          subjects: subjectPlans,
+          weekday_limits: limits,
+          target_weeks: weeks,
+          default_block_minutes: blockMinutes,
+          subjects_per_day: resolvedSubjectsPerDay,
+          planning_mode: planning_mode ?? "deadline_driven",
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Erro ao distribuir sessões"
+        return NextResponse.json({ error: msg }, { status: 400 })
+      }
+
+      if (!generated.stats.feasible) {
+        return NextResponse.json(
+          { error: generated.stats.warning ?? "Prazo inviável com tempo disponível", stats: generated.stats },
+          { status: 400 }
+        )
+      }
+
+      const input: ManualCycleSaveInput = {
+        name: name ?? cycle.name ?? "Meu ciclo",
+        weekday_limits: limits,
+        planning_mode: "deadline_driven",
+        target_weeks: weeks,
+        default_block_minutes: blockMinutes,
+        subjects_per_day: resolvedSubjectsPerDay,
+        subjects: cycle.subjects.map((s, i) => ({
+          subject_id: s.subject_id,
+          sort_order: s.sort_order ?? i,
+          weight: s.weight ?? s.times_in_cycle ?? 1,
+        })),
+        days: generated.days,
+      }
+
+      const saved = await saveManualCycle(user_id, input)
+
+      if (action === "generate_and_activate" || shouldActivate) {
+        const active = await activateCycle(user_id, saved.id)
+        return NextResponse.json({
+          cycle: active,
+          stats: generated.stats,
+          distribution_stats: generated.distribution_stats,
+          cycle_enabled: true,
+        })
+      }
+
+      return NextResponse.json({
+        cycle: saved,
+        stats: generated.stats,
+        distribution_stats: generated.distribution_stats,
+      })
+    }
+
     if (action === "save" || action === "save_and_activate") {
       if (!Array.isArray(days) || !days.length) {
         return NextResponse.json(
@@ -26,6 +194,9 @@ export async function POST(req: Request) {
 
       const input: ManualCycleSaveInput = {
         name,
+        planning_mode: planning_mode ?? "time_driven",
+        target_weeks,
+        default_block_minutes,
         weekday_limits: normalizeWeekdayLimits(
           (weekday_limits as WeekdayLimits[]) ?? defaultWeekdayLimits()
         ),
@@ -48,6 +219,7 @@ export async function POST(req: Request) {
                 day_index: d.day_index ?? i,
                 subject_id: b.subject_id,
                 content_node_id: b.content_node_id ?? null,
+                content_block_id: b.content_block_id ?? null,
                 block_type: b.block_type,
                 sort_order,
                 label: b.label ?? "",
@@ -87,6 +259,8 @@ export async function PATCH(req: Request) {
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
+
+  const { supabaseServer } = await import("@/lib/supabase-server")
 
   if (subjects_per_cycle_day != null) {
     await supabaseServer.from("coach_study_preferences").upsert({

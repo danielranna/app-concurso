@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { loadContentBlocksForCycle } from "./study-cycle-content-blocks-db"
 import { defaultWeekdayLimits, normalizeWeekdayLimits } from "./study-cycle-planner"
 import type {
   ManualCycleSaveInput,
@@ -15,6 +16,9 @@ type CycleRow = {
   status: string
   name: string
   subjects_per_day: number
+  planning_mode?: string | null
+  target_weeks?: number | null
+  default_block_minutes?: number | null
   started_at: string | null
   paused_at: string | null
   current_day_index: number
@@ -83,6 +87,7 @@ async function loadCycleBlocks(cycleId: string): Promise<StudyCycleBlock[]> {
       day_index: r.day_index,
       subject_id: r.subject_id,
       content_node_id: r.content_node_id,
+      content_block_id: r.content_block_id ?? null,
       block_type: r.block_type as StudyCycleBlock["block_type"],
       sort_order: r.sort_order,
       label: r.label ?? "",
@@ -118,8 +123,9 @@ async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
   weekday_limits: WeekdayLimits[]
   days: StudyCycleDay[]
   cycle_blocks: StudyCycleBlock[]
+  content_blocks: Awaited<ReturnType<typeof loadContentBlocksForCycle>>
 }> {
-  const [{ data: subRows }, { data: wdRows }, { data: dayRows }, cycle_blocks] =
+  const [{ data: subRows }, { data: wdRows }, { data: dayRows }, cycle_blocks, content_blocks] =
     await Promise.all([
       supabaseServer
         .from("study_cycle_subjects")
@@ -137,6 +143,7 @@ async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
         .eq("cycle_id", cycleId)
         .order("day_index"),
       loadCycleBlocks(cycleId),
+      loadContentBlocksForCycle(cycleId),
     ])
 
   const subjects: StudyCycleSubject[] = (subRows ?? []).map((r) => {
@@ -146,6 +153,7 @@ async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
       subject_id: r.subject_id,
       sort_order: r.sort_order,
       times_in_cycle: r.times_in_cycle,
+      weight: r.times_in_cycle,
       subject_name: name,
     }
   })
@@ -183,7 +191,7 @@ async function loadCycleRelations(cycleId: string, totalDays: number): Promise<{
     }))
   }
 
-  return { subjects, weekday_limits, days, cycle_blocks }
+  return { subjects, weekday_limits, days, cycle_blocks, content_blocks }
 }
 
 function rowToCycle(
@@ -196,6 +204,9 @@ function rowToCycle(
     status: row.status as StudyCycle["status"],
     name: row.name,
     subjects_per_day: row.subjects_per_day,
+    planning_mode: (row.planning_mode ?? "time_driven") as StudyCycle["planning_mode"],
+    target_weeks: row.target_weeks ?? null,
+    default_block_minutes: row.default_block_minutes ?? 45,
     started_at: row.started_at,
     paused_at: row.paused_at,
     current_day_index: row.current_day_index,
@@ -204,6 +215,7 @@ function rowToCycle(
     weekday_limits: rel.weekday_limits,
     days: rel.days,
     cycle_blocks: rel.cycle_blocks,
+    content_blocks: rel.content_blocks,
   }
 }
 
@@ -282,9 +294,9 @@ export async function saveManualCycle(
 
   const { data: existing } = await supabaseServer
     .from("study_cycles")
-    .select("id")
+    .select("id, status")
     .eq("user_id", userId)
-    .in("status", ["draft", "paused"])
+    .in("status", ["draft", "paused", "active"])
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -294,8 +306,10 @@ export async function saveManualCycle(
   const weekday_limits = normalizeWeekdayLimits(input.weekday_limits ?? defaultWeekdayLimits())
 
   const maxSubjectsPerDay = Math.max(
-    ...input.days.map((d) => new Set(d.blocks.map((b) => b.subject_id)).size),
-    1
+    1,
+    input.subjects_per_day ??
+      (await getCyclePreferences(userId)).subjects_per_cycle_day ??
+      2
   )
 
   if (cycleId) {
@@ -305,6 +319,9 @@ export async function saveManualCycle(
         name: input.name ?? "Meu ciclo",
         subjects_per_day: maxSubjectsPerDay,
         total_days,
+        planning_mode: input.planning_mode ?? "time_driven",
+        target_weeks: input.target_weeks ?? null,
+        default_block_minutes: input.default_block_minutes ?? 45,
         updated_at: new Date().toISOString(),
       })
       .eq("id", cycleId)
@@ -324,6 +341,9 @@ export async function saveManualCycle(
         name: input.name ?? "Meu ciclo",
         subjects_per_day: maxSubjectsPerDay,
         total_days,
+        planning_mode: input.planning_mode ?? "time_driven",
+        target_weeks: input.target_weeks ?? null,
+        default_block_minutes: input.default_block_minutes ?? 45,
       })
       .select("id")
       .single()
@@ -331,13 +351,22 @@ export async function saveManualCycle(
     cycleId = created.id
   }
 
-  if (allSubjectIds.length) {
+  const subjectEntries =
+    input.subjects?.length
+      ? input.subjects
+      : allSubjectIds.map((sid, i) => ({
+          subject_id: sid,
+          sort_order: i,
+          weight: 1,
+        }))
+
+  if (subjectEntries.length) {
     await supabaseServer.from("study_cycle_subjects").insert(
-      allSubjectIds.map((sid, i) => ({
+      subjectEntries.map((s) => ({
         cycle_id: cycleId,
-        subject_id: sid,
-        sort_order: i,
-        times_in_cycle: 1,
+        subject_id: s.subject_id,
+        sort_order: s.sort_order,
+        times_in_cycle: Math.min(10, Math.max(1, s.weight)),
       }))
     )
   }
@@ -372,6 +401,7 @@ export async function saveManualCycle(
       day_index: d.day_index,
       subject_id: b.subject_id,
       content_node_id: b.content_node_id,
+      content_block_id: b.content_block_id ?? null,
       block_type: b.block_type,
       sort_order,
       label: b.label,
