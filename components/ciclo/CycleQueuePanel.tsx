@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   BookOpen,
@@ -19,6 +19,7 @@ import {
   resolveQueueNotebook,
 } from "@/lib/study-cycle-queue-display"
 import type { StudyCycle } from "@/lib/study-cycle-types"
+import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
 import BlockTopicGroups from "@/components/ciclo/BlockTopicGroups"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,6 +55,7 @@ export default function CycleQueuePanel({
   const [acting, setActing] = useState(false)
   const [showPending, setShowPending] = useState(false)
   const [showCompleted, setShowCompleted] = useState(false)
+  const [topicTrees, setTopicTrees] = useState<TecSubjectTreeResponse[]>([])
 
   const weightMap = new Map(
     cycle.subjects.map((s) => [s.subject_id, s.weight ?? s.times_in_cycle ?? 1])
@@ -98,6 +100,28 @@ export default function CycleQueuePanel({
   const recentCompleted = queue.completed.slice(0, 10)
   const currentContent = resolveQueueContentBlock(cycle, queue.current)
   const currentNotebook = resolveQueueNotebook(cycle, queue.current)
+
+  useEffect(() => {
+    const subjectId = currentContent?.subject_id ?? queue.current?.subject_id
+    if (!userId || !subjectId) {
+      setTopicTrees([])
+      return
+    }
+    let cancelled = false
+    fetch(
+      `/api/ciclo/content-blocks?user_id=${userId}&subject_id=${subjectId}&tec_tree=1`
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setTopicTrees(d.trees ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setTopicTrees([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, currentContent?.subject_id, queue.current?.subject_id])
 
   return (
     <Card className="overflow-hidden">
@@ -194,6 +218,7 @@ export default function CycleQueuePanel({
                       </p>
                       <BlockTopicGroups
                         topics={currentContent!.topics}
+                        trees={topicTrees}
                         compact
                         defaultOpen={currentContent!.topics.length <= 12}
                       />

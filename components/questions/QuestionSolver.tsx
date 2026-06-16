@@ -532,6 +532,14 @@ export default function QuestionSolver({
           <CombinedSessionNotebookSummary breakdown={notebookBreakdown} />
         )}
         <div className="flex flex-wrap justify-center gap-3 pt-2">
+          {wrongN > 0 && (
+            <Link
+              href="/questoes/revisao"
+              className="rounded-lg border border-red-300 bg-white px-5 py-2.5 text-sm font-medium text-red-900 hover:bg-red-50"
+            >
+              Ver correções de hoje
+            </Link>
+          )}
           {mode === "notebook" && onResetNotebook && (
             <button
               type="button"

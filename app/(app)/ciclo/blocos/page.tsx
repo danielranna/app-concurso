@@ -362,6 +362,7 @@ export default function CicloBlocosPage() {
                   block={block}
                   userId={userId!}
                   subjectName={selectedName}
+                  trees={trees}
                   onDrop={(e) => handleDrop(block.id, block.name, e)}
                   onRemoveTopic={removeTopic}
                   onDelete={() => deleteBlock(block.id)}
@@ -389,6 +390,7 @@ function BlockCard({
   block,
   userId,
   subjectName,
+  trees,
   onDrop,
   onRemoveTopic,
   onDelete,
@@ -399,6 +401,7 @@ function BlockCard({
   block: StudyCycleContentBlock
   userId: string
   subjectName: string
+  trees: TecSubjectTreeResponse[]
   onDrop: (e: React.DragEvent) => void
   onRemoveTopic: (id: string) => void
   onDelete: () => void
@@ -495,6 +498,7 @@ function BlockCard({
         ) : (
           <BlockTopicGroups
             topics={block.topics}
+            trees={trees}
             onRemoveTopic={onRemoveTopic}
           />
         )}

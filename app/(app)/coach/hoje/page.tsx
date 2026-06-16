@@ -124,14 +124,22 @@ export default function CoachHojePage() {
   const [pinning, setPinning] = useState(false)
   const [completingKey, setCompletingKey] = useState<string | null>(null)
   const [metaExpanded, setMetaExpanded] = useState(false)
+  const [dailyWrongCount, setDailyWrongCount] = useState<number | null>(null)
 
   const load = useCallback((uid: string) => {
     setLoading(true)
-    fetch(`/api/coach/daily-plan?user_id=${uid}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.plan) setPlan(parsePlanFromApi(d.plan))
+    Promise.all([
+      fetch(`/api/coach/daily-plan?user_id=${uid}`).then((r) => r.json()),
+      fetch(
+        `/api/questions/daily-wrongs?user_id=${encodeURIComponent(uid)}&count_only=1`
+      ).then((r) => r.json()),
+    ])
+      .then(([planData, wrongData]) => {
+        if (planData.plan) setPlan(parsePlanFromApi(planData.plan))
         else setPlan(null)
+        setDailyWrongCount(
+          typeof wrongData.count === "number" ? wrongData.count : 0
+        )
       })
       .finally(() => setLoading(false))
   }, [])
@@ -294,6 +302,19 @@ export default function CoachHojePage() {
           </button>
         </div>
       </header>
+
+      {dailyWrongCount != null && dailyWrongCount > 0 && (
+        <Link
+          href="/questoes/revisao"
+          className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm transition hover:border-red-300 hover:bg-red-100"
+        >
+          <span className="font-medium text-red-900">
+            {dailyWrongCount}{" "}
+            {dailyWrongCount === 1 ? "erro hoje" : "erros hoje"} — revisar gabaritos no TEC
+          </span>
+          <span className="shrink-0 text-red-700 underline">Abrir lista</span>
+        </Link>
+      )}
 
       {!plan && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-slate-600">

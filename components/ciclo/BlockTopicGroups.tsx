@@ -1,13 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ChevronDown, ChevronRight, Folder, X } from "lucide-react"
 import type { StudyCycleContentBlockTopic } from "@/lib/study-cycle-types"
-import { groupTopicsBySubject } from "@/lib/study-cycle-topic-utils"
+import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
+import {
+  buildAssignedTopicTree,
+  groupTopicsBySubject,
+  type AssignedTopicTreeNode,
+} from "@/lib/study-cycle-topic-utils"
 import { cn } from "@/lib/utils"
 
 type Props = {
   topics: StudyCycleContentBlockTopic[]
+  trees?: TecSubjectTreeResponse[]
   onRemoveTopic?: (topicId: string) => void
   compact?: boolean
   defaultOpen?: boolean
@@ -16,22 +22,42 @@ type Props = {
 
 export default function BlockTopicGroups({
   topics,
+  trees,
   onRemoveTopic,
   compact = false,
   defaultOpen = true,
   className,
 }: Props) {
-  const groups = groupTopicsBySubject(topics)
+  const nodes = useMemo(() => {
+    if (trees?.length) {
+      const treeNodes = buildAssignedTopicTree(topics, trees)
+      if (treeNodes.length) return treeNodes
+    }
+    return groupTopicsBySubject(topics).map((group) => ({
+      kind: "folder" as const,
+      name: group.tec_subject,
+      count: group.topics.length,
+      children: group.topics.map((topic) => ({
+        kind: "topic" as const,
+        topic,
+        name: topic.tec_topic || topic.tec_subject,
+      })),
+    }))
+  }, [topics, trees])
 
-  if (!groups.length) return null
+  if (!nodes.length) return null
 
   return (
     <div className={cn("space-y-1", className)}>
-      {groups.map((group) => (
-        <SubjectGroup
-          key={group.tec_subject}
-          tec_subject={group.tec_subject}
-          topics={group.topics}
+      {nodes.map((node, i) => (
+        <TreeNode
+          key={
+            node.kind === "folder"
+              ? `folder:${node.name}:${i}`
+              : `topic:${node.topic.id ?? node.name}`
+          }
+          node={node}
+          depth={0}
           onRemoveTopic={onRemoveTopic}
           compact={compact}
           defaultOpen={defaultOpen}
@@ -41,41 +67,91 @@ export default function BlockTopicGroups({
   )
 }
 
-function SubjectGroup({
-  tec_subject,
-  topics,
+function TreeNode({
+  node,
+  depth,
   onRemoveTopic,
   compact,
   defaultOpen,
 }: {
-  tec_subject: string
-  topics: StudyCycleContentBlockTopic[]
+  node: AssignedTopicTreeNode
+  depth: number
   onRemoveTopic?: (topicId: string) => void
   compact?: boolean
   defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(defaultOpen ?? true)
-  const showFolderHeader = topics.length > 1 || tec_subject !== topics[0]?.tec_topic
-
-  if (!showFolderHeader && topics.length === 1) {
-    const t = topics[0]
-    const label = t.tec_topic || t.tec_subject
+  if (node.kind === "topic") {
     return (
-      <TopicChip
-        label={label}
-        topicId={t.id}
-        onRemove={onRemoveTopic}
-        compact={compact}
-      />
+      <div style={{ paddingLeft: depth * 12 + (depth > 0 ? 8 : 0) }}>
+        <TopicRow
+          label={node.name}
+          topicId={node.topic.id}
+          onRemove={onRemoveTopic}
+          compact={compact}
+        />
+      </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50/50">
+    <FolderGroup
+      name={node.name}
+      count={node.count}
+      depth={depth}
+      compact={compact}
+      defaultOpen={defaultOpen}
+    >
+      {node.children.map((child, i) => (
+        <TreeNode
+          key={
+            child.kind === "folder"
+              ? `folder:${child.name}:${i}`
+              : `topic:${child.topic.id ?? child.name}`
+          }
+          node={child}
+          depth={depth + 1}
+          onRemoveTopic={onRemoveTopic}
+          compact={compact}
+          defaultOpen={defaultOpen}
+        />
+      ))}
+    </FolderGroup>
+  )
+}
+
+function FolderGroup({
+  name,
+  count,
+  depth,
+  children,
+  compact,
+  defaultOpen,
+}: {
+  name: string
+  count: number
+  depth: number
+  children: React.ReactNode
+  compact?: boolean
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(
+    defaultOpen ?? (depth < 2 || count <= 6)
+  )
+
+  return (
+    <div
+      className={cn(
+        depth === 0 && "rounded-lg border border-slate-100 bg-slate-50/50"
+      )}
+      style={depth > 0 ? { paddingLeft: depth * 12 } : undefined}
+    >
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+        className={cn(
+          "flex w-full items-center gap-1.5 text-left hover:bg-slate-50",
+          depth === 0 ? "rounded-lg px-2 py-1.5" : "rounded-md px-1 py-1"
+        )}
       >
         {open ? (
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -89,43 +165,29 @@ function SubjectGroup({
             compact ? "text-xs" : "text-sm"
           )}
         >
-          {tec_subject}
+          {name}
         </span>
         <span className="shrink-0 rounded bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700">
-          {topics.length}
+          {count}
         </span>
       </button>
       {open && (
-        <ul className="space-y-0.5 border-t border-slate-100 px-2 py-1.5">
-          {topics.map((t) => (
-            <li
-              key={t.id ?? `${t.tec_subject}:${t.tec_topic}`}
-              className={cn(
-                "flex items-center gap-2 rounded-md border border-white bg-white px-2 py-1 text-slate-700 shadow-sm",
-                compact ? "text-xs" : "text-sm"
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">
-                {t.tec_topic || t.tec_subject}
-              </span>
-              {t.id && onRemoveTopic && (
-                <button
-                  type="button"
-                  onClick={() => onRemoveTopic(t.id!)}
-                  className="shrink-0 text-slate-400 hover:text-red-500"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div
+          className={cn(
+            "space-y-0.5",
+            depth === 0
+              ? "border-t border-slate-100 px-2 py-1.5"
+              : "pb-0.5 pl-1"
+          )}
+        >
+          {children}
+        </div>
       )}
     </div>
   )
 }
 
-function TopicChip({
+function TopicRow({
   label,
   topicId,
   onRemove,
@@ -139,11 +201,11 @@ function TopicChip({
   return (
     <div
       className={cn(
-        "inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-700",
+        "flex items-center gap-2 rounded-md border border-white bg-white px-2 py-1 text-slate-700 shadow-sm",
         compact ? "text-xs" : "text-sm"
       )}
     >
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {topicId && onRemove && (
         <button
           type="button"

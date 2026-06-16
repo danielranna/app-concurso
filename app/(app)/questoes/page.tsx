@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { FolderOpen, Filter, Calendar, Link2, Inbox, FileText } from "lucide-react"
+import { FolderOpen, Filter, Calendar, Link2, Inbox, FileText, ClipboardList } from "lucide-react"
 
 type SubjectRow = {
   id: string
@@ -78,6 +78,12 @@ export default function QuestoesHomePage() {
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
           >
             <Calendar className="h-4 w-4" /> Semana / estudo combinado
+          </Link>
+          <Link
+            href="/questoes/revisao"
+            className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 hover:bg-red-100"
+          >
+            <ClipboardList className="h-4 w-4" /> Correções do dia
           </Link>
           <Link
             href="/questoes/mapeamento"
