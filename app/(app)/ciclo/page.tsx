@@ -4,7 +4,18 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { Loader2, Calendar, Settings, PenLine, CheckCircle2, Circle } from "lucide-react"
+import {
+  Loader2,
+  Calendar,
+  Settings,
+  PenLine,
+  CheckCircle2,
+  Circle,
+  ArrowRight,
+  BookOpen,
+  Layers,
+  LayoutGrid,
+} from "lucide-react"
 import type { StudyCycle } from "@/lib/study-cycle-types"
 import type { PrioritySource } from "@/lib/priority-source"
 import PrioritySourceBanner from "@/components/ciclo/PrioritySourceBanner"
@@ -13,6 +24,15 @@ import CycleQueuePanel from "@/components/ciclo/CycleQueuePanel"
 import CyclePaceChart from "@/components/ciclo/CyclePaceChart"
 import { WEEKDAY_LABELS } from "@/lib/study-cycle-planner"
 import type { PaceAnalytics, QueueState } from "@/lib/study-cycle-queue"
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 
 type CicloOverview = {
   preferences: {
@@ -23,6 +43,44 @@ type CicloOverview = {
   cycle: StudyCycle | null
   priority_source: PrioritySource
 }
+
+const quickLinks = [
+  {
+    href: "/ciclo/materias",
+    icon: BookOpen,
+    title: "Matérias",
+    desc: "Peso no mini-ciclo",
+    accent: "from-violet-50 to-indigo-50 text-indigo-600",
+  },
+  {
+    href: "/ciclo/blocos",
+    icon: Layers,
+    title: "Blocos",
+    desc: "Agrupar assuntos",
+    accent: "from-sky-50 to-blue-50 text-sky-600",
+  },
+  {
+    href: "/ciclo/planejar",
+    icon: PenLine,
+    title: "Planejar",
+    desc: "Gerar calendário",
+    accent: "from-teal-50 to-emerald-50 text-teal-600",
+  },
+  {
+    href: "/ciclo/semana",
+    icon: Calendar,
+    title: "Semana",
+    desc: "Ver grade do ciclo",
+    accent: "from-amber-50 to-orange-50 text-amber-600",
+  },
+  {
+    href: "/ciclo/configuracoes",
+    icon: Settings,
+    title: "Configurações",
+    desc: "Blocos por dia",
+    accent: "from-slate-50 to-zinc-50 text-slate-600",
+  },
+]
 
 export default function CicloOverviewPage() {
   const router = useRouter()
@@ -111,20 +169,42 @@ export default function CicloOverviewPage() {
   const isActive = cycle?.status === "active" && prefs?.cycle_enabled
 
   const setupSteps = [
-    { done: hasSubjects, label: "Matérias e peso", href: "/ciclo/materias" },
-    { done: hasBlocks, label: "Blocos de assuntos", href: "/ciclo/blocos" },
-    { done: hasPlan, label: "Calendário gerado", href: "/ciclo/planejar" },
-    { done: isActive, label: "Ciclo ativo", href: "/ciclo/semana" },
+    { done: hasSubjects, label: "Matérias", href: "/ciclo/materias" },
+    { done: hasBlocks, label: "Blocos", href: "/ciclo/blocos" },
+    { done: hasPlan, label: "Calendário", href: "/ciclo/planejar" },
+    { done: isActive, label: "Ativo", href: "/ciclo/semana" },
   ]
 
+  const statusLabel =
+    cycle?.status === "active"
+      ? "Ativo"
+      : cycle?.status === "paused"
+        ? "Pausado"
+        : cycle?.status === "draft"
+          ? "Rascunho"
+          : cycle?.status
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Ciclo de estudo</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Planeje um ciclo amplo para o pré-edital ou pause para seguir a
-          consultoria.
-        </p>
+    <div className="mx-auto max-w-3xl space-y-6 pb-8">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 p-6 shadow-sm">
+        <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-teal-200/20 blur-3xl" />
+        <div className="relative">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-200/80">
+              <LayoutGrid className="h-4 w-4 text-teal-600" />
+            </div>
+            <Badge variant={isActive ? "success" : "outline"}>
+              {isActive ? "Ciclo em execução" : "Visão geral"}
+            </Badge>
+          </div>
+          <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-900">
+            Ciclo de estudo
+          </h1>
+          <p className="mt-1 max-w-lg text-sm text-slate-600">
+            Planeje um ciclo amplo para o pré-edital ou pause para seguir a
+            consultoria.
+          </p>
+        </div>
       </div>
 
       {data?.priority_source && prefs && (
@@ -142,121 +222,129 @@ export default function CicloOverviewPage() {
         onResume={() => handleToggle("resume")}
       />
 
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Setup do ciclo
-        </h2>
-        <ol className="mt-3 space-y-2">
-          {setupSteps.map((step) => (
-            <li key={step.href}>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Setup do ciclo
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="flex flex-wrap gap-2">
+            {setupSteps.map((step, i) => (
               <Link
+                key={step.href}
                 href={step.href}
-                className="flex items-center gap-2 text-sm hover:text-teal-700"
+                className={cn(
+                  "group flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-all",
+                  step.done
+                    ? "border-teal-200/80 bg-teal-50/50 text-teal-800 hover:bg-teal-50"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                )}
               >
                 {step.done ? (
-                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-teal-600" />
                 ) : (
-                  <Circle className="h-4 w-4 text-slate-300" />
+                  <Circle className="h-4 w-4 shrink-0 text-slate-300" />
                 )}
-                <span className={step.done ? "text-slate-800" : "text-slate-500"}>
-                  {step.label}
+                <span className="font-medium">
+                  {i + 1}. {step.label}
                 </span>
+                <ArrowRight className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-60" />
               </Link>
-            </li>
-          ))}
-        </ol>
-      </section>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {cycle && cycle.days.length > 0 ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Ciclo atual
-          </h2>
-          <p className="mt-2 text-lg font-medium text-slate-900">{cycle.name}</p>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div>
-              <dt className="text-xs text-slate-500">Status</dt>
-              <dd className="text-sm font-medium capitalize text-slate-800">
-                {cycle.status === "active"
-                  ? "Ativo"
-                  : cycle.status === "paused"
-                    ? "Pausado"
-                    : cycle.status === "draft"
-                      ? "Rascunho"
-                      : cycle.status}
-              </dd>
+        <Card>
+          <CardHeader>
+            <CardTitle>{cycle.name}</CardTitle>
+            <CardDescription>Resumo do ciclo atual</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { label: "Status", value: statusLabel },
+                {
+                  label: "Dia do ciclo",
+                  value: `${cycle.current_day_index + 1} / ${cycle.total_days}`,
+                },
+                {
+                  label: "Modo",
+                  value:
+                    cycle.planning_mode === "deadline_driven"
+                      ? `Prazo (${cycle.target_weeks ?? "?"} sem)`
+                      : "Tempo livre",
+                },
+                { label: "Matérias", value: String(cycle.subjects.length) },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"
+                >
+                  <p className="text-xs font-medium text-slate-500">
+                    {stat.label}
+                  </p>
+                  <p className="mt-0.5 text-base font-semibold capitalize text-slate-900">
+                    {stat.value}
+                  </p>
+                </div>
+              ))}
             </div>
-            <div>
-              <dt className="text-xs text-slate-500">Dia do ciclo</dt>
-              <dd className="text-sm font-medium text-slate-800">
-                {cycle.current_day_index + 1} / {cycle.total_days}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-slate-500">Modo</dt>
-              <dd className="text-sm font-medium text-slate-800">
-                {cycle.planning_mode === "deadline_driven"
-                  ? `Prazo (${cycle.target_weeks ?? "?"} sem)`
-                  : "Tempo livre"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-slate-500">Matérias</dt>
-              <dd className="text-sm font-medium text-slate-800">
-                {cycle.subjects.length}
-              </dd>
-            </div>
-          </dl>
 
-          {cycle.status === "active" && !hasQueue && cycle.days[cycle.current_day_index] && (
-            <div className="mt-4 rounded-lg bg-slate-50 p-3">
-              <p className="text-xs font-medium uppercase text-slate-500">
-                Hoje no ciclo
-              </p>
-              <p className="mt-1 text-sm text-slate-800">
-                {(cycle.days[cycle.current_day_index].subject_ids ?? [])
-                  .map(
-                    (id) =>
-                      cycle.subjects.find((s) => s.subject_id === id)
-                        ?.subject_name ?? id
-                  )
-                  .join(" · ") || "—"}
-              </p>
-            </div>
-          )}
-        </section>
+            {cycle.status === "active" && !hasQueue && cycle.days[cycle.current_day_index] && (
+              <div className="mt-4 rounded-xl border border-teal-100 bg-teal-50/40 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">
+                  Hoje no ciclo
+                </p>
+                <p className="mt-1 text-sm text-slate-800">
+                  {(cycle.days[cycle.current_day_index].subject_ids ?? [])
+                    .map(
+                      (id) =>
+                        cycle.subjects.find((s) => s.subject_id === id)
+                          ?.subject_name ?? id
+                    )
+                    .join(" · ") || "—"}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       ) : (
-        <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-6 text-center">
-          <p className="text-sm text-slate-600">
-            Configure matérias, monte blocos de assuntos e gere o calendário
-            automaticamente.
-          </p>
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <Link
-              href="/ciclo/materias"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-            >
-              1. Matérias
-            </Link>
-            <Link
-              href="/ciclo/blocos"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
-            >
-              2. Blocos
-            </Link>
-            <Link
-              href="/ciclo/planejar"
-              className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-            >
-              <PenLine className="h-4 w-4" />
-              3. Planejar
-            </Link>
-          </div>
-        </section>
+        <Card className="border-dashed bg-slate-50/30">
+          <CardContent className="py-8 text-center">
+            <p className="text-sm text-slate-600">
+              Configure matérias, monte blocos de assuntos e gere o calendário
+              automaticamente.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <Link
+                href="/ciclo/materias"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                1. Matérias
+              </Link>
+              <Link
+                href="/ciclo/blocos"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50"
+              >
+                2. Blocos
+              </Link>
+              <Link
+                href="/ciclo/planejar"
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-700"
+              >
+                <PenLine className="h-4 w-4" />
+                3. Planejar
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {hasQueue && queue && userId && cycle && (
-        <>
+        <div className="space-y-4">
           <CycleQueuePanel
             userId={userId}
             cycle={cycle}
@@ -269,60 +357,38 @@ export default function CicloOverviewPage() {
             }}
           />
           <CyclePaceChart pace={pace} />
-        </>
+        </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Link
-          href="/ciclo/materias"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
-        >
-          <PenLine className="h-5 w-5 text-teal-600" />
-          <div>
-            <p className="text-sm font-medium text-slate-900">Matérias</p>
-            <p className="text-xs text-slate-500">Peso no mini-ciclo</p>
-          </div>
-        </Link>
-        <Link
-          href="/ciclo/blocos"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
-        >
-          <PenLine className="h-5 w-5 text-teal-600" />
-          <div>
-            <p className="text-sm font-medium text-slate-900">Blocos</p>
-            <p className="text-xs text-slate-500">Agrupar assuntos</p>
-          </div>
-        </Link>
-        <Link
-          href="/ciclo/planejar"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
-        >
-          <PenLine className="h-5 w-5 text-teal-600" />
-          <div>
-            <p className="text-sm font-medium text-slate-900">Planejar</p>
-            <p className="text-xs text-slate-500">Gerar calendário</p>
-          </div>
-        </Link>
-        <Link
-          href="/ciclo/semana"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
-        >
-          <Calendar className="h-5 w-5 text-teal-600" />
-          <div>
-            <p className="text-sm font-medium text-slate-900">Semana</p>
-            <p className="text-xs text-slate-500">Ver grade do ciclo</p>
-          </div>
-        </Link>
-        <Link
-          href="/ciclo/configuracoes"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 hover:border-teal-200 hover:bg-teal-50/30"
-        >
-          <Settings className="h-5 w-5 text-teal-600" />
-          <div>
-            <p className="text-sm font-medium text-slate-900">Configurações</p>
-            <p className="text-xs text-slate-500">Horas por dia da semana</p>
-          </div>
-        </Link>
+      <div>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Atalhos
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {quickLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="group flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
+            >
+              <div
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br",
+                  link.accent
+                )}
+              >
+                <link.icon className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900">
+                  {link.title}
+                </p>
+                <p className="text-xs text-slate-500">{link.desc}</p>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500" />
+            </Link>
+          ))}
+        </div>
       </div>
 
       {!prefs?.cycle_enabled && (
@@ -335,41 +401,45 @@ export default function CicloOverviewPage() {
       )}
 
       {cycle && cycle.days.length > 0 && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-slate-900">
-            Próximos dias do ciclo
-          </h2>
-          <ul className="mt-3 divide-y divide-slate-100">
-            {cycle.days.slice(0, 5).map((day) => (
-              <li
-                key={day.day_index}
-                className="flex items-center justify-between py-2 text-sm"
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Próximos dias</CardTitle>
+            <CardDescription>Primeiros dias do calendário gerado</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ul className="divide-y divide-slate-100">
+              {cycle.days.slice(0, 5).map((day) => (
+                <li
+                  key={day.day_index}
+                  className="flex items-center justify-between gap-4 py-3 text-sm"
+                >
+                  <span className="shrink-0 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                    Dia {day.day_index + 1}
+                    {day.weekday != null && ` · ${WEEKDAY_LABELS[day.weekday]}`}
+                  </span>
+                  <span className="truncate text-right font-medium text-slate-800">
+                    {day.subject_ids
+                      .map(
+                        (id) =>
+                          cycle.subjects.find((s) => s.subject_id === id)
+                            ?.subject_name ?? "?"
+                      )
+                      .join(", ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {cycle.days.length > 5 && (
+              <Link
+                href="/ciclo/semana"
+                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline"
               >
-                <span className="text-slate-600">
-                  Dia {day.day_index + 1}
-                  {day.weekday != null && ` (${WEEKDAY_LABELS[day.weekday]})`}
-                </span>
-                <span className="font-medium text-slate-800">
-                  {day.subject_ids
-                    .map(
-                      (id) =>
-                        cycle.subjects.find((s) => s.subject_id === id)
-                          ?.subject_name ?? "?"
-                    )
-                    .join(", ")}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {cycle.days.length > 5 && (
-            <Link
-              href="/ciclo/semana"
-              className="mt-2 block text-xs text-teal-700 hover:underline"
-            >
-              Ver ciclo completo ({cycle.total_days} dias)
-            </Link>
-          )}
-        </section>
+                Ver ciclo completo ({cycle.total_days} dias)
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   )
