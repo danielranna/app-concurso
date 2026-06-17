@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   completeQueueItemDb,
   loadCycleWithQueue,
+  realignQueuePositionsDb,
   reopenQueueItemDb,
   skipQueueItemDb,
 } from "@/lib/study-cycle-queue-db"
@@ -17,7 +18,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
-  const cycle = await loadCycleWithQueue(user_id)
+  let cycle = await loadCycleWithQueue(user_id)
+  if (cycle?.id && cycle.cycle_blocks?.length) {
+    const realigned = await realignQueuePositionsDb(cycle.id)
+    if (realigned) cycle = (await loadCycleWithQueue(user_id)) ?? cycle
+  }
   if (!cycle?.cycle_blocks?.length) {
     return NextResponse.json({
       cycle,

@@ -1,6 +1,32 @@
 import { supabaseServer } from "./supabase-server"
 import type { StudyCycle } from "./study-cycle-types"
 
+/** Corrige queue_position para bater com a ordem do calendário. */
+export async function realignQueuePositionsDb(cycleId: string): Promise<boolean> {
+  const { data: rows, error } = await supabaseServer
+    .from("study_cycle_blocks")
+    .select("id, day_index, sort_order, queue_position")
+    .eq("cycle_id", cycleId)
+
+  if (error || !rows?.length) return false
+
+  const sorted = [...rows].sort(
+    (a, b) => a.day_index - b.day_index || a.sort_order - b.sort_order
+  )
+  let changed = false
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].queue_position !== i) {
+      changed = true
+      const { error: upErr } = await supabaseServer
+        .from("study_cycle_blocks")
+        .update({ queue_position: i })
+        .eq("id", sorted[i].id)
+      if (upErr) throw new Error(upErr.message)
+    }
+  }
+  return changed
+}
+
 export async function completeQueueItemDb(
   cycleId: string,
   blockId: string
@@ -24,7 +50,7 @@ export async function skipQueueItemDb(
 ): Promise<void> {
   const { data: rows, error: loadError } = await supabaseServer
     .from("study_cycle_blocks")
-    .select("id, queue_position, status, day_index, sort_order")
+    .select("id, status, day_index, sort_order")
     .eq("cycle_id", cycleId)
 
   if (loadError) throw new Error(loadError.message)
@@ -32,11 +58,7 @@ export async function skipQueueItemDb(
 
   const pending = rows
     .filter((r) => r.status === "pending")
-    .sort((a, b) => {
-      const pa = a.queue_position ?? a.day_index * 1000 + a.sort_order
-      const pb = b.queue_position ?? b.day_index * 1000 + b.sort_order
-      return pa - pb
-    })
+    .sort((a, b) => a.day_index - b.day_index || a.sort_order - b.sort_order)
 
   const idx = pending.findIndex((r) => r.id === blockId)
   if (idx < 0) throw new Error("Bloco não encontrado na fila")
@@ -46,22 +68,28 @@ export async function skipQueueItemDb(
 
   const current = pending[idx]
   const next = pending[idx + 1]
-  const posCurrent = current.queue_position ?? idx
-  const posNext = next.queue_position ?? idx + 1
 
   const { error: e1 } = await supabaseServer
     .from("study_cycle_blocks")
-    .update({ queue_position: posNext })
+    .update({
+      day_index: next.day_index,
+      sort_order: next.sort_order,
+    })
     .eq("id", current.id)
 
   if (e1) throw new Error(e1.message)
 
   const { error: e2 } = await supabaseServer
     .from("study_cycle_blocks")
-    .update({ queue_position: posCurrent })
+    .update({
+      day_index: current.day_index,
+      sort_order: current.sort_order,
+    })
     .eq("id", next.id)
 
   if (e2) throw new Error(e2.message)
+
+  await realignQueuePositionsDb(cycleId)
 }
 
 export async function reopenQueueItemDb(

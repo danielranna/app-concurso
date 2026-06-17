@@ -36,7 +36,10 @@ export type PaceAnalytics = {
   blocks_per_day_label: string
 }
 
-function comparePlannedOrder(a: StudyCycleBlock, b: StudyCycleBlock): number {
+export function comparePlannedOrder(
+  a: StudyCycleBlock,
+  b: StudyCycleBlock
+): number {
   return a.day_index - b.day_index || a.sort_order - b.sort_order
 }
 
@@ -82,9 +85,8 @@ function sessionsCapacityPerWeek(weekday_limits: WeekdayLimits[]): number {
 }
 
 export function getQueueState(cycle: StudyCycle): QueueState {
-  const items = flattenCycleBlocksToQueue(cycle).sort(
-    (a, b) => a.queue_position - b.queue_position
-  )
+  // A fila segue o calendário (dia → ordem no dia), não queue_position solto no banco.
+  const items = flattenCycleBlocksToQueue(cycle)
   const pending = items.filter((i) => i.status !== "completed")
   const completed = items
     .filter((i) => i.status === "completed")

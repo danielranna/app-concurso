@@ -80,6 +80,23 @@ describe("getQueueState", () => {
     expect(state.stats.pending).toBe(2)
   })
 
+  it("ignores stale queue_position and follows calendar order", () => {
+    const state = getQueueState(
+      makeCycle([
+        block("done-a", 0, 0, { status: "completed", queue_position: 0 }),
+        block("done-b", 0, 1, { status: "completed", queue_position: 1 }),
+        block("adm", 0, 2, { label: "Dir Adm", queue_position: 99 }),
+        block("ti7", 5, 0, {
+          label: "TI Bloco 7",
+          queue_position: 2,
+          subject_name: "TI",
+        }),
+      ])
+    )
+    expect(state.current?.id).toBe("adm")
+    expect(state.pending[1]?.id).toBe("ti7")
+  })
+
   it("computes weekly capacity from max_blocks", () => {
     const state = getQueueState(makeCycle([block("1", 0, 0)]))
     expect(state.stats.sessions_per_week_capacity).toBe(36)
