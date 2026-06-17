@@ -207,6 +207,61 @@ export type SubjectBrainState = {
   computed_at?: string
 }
 
+export type SubjectDossierEvidence = {
+  question_id: string
+  tec_id?: number
+  tec_topic?: string
+  specific_mistake?: string
+  report_id: string
+  recurrence: number
+}
+
+export type SubjectStudyDossierStructured = {
+  headline: string
+  opening_narrative: string
+  critical_themes: {
+    theme: string
+    topics: string[]
+    why_it_matters: string
+    understanding_md: string
+    confusion_pairs?: { wrong_belief: string; correct: string }[]
+    evidence: SubjectDossierEvidence[]
+  }[]
+  annotation_clarifications: {
+    question_id: string
+    note_body: string
+    answer_md: string
+    linked_topics: string[]
+  }[]
+  evolutions: {
+    topic: string
+    previous_misconception?: string
+    current_status: string
+    evidence: string
+    encouragement?: string
+  }[]
+  still_attention: { topic: string; reason: string; action: string }[]
+  study_blocks: {
+    title: string
+    content_md: string
+    question_ids: string[]
+  }[]
+}
+
+export type SubjectStudyDossierRow = {
+  user_id: string
+  subject_id: string
+  narrative_md: string | null
+  structured: SubjectStudyDossierStructured
+  source_report_ids: string[]
+  input_snapshot: Record<string, unknown> | null
+  model_used: string | null
+  tokens_in: number
+  tokens_out: number
+  cost_usd_estimate: number
+  updated_at: string
+}
+
 export type StrategicQueueItem = {
   id: string
   subject_id: string

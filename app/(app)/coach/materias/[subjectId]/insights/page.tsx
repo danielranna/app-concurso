@@ -23,6 +23,7 @@ import {
   ERROR_TAXONOMY_LABELS,
   SIGNAL_LABELS,
 } from "@/lib/coach-labels"
+import SubjectDossierPanel from "@/components/coach/SubjectDossierPanel"
 
 export default function CoachInsightsPage() {
   const params = useParams()
@@ -306,6 +307,14 @@ export default function CoachInsightsPage() {
           Ações a partir da fila
         </button>
       </div>
+
+      {userId && (
+        <SubjectDossierPanel
+          userId={userId}
+          subjectId={subjectId}
+          subjectName={subjectName}
+        />
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">

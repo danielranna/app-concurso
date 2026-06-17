@@ -6,6 +6,7 @@ import { persistSubjectBrain } from "../subject-brain"
 import { recomputeStrategicQueue } from "../strategic-queue"
 import { generateDailyStudyPlan } from "../execution-plan"
 import { filterReportStructuredForSubject } from "../notebook-subject-split"
+import { generateSubjectDossier } from "../subject-dossier"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -153,6 +154,31 @@ export async function processJob(job: {
           },
           priority: 7,
         })
+
+        await enqueueJob({
+          userId,
+          jobType: "subject_dossier_generate",
+          idempotencyKey: `dossier:${subjectId}:${reportId}`,
+          payload: { subject_id: subjectId, report_id: reportId },
+          priority: 7,
+        })
+        break
+      }
+
+      case "subject_dossier_generate": {
+        const subjectId = payload.subject_id as string
+        const result = await generateSubjectDossier(userId, subjectId, {
+          force: Boolean(payload.force),
+        })
+        if (result.empty) {
+          await completeJob(job.id, { skipped: true, reason: result.reason })
+        } else {
+          await completeJob(job.id, {
+            headline: result.dossier.structured.headline,
+            used_llm: result.dossier.used_llm,
+            themes: result.dossier.structured.critical_themes.length,
+          })
+        }
         break
       }
 
