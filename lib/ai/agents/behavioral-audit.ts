@@ -224,11 +224,31 @@ function mapZoneItems(
   })
 }
 
+function appendPendingFallbacks(
+  audit: BehavioralAudit,
+  items: ExplainWorkItem[],
+  optionsByQ: Map<string, { label: string; text: string }[]>,
+  taxHint: (qid: string) => PerQuestionError["error_taxonomy"] | undefined
+) {
+  for (const item of items) {
+    const auditItem = workItemToAuditItem(
+      item,
+      undefined,
+      optionsByQ,
+      taxHint
+    )
+    if (item.zone === "red") audit.red_zone.push(auditItem)
+    else if (item.zone === "yellow") audit.yellow_zone.push(auditItem)
+    else audit.green_zone.note_clarifications!.push(auditItem)
+  }
+}
+
 export async function runBehavioralAuditAgent(params: {
   userId: string
   subjectId: string | null
   payload: NotebookAuditPayload
   skipLlm?: boolean
+  prioritizeGreenNotes?: boolean
   taxonomyByQuestion?: Map<string, PerQuestionError>
 }): Promise<RunBehavioralAuditResult> {
   const taxHint = (qid: string) =>
@@ -264,17 +284,7 @@ export async function runBehavioralAuditAgent(params: {
   const nothingToExplain = pending.length === 0
 
   if (params.skipLlm || nothingToExplain) {
-    for (const item of pending) {
-      const auditItem = workItemToAuditItem(
-        item,
-        undefined,
-        optionsByQ,
-        taxHint
-      )
-      if (item.zone === "red") baseAudit.red_zone.push(auditItem)
-      else if (item.zone === "yellow") baseAudit.yellow_zone.push(auditItem)
-      else baseAudit.green_zone.note_clarifications!.push(auditItem)
-    }
+    appendPendingFallbacks(baseAudit, pending, optionsByQ, taxHint)
     return {
       audit: baseAudit,
       modelUsed:
@@ -290,7 +300,17 @@ export async function runBehavioralAuditAgent(params: {
 
   const prefs = await getEffectiveReportPreferences(params.userId, params.subjectId)
   const reportsToday = await countReportLlmRunsToday(params.userId)
-  if (reportsToday >= prefs.max_llm_explanations_per_day) {
+
+  const pendingRed = pending.filter((p) => p.zone === "red")
+  const pendingYellow = pending.filter((p) => p.zone === "yellow")
+  const pendingGreen = pending.filter((p) => p.zone === "green_note")
+
+  const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
+  const greenNoteOnly =
+    (atDailyCap || params.prioritizeGreenNotes) && pendingGreen.length > 0
+
+  if (atDailyCap && !greenNoteOnly) {
+    appendPendingFallbacks(baseAudit, pending, optionsByQ, taxHint)
     return {
       audit: baseAudit,
       modelUsed: "rule-based",
@@ -301,15 +321,24 @@ export async function runBehavioralAuditAgent(params: {
     }
   }
 
-  const pendingRed = pending.filter((p) => p.zone === "red")
-  const pendingYellow = pending.filter((p) => p.zone === "yellow")
-  const pendingGreen = pending.filter((p) => p.zone === "green_note")
+  if (greenNoteOnly) {
+    appendPendingFallbacks(
+      baseAudit,
+      [...pendingRed, ...pendingYellow],
+      optionsByQ,
+      taxHint
+    )
+  }
+
+  const llmPendingRed = greenNoteOnly ? [] : pendingRed
+  const llmPendingYellow = greenNoteOnly ? [] : pendingYellow
+  const llmPendingGreen = pendingGreen
 
   const input = {
     notebook_name: params.payload.notebook_name,
     subject_name: params.payload.subject_name,
     performance_summary: params.payload.performance_summary,
-    red_zone: pendingRed.map((item) =>
+    red_zone: llmPendingRed.map((item) =>
       buildExplainLlmItem(
         item.question,
         optionsByQ.get(item.question.question_id) ?? [],
@@ -318,7 +347,7 @@ export async function runBehavioralAuditAgent(params: {
         item.entry
       )
     ),
-    yellow_zone: pendingYellow.map((item) =>
+    yellow_zone: llmPendingYellow.map((item) =>
       buildExplainLlmItem(
         item.question,
         optionsByQ.get(item.question.question_id) ?? [],
@@ -327,7 +356,7 @@ export async function runBehavioralAuditAgent(params: {
         item.entry
       )
     ),
-    green_note_zone: pendingGreen.map((item) =>
+    green_note_zone: llmPendingGreen.map((item) =>
       buildExplainLlmItem(
         item.question,
         optionsByQ.get(item.question.question_id) ?? [],
@@ -358,13 +387,17 @@ export async function runBehavioralAuditAgent(params: {
   })
 
   if (!result.usedLlm || !result.text) {
+    const remaining = greenNoteOnly
+      ? llmPendingGreen
+      : [...llmPendingRed, ...llmPendingYellow, ...llmPendingGreen]
+    appendPendingFallbacks(baseAudit, remaining, optionsByQ, taxHint)
     return {
       audit: baseAudit,
       modelUsed: "rule-based",
       usedLlm: false,
-      tokensIn: 0,
-      tokensOut: 0,
-      costUsd: 0,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: result.costUsd,
     }
   }
 
@@ -404,18 +437,18 @@ export async function runBehavioralAuditAgent(params: {
       return llmByIndex.get(item.question.question_index)
     }
 
-    const newRed = pendingRed.map((item) =>
+    const newRed = llmPendingRed.map((item) =>
       workItemToAuditItem(item, resolveLlm(item), optionsByQ, taxHint)
     )
-    const newYellow = pendingYellow.map((item) =>
+    const newYellow = llmPendingYellow.map((item) =>
       workItemToAuditItem(item, resolveLlm(item), optionsByQ, taxHint)
     )
-    const newGreen = pendingGreen.map((item) =>
+    const newGreen = llmPendingGreen.map((item) =>
       workItemToAuditItem(item, resolveLlm(item), optionsByQ, taxHint)
     )
 
-    for (let i = 0; i < pending.length; i++) {
-      const item = pending[i]
+    const llmProcessed = [...llmPendingRed, ...llmPendingYellow, ...llmPendingGreen]
+    for (const item of llmProcessed) {
       const llm = resolveLlm(item)
       if (llm?.feedback) {
         await persistExplainOnEntry(
@@ -452,6 +485,10 @@ export async function runBehavioralAuditAgent(params: {
       costUsd: result.costUsd,
     }
   } catch {
+    const remaining = greenNoteOnly
+      ? llmPendingGreen
+      : [...llmPendingRed, ...llmPendingYellow, ...llmPendingGreen]
+    appendPendingFallbacks(baseAudit, remaining, optionsByQ, taxHint)
     return {
       audit: baseAudit,
       modelUsed: "rule-based",
@@ -469,6 +506,7 @@ export async function runBehavioralAuditForNotebook(
   subjectId: string | null,
   options?: {
     skipLlm?: boolean
+    prioritizeGreenNotes?: boolean
     payload?: NotebookAuditPayload
     taxonomyByQuestion?: Map<string, PerQuestionError>
   }
@@ -480,6 +518,7 @@ export async function runBehavioralAuditForNotebook(
     subjectId,
     payload,
     skipLlm: options?.skipLlm,
+    prioritizeGreenNotes: options?.prioritizeGreenNotes,
     taxonomyByQuestion: options?.taxonomyByQuestion,
   })
   await persistAuditInsightsToAttempts(result.audit, payload)

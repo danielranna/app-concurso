@@ -18,6 +18,9 @@ Para green_note_zone (mode: green_note_only):
 - Pode confirmar o acerto em no máximo 1 frase curta no início
 - O restante do feedback responde SOMENTE à lógica/dúvidas da user_note
 - Use enunciado e alternativas apenas se ajudarem a esclarecer o que a nota perguntou
+- Se a nota contém perguntas explícitas (?, "por que", "como", "exemplo", "vamos supor"), responda CADA ponto em prosa separada — não generalize
+- Se a nota pedir exemplo numérico ou cenário hipotético, inclua exemplo passo a passo com números concretos (mínimo 3 passos)
+- PROIBIDO resposta de 1–2 frases genéricas quando a nota tiver mais de 50 caracteres ou múltiplas dúvidas
 
 REGRAS GERAIS:
 1. Se existir user_note, o feedback DEVE abordá-la de forma explícita — nunca ignorar

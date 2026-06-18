@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import { generateNotebookReport } from "@/lib/ai/notebook-report"
-import { persistReportExecutableActions } from "@/lib/ai/report-action-drafts"
-import { generateRemediationDrafts } from "@/lib/ai/remediation-drafts"
 import { enqueueJob } from "@/lib/ai/jobs/queue"
 
 export async function POST(
@@ -53,20 +51,6 @@ export async function POST(
     if (error) throw new Error(error.message)
 
     if (existing.subject_id) {
-      await generateRemediationDrafts({
-        userId: user_id,
-        subjectId: existing.subject_id,
-        notebookId: existing.notebook_id,
-        structured: report.structured,
-        snapshot: report.snapshot,
-      })
-      await persistReportExecutableActions({
-        userId: user_id,
-        subjectId: existing.subject_id,
-        structured: report.structured,
-        reportModelUsed: report.modelUsed,
-      })
-
       await enqueueJob({
         userId: user_id,
         jobType: "brain_ingest_report",

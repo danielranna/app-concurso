@@ -1,7 +1,7 @@
 import type { DailyStudyBlock, DailyStudyPlan, PlanGenerationMeta } from "../coach-types"
 import { fetchDueStates } from "../flashcard-queue"
 import { ensureSubjectDecks } from "../flashcard-subjects"
-import { loadMappings } from "../tec-mapping"
+import { loadMappings, resolveQuestionMapping } from "../tec-mapping"
 import { supabaseServer } from "../supabase-server"
 import { topicBrainKey } from "./brain-helpers"
 type QueueRow = {
@@ -160,6 +160,166 @@ export async function pickClassifiedWrongAttempts(
   return rows
 }
 
+const ERROR_TAXONOMY_LABELS: Record<string, string> = {
+  falta_compreensao: "Confusão conceitual",
+  falta_memorizacao: "Falta de memorização",
+  conteudo_desconhecido: "Conteúdo desconhecido",
+  interpretacao_errada: "Interpretação errada do enunciado",
+  distrator_armadilha: "Caiu em distrator",
+  pressa_desatencao: "Pressa ou desatenção",
+}
+
+async function hasExecutorDraftToday(params: {
+  userId: string
+  subjectId: string
+  type: string
+  topic: string
+}): Promise<boolean> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const topicNorm = topicBrainKey(params.topic)
+  const { data } = await supabaseServer
+    .from("ai_action_drafts")
+    .select("id, payload")
+    .eq("user_id", params.userId)
+    .eq("subject_id", params.subjectId)
+    .eq("type", params.type)
+    .eq("status", "pending")
+    .eq("source_agent", "execution_plan")
+    .gte("created_at", start.toISOString())
+
+  return (data ?? []).some((d) => {
+    const p = (d.payload ?? {}) as Record<string, unknown>
+    const raw =
+      (p.topic as string) ??
+      (p.topic_key as string) ??
+      (p.tec_topics as string[])?.[0] ??
+      ""
+    return topicNorm === topicBrainKey(String(raw))
+  })
+}
+
+async function resolveTopicIdForSubject(
+  userId: string,
+  subjectId: string,
+  topic: string
+): Promise<string | null> {
+  const { data: topics } = await supabaseServer
+    .from("topics")
+    .select("id, name")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+
+  const match = (topics ?? []).find(
+    (t) => t.name.trim().toLowerCase() === topic.trim().toLowerCase()
+  )
+  if (match) return match.id
+
+  const { data: mapRow } = await supabaseServer
+    .from("tec_taxonomy_mappings")
+    .select("tec_subject, topic_id")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+    .not("topic_id", "is", null)
+    .limit(1)
+    .maybeSingle()
+
+  if (!mapRow?.tec_subject) return null
+  const resolved = await resolveQuestionMapping(
+    userId,
+    mapRow.tec_subject,
+    topic
+  )
+  return resolved.topic_id
+}
+
+export async function enqueueExecutorErrorDrafts(params: {
+  userId: string
+  subjectIds: string[]
+  queueBySubject: Map<string, QueueRow[]>
+  limit: number
+}): Promise<number> {
+  const { userId, subjectIds, queueBySubject, limit } = params
+  if (limit <= 0 || !subjectIds.length) return 0
+
+  const topicsDone = new Set<string>()
+  let created = 0
+
+  for (const subjectId of subjectIds) {
+    if (created >= limit) break
+
+    const wrongRows = await pickClassifiedWrongAttempts(userId, subjectId, {
+      limit: 30,
+    })
+    const queueTopics = (queueBySubject.get(subjectId) ?? [])
+      .slice(0, 5)
+      .map((q) => q.topic_label ?? q.topic_key)
+
+    const wrongByTopic = new Map<string, WrongReviewRow>()
+    for (const row of wrongRows) {
+      const key = topicBrainKey(row.tec_topic)
+      if (!wrongByTopic.has(key)) wrongByTopic.set(key, row)
+    }
+
+    const orderedTopics: { topic: string; row?: WrongReviewRow }[] = []
+    for (const qt of queueTopics) {
+      const key = topicBrainKey(qt)
+      orderedTopics.push({ topic: qt, row: wrongByTopic.get(key) })
+    }
+    for (const row of wrongRows) {
+      const key = topicBrainKey(row.tec_topic)
+      if (!orderedTopics.some((t) => topicBrainKey(t.topic) === key)) {
+        orderedTopics.push({ topic: row.tec_topic, row })
+      }
+    }
+
+    for (const { topic, row } of orderedTopics) {
+      if (created >= limit) break
+      const dedupeKey = `${subjectId}:${topicBrainKey(topic)}`
+      if (topicsDone.has(dedupeKey)) continue
+      topicsDone.add(dedupeKey)
+
+      if (
+        await hasExecutorDraftToday({
+          userId,
+          subjectId,
+          type: "error_create",
+          topic,
+        })
+      ) {
+        continue
+      }
+
+      const topicId = await resolveTopicIdForSubject(userId, subjectId, topic)
+      if (!topicId) continue
+
+      const tax = row?.error_taxonomy ?? "falta_compreensao"
+      const taxLabel = ERROR_TAXONOMY_LABELS[tax] ?? "Lacuna identificada"
+      const errorText = `${taxLabel} em ${topic}`
+      const correctionText = `Revise ${topic}: confronte suas anotações com o gabarito e complete a correção ao aprovar.`
+
+      await supabaseServer.from("ai_action_drafts").insert({
+        user_id: userId,
+        subject_id: subjectId,
+        type: "error_create",
+        label: `Erro no mapa: ${topic.slice(0, 60)}`,
+        payload: {
+          topic_id: topicId,
+          error_text: errorText,
+          correction_text: correctionText,
+          description: `Sugerido pelo plano diário (${tax})`,
+          topic,
+        },
+        source_agent: "execution_plan",
+        status: "pending",
+      })
+      created++
+    }
+  }
+
+  return created
+}
+
 export async function pickDueFlashcardStateIds(
   userId: string,
   subjectIds: string[],
@@ -244,6 +404,17 @@ export async function enqueueExecutorFlashcardDrafts(params: {
       const key = `${subjectId}:${topicBrainKey(topic)}`
       if (topicsDone.has(key)) continue
       topicsDone.add(key)
+
+      if (
+        await hasExecutorDraftToday({
+          userId,
+          subjectId,
+          type: "flashcard_create",
+          topic,
+        })
+      ) {
+        continue
+      }
 
       await supabaseServer.from("ai_action_drafts").insert({
         user_id: userId,

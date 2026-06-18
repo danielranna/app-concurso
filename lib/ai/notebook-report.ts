@@ -8,6 +8,8 @@ import {
   mergeUnifiedExplainIntoErrors,
   runBehavioralAuditForNotebook,
 } from "./agents/behavioral-audit"
+import { filterGreenNoteQuestions } from "./behavioral-audit-helpers"
+import { splitPendingNoteEntries } from "../note-entry-utils"
 import { runReportAgent } from "./agents/report"
 import { loadSubjectBrain } from "./context-builder"
 import { getEffectiveReportPreferences } from "./context-builder"
@@ -25,13 +27,22 @@ import {
   percentToIncidenceWeight,
 } from "../strategic-weights"
 import { fetchIncidenceRows, resolveSubjectLabels } from "../incidence-rows-db"
-import { persistReportExecutableActions } from "./report-action-drafts"
-import { generateRemediationDrafts } from "./remediation-drafts"
 import {
-  filterReportStructuredForSubject,
   resolveNotebookQuestionIdsBySubject,
 } from "./notebook-subject-split"
 import { enqueueJob } from "./jobs/queue"
+
+function hasPendingGreenNoteExplains(
+  questions: Awaited<ReturnType<typeof buildNotebookAuditPayload>>["questions"]
+): boolean {
+  for (const q of filterGreenNoteQuestions(questions)) {
+    const entries = (q.note_entries ?? []).filter((e) => e.body.trim())
+    if (entries.length === 0 && q.user_note.trim()) return true
+    const { pending } = splitPendingNoteEntries(entries)
+    if (pending.length > 0) return true
+  }
+  return false
+}
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
@@ -378,7 +389,9 @@ export async function generateNotebookReport(
 
   let perQuestionErrors = classifyResult.items
 
-  const skipAuditLlm = reportsToday >= prefs.max_llm_explanations_per_day
+  const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
+  const pendingGreenNotes = hasPendingGreenNoteExplains(payload.questions)
+  const skipAuditLlm = atDailyCap && !pendingGreenNotes
 
   const auditResult = await runBehavioralAuditForNotebook(
     notebookId,
@@ -386,6 +399,7 @@ export async function generateNotebookReport(
     subjectId,
     {
       skipLlm: skipAuditLlm,
+      prioritizeGreenNotes: atDailyCap && pendingGreenNotes,
       payload,
       taxonomyByQuestion: classifyResult.byQuestionId,
     }
@@ -509,7 +523,9 @@ export async function regenerateBehavioralAuditOnly(
     ? classifyResult.items
     : (prior.per_question_errors ?? [])
 
-  const skipAuditLlm = reportsToday >= prefs.max_llm_explanations_per_day
+  const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
+  const pendingGreenNotes = hasPendingGreenNoteExplains(payload.questions)
+  const skipAuditLlm = atDailyCap && !pendingGreenNotes
 
   const auditResult = await runBehavioralAuditForNotebook(
     existing.notebook_id,
@@ -517,6 +533,7 @@ export async function regenerateBehavioralAuditOnly(
     existing.subject_id,
     {
       skipLlm: skipAuditLlm,
+      prioritizeGreenNotes: atDailyCap && pendingGreenNotes,
       payload,
       taxonomyByQuestion: classifyResult.byQuestionId,
     }
@@ -564,7 +581,6 @@ export type CreateNotebookReportSyncResult =
       llm_used: boolean
       per_question_count: number
       actions_count: number
-      drafts_created: number
       topics_weak: number
       subjects_in_notebook: number
     }
@@ -643,46 +659,8 @@ export async function createNotebookReportSync(
     .update({ report_pending: false })
     .eq("id", notebookId)
 
-  let draftsCreated = 0
   const bySubject = await resolveNotebookQuestionIdsBySubject(userId, notebookId)
   const subjectIdsInNotebook = [...bySubject.keys()]
-
-  if (subjectIdsInNotebook.length > 0) {
-    for (const subjectId of subjectIdsInNotebook) {
-      const qids = bySubject.get(subjectId) ?? []
-      const filtered = filterReportStructuredForSubject(
-        report.structured,
-        new Set(qids)
-      )
-      await generateRemediationDrafts({
-        userId,
-        subjectId,
-        notebookId,
-        structured: filtered,
-        snapshot: report.snapshot,
-      })
-      draftsCreated += await persistReportExecutableActions({
-        userId,
-        subjectId,
-        structured: filtered,
-        reportModelUsed: report.modelUsed,
-      })
-    }
-  } else if (nb?.subject_id) {
-    await generateRemediationDrafts({
-      userId,
-      subjectId: nb.subject_id,
-      notebookId,
-      structured: report.structured,
-      snapshot: report.snapshot,
-    })
-    draftsCreated = await persistReportExecutableActions({
-      userId,
-      subjectId: nb.subject_id,
-      structured: report.structured,
-      reportModelUsed: report.modelUsed,
-    })
-  }
 
   const brainTargets =
     subjectIdsInNotebook.length > 0
@@ -712,7 +690,6 @@ export async function createNotebookReportSync(
     llm_used: report.usedLlm,
     per_question_count: report.perQuestionCount,
     actions_count: report.structured.executable_actions?.length ?? 0,
-    drafts_created: draftsCreated,
     topics_weak: report.structured.weaknesses?.length ?? 0,
     subjects_in_notebook: subjectIdsInNotebook.length,
   }

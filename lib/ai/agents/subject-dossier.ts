@@ -2,6 +2,7 @@ import type { SubjectStudyDossierStructured } from "../../coach-types"
 import { runAgent } from "../run-agent"
 import type { SubjectDossierPayload } from "../subject-dossier-payload"
 import { compactDossierPayloadForLlm } from "../subject-dossier-payload"
+import { runAnnotationClarificationsAgent } from "./annotation-clarifications"
 
 const SYSTEM = `Você é o "cérebro" do aluno nesta matéria — um tutor que escreve um relato de estudo personalizado em português do Brasil.
 
@@ -10,7 +11,11 @@ Use APENAS os dados JSON fornecidos. Não invente leis, artigos, conceitos ou qu
 TAREFA: produzir o Caderno da Matéria — síntese narrativa que:
 1. Correlaciona equívocos entre tópicos (padrões de confusão recorrentes)
 2. Explica o que o aluno precisa internalizar em cada lacuna crítica
-3. Responde às anotações/dúvidas do aluno (annotation_clarifications) — use cached_feedback quando existir e complemente
+3. Responde às anotações/dúvidas do aluno (annotation_clarifications) — use precomputed_clarifications quando existir; caso contrário, use cached_feedback e COMPLEMENTE com exemplos concretos
+   - answer_md deve responder DIRETAMENTE à nota do aluno, ponto a ponto
+   - Se a nota pedir exemplo numérico ou cenário ("vamos supor", "como fica"), inclua exemplo passo a passo com números
+   - NÃO repita definição genérica de conceito sem ligar ao caso da questão e à dúvida específica
+   - Se cached_feedback for vago, substitua por resposta específica
 4. Destaca evoluções REAIS listadas em evolution_candidates — cite evidências factuais
 5. Indica o que ainda precisa de atenção (still_attention)
 6. Monta blocos de estudo (study_blocks) como mini-capítulos de revisão
@@ -64,7 +69,16 @@ export async function runSubjectDossierAgent(params: {
   payload: SubjectDossierPayload
   skipLlm?: boolean
 }): Promise<SubjectDossierAgentResult> {
-  const compact = compactDossierPayloadForLlm(params.payload)
+  const annotationResult = await runAnnotationClarificationsAgent({
+    userId: params.userId,
+    subjectId: params.subjectId,
+    payload: params.payload,
+    skipLlm: params.skipLlm,
+  })
+
+  const compact = compactDossierPayloadForLlm(params.payload, {
+    precomputed_clarifications: annotationResult.clarifications,
+  })
 
   const result = await runAgent({
     agentType: "dossier",
@@ -88,35 +102,65 @@ export async function runSubjectDossierAgent(params: {
         parsed.opening_narrative,
       ].join("\n")
       return {
-        structured: normalizeDossierStructured(parsed, params.payload),
+        structured: normalizeDossierStructured(
+          parsed,
+          params.payload,
+          annotationResult.clarifications
+        ),
         narrativeMd,
         usedLlm: true,
         modelUsed: result.model,
-        tokensIn: result.tokensIn,
-        tokensOut: result.tokensOut,
-        costUsd: result.costUsd,
+        tokensIn: result.tokensIn + annotationResult.tokensIn,
+        tokensOut: result.tokensOut + annotationResult.tokensOut,
+        costUsd: result.costUsd + annotationResult.costUsd,
       }
     } catch {
       /* fall through to rule-based */
     }
   }
 
-  const fallback = buildRuleBasedDossier(params.payload)
+  const fallback = buildRuleBasedDossier(
+    params.payload,
+    annotationResult.clarifications
+  )
   return {
     ...fallback,
-    usedLlm: false,
-    modelUsed: "rule-based",
-    tokensIn: 0,
-    tokensOut: 0,
-    costUsd: 0,
+    usedLlm: annotationResult.usedLlm,
+    modelUsed: annotationResult.usedLlm
+      ? annotationResult.modelUsed
+      : "rule-based",
+    tokensIn: annotationResult.tokensIn,
+    tokensOut: annotationResult.tokensOut,
+    costUsd: annotationResult.costUsd,
   }
 }
 
 function normalizeDossierStructured(
   raw: SubjectStudyDossierStructured,
-  payload: SubjectDossierPayload
+  payload: SubjectDossierPayload,
+  precomputedClarifications?: SubjectStudyDossierStructured["annotation_clarifications"]
 ): SubjectStudyDossierStructured {
   const errorByQ = new Map(payload.aggregated_errors.map((e) => [e.question_id, e]))
+
+  const llmClarifications = (raw.annotation_clarifications ?? []).slice(0, 15)
+  const precomputedByQ = new Map(
+    (precomputedClarifications ?? []).map((c) => [c.question_id, c])
+  )
+  const mergedClarifications =
+    precomputedClarifications && precomputedClarifications.length > 0
+      ? precomputedClarifications.map((pre) => {
+          const fromLlm = llmClarifications.find(
+            (c) => c.question_id === pre.question_id
+          )
+          return {
+            ...pre,
+            answer_md:
+              pre.answer_md?.trim().length > 80
+                ? pre.answer_md
+                : fromLlm?.answer_md?.trim() || pre.answer_md,
+          }
+        })
+      : llmClarifications
 
   return {
     headline: raw.headline?.trim() || `Caderno da matéria: ${payload.subject_name}`,
@@ -135,7 +179,7 @@ function normalizeDossierStructured(
         }
       }),
     })),
-    annotation_clarifications: (raw.annotation_clarifications ?? []).slice(0, 15),
+    annotation_clarifications: mergedClarifications,
     evolutions: (raw.evolutions ?? []).slice(0, 10),
     still_attention: (raw.still_attention ?? []).slice(0, 10),
     study_blocks: (raw.study_blocks ?? []).slice(0, 8),
@@ -143,7 +187,8 @@ function normalizeDossierStructured(
 }
 
 export function buildRuleBasedDossier(
-  payload: SubjectDossierPayload
+  payload: SubjectDossierPayload,
+  precomputedClarifications?: SubjectStudyDossierStructured["annotation_clarifications"]
 ): { structured: SubjectStudyDossierStructured; narrativeMd: string } {
   const byTopic = new Map<string, typeof payload.aggregated_errors>()
   for (const e of payload.aggregated_errors) {
@@ -180,16 +225,19 @@ export function buildRuleBasedDossier(
       })),
     }))
 
-  const annotation_clarifications = payload.annotations
-    .filter((a) => a.note_body.trim())
-    .map((a) => ({
-      question_id: a.question_id,
-      note_body: a.note_body,
-      answer_md:
-        a.cached_feedback ??
-        "Revise a explicação da questão no relatório do caderno ou adicione explicações com IA ao concluir o caderno.",
-      linked_topics: a.tec_topic ? [a.tec_topic] : [],
-    }))
+  const annotation_clarifications =
+    precomputedClarifications && precomputedClarifications.length > 0
+      ? precomputedClarifications
+      : payload.annotations
+          .filter((a) => a.note_body.trim())
+          .map((a) => ({
+            question_id: a.question_id,
+            note_body: a.note_body,
+            answer_md:
+              a.cached_feedback ??
+              "Revise a explicação da questão no relatório do caderno ou adicione explicações com IA ao concluir o caderno.",
+            linked_topics: a.tec_topic ? [a.tec_topic] : [],
+          }))
 
   const evolutions = payload.evolution_candidates.map((c) => ({
     topic: c.topic,

@@ -292,7 +292,7 @@ export type PlanGenerationMeta = {
     source?: "queue_topic" | "subject_fallback" | "none"
   }[]
   total_questions: number
-  inbox_drafts: { flashcards: number; summaries: number }
+  inbox_drafts: { flashcards: number; summaries: number; errors: number }
   subject_pick_diagnostics?: SubjectPickDiagnostic[]
   source?: "cycle" | "consultancy" | "executor" | "cycle_manual"
   cycle_day_index?: number

@@ -125,21 +125,6 @@ export function buildRuleBasedExecutableActions(
   const weak = [...byTopic].sort((a, b) => b.wrong - a.wrong).filter((t) => t.wrong > 0)
   const actions: ExecutableAction[] = []
 
-  if (weak[0]) {
-    actions.push({
-      type: "create_remediation_notebook",
-      label: `Caderno de reforço — ${weak[0].topic}`,
-      params: {
-        source_notebook_id: notebookId,
-        tec_topics: [weak[0].topic],
-        min_wrong_attempts: 1,
-        suggested_name: `Reforço - ${weak[0].topic}`,
-      },
-      priority: 1,
-      estimated_minutes: 45,
-    })
-  }
-
   if (subjectId && weak[0]) {
     actions.push({
       type: "review_errors",
@@ -149,7 +134,7 @@ export function buildRuleBasedExecutableActions(
         topic_key: weak[0].topic,
         href: `/coach/materias/${subjectId}/insights?topic=${encodeURIComponent(weak[0].topic)}`,
       },
-      priority: 2,
+      priority: 1,
       estimated_minutes: 20,
     })
     actions.push({
@@ -159,14 +144,14 @@ export function buildRuleBasedExecutableActions(
         subject_id: subjectId,
         href: `/flashcards/study?subject_id=${subjectId}`,
       },
-      priority: 3,
+      priority: 2,
       estimated_minutes: 15,
     })
     actions.push({
       type: "start_combined_study",
       label: "Ver plano de hoje",
       params: { href: "/coach/hoje" },
-      priority: 4,
+      priority: 3,
       estimated_minutes: 5,
     })
   }
@@ -184,12 +169,12 @@ export function buildRuleBasedExecutableActions(
         topic_key: topTax.tec_topic,
         href: `/coach/materias/${subjectId}/insights`,
       },
-      priority: 5,
+      priority: 4,
       estimated_minutes: 15,
     })
   }
 
-  return actions.slice(0, 6)
+  return actions.slice(0, 5)
 }
 
 export function mergeStructuredReport(

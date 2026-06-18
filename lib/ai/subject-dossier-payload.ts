@@ -44,6 +44,7 @@ export type DossierAnnotationInput = {
   note_body: string
   cached_feedback?: string
   tec_topic?: string
+  statement_excerpt?: string
 }
 
 export type SubjectDossierPayload = {
@@ -294,6 +295,7 @@ export async function buildSubjectDossierPayload(
       note_body: bodies.join("\n---\n"),
       cached_feedback: cached || undefined,
       tec_topic: err?.tec_topic,
+      statement_excerpt: err?.statement_excerpt,
     })
   }
 
@@ -361,7 +363,15 @@ export async function buildSubjectDossierPayload(
 
 /** Compact payload for LLM (token control). */
 export function compactDossierPayloadForLlm(
-  payload: SubjectDossierPayload
+  payload: SubjectDossierPayload,
+  extras?: {
+    precomputed_clarifications?: {
+      question_id: string
+      note_body: string
+      answer_md: string
+      linked_topics?: string[]
+    }[]
+  }
 ): Record<string, unknown> {
   return {
     subject_name: payload.subject_name,
@@ -402,10 +412,12 @@ export function compactDossierPayloadForLlm(
     evolution_candidates: payload.evolution_candidates,
     annotations: payload.annotations.map((a) => ({
       question_id: a.question_id,
-      note_body: a.note_body.slice(0, 400),
-      cached_feedback: a.cached_feedback?.slice(0, 300),
+      note_body: a.note_body.slice(0, 1200),
+      cached_feedback: a.cached_feedback?.slice(0, 800),
       tec_topic: a.tec_topic,
+      statement_excerpt: a.statement_excerpt?.slice(0, 400),
     })),
+    precomputed_clarifications: extras?.precomputed_clarifications ?? [],
     learning_signals: payload.learning_signals,
     incidence_top_topics: payload.incidence_top_topics,
     edital_weight: payload.edital_weight,

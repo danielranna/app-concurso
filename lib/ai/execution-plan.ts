@@ -32,6 +32,7 @@ import {
 } from "./execution-questions"
 import {
   buildComprehensionSummaryBlocks,
+  enqueueExecutorErrorDrafts,
   enqueueExecutorFlashcardDrafts,
   planRowToDailyStudyPlan,
 } from "./execution-helpers"
@@ -200,6 +201,7 @@ export async function generateDailyStudyPlan(
   }
   let summaryDrafts = 0
   let flashDrafts = 0
+  let errorDrafts = 0
   let planSource: PlanGenerationMeta["source"] = useCycle
     ? "executor"
     : "consultancy"
@@ -333,8 +335,19 @@ export async function generateDailyStudyPlan(
       limit: flashBudget,
     })
 
-    const totalInboxDrafts = flashDrafts + summaryDrafts
+    errorDrafts = await enqueueExecutorErrorDrafts({
+      userId,
+      subjectIds: cycleSubjects,
+      queueBySubject,
+      limit: limits.error_reviews,
+    })
+
+    const totalInboxDrafts = flashDrafts + summaryDrafts + errorDrafts
     if (totalInboxDrafts > 0) {
+      const parts: string[] = []
+      if (flashDrafts > 0) parts.push("flashcards")
+      if (errorDrafts > 0) parts.push("erros")
+      if (summaryDrafts > 0) parts.push("resumos")
       blocks.push({
         subject_id:
           questionResult.rounds[0]?.subject_id ?? cycleSubjects[0] ?? "",
@@ -342,12 +355,13 @@ export async function generateDailyStudyPlan(
         type: "inbox_pending",
         count: totalInboxDrafts,
         minutes: totalInboxDrafts * 2,
-        label: `${totalInboxDrafts} rascunho(s) na Inbox (flashcards e resumos)`,
+        label: `${totalInboxDrafts} rascunho(s) na Inbox (${parts.join(" e ")})`,
         params: {
           block_key: `inbox_pending:${ctx.today}`,
           href: "/coach/inbox",
           flashcard_drafts: flashDrafts,
           summary_drafts: summaryDrafts,
+          error_drafts: errorDrafts,
         },
       })
     }
@@ -381,6 +395,7 @@ export async function generateDailyStudyPlan(
     inbox_drafts: {
       flashcards: flashDrafts,
       summaries: summaryDrafts,
+      errors: errorDrafts,
     },
     subject_pick_diagnostics: aggregatePickDiagnostics(
       questionResult.subject_pick_diagnostics

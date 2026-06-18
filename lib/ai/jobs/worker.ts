@@ -35,7 +35,6 @@ export async function processJob(job: {
             llm_used: result.llm_used,
             per_question_count: result.per_question_count,
             actions_count: result.actions_count,
-            drafts_created: result.drafts_created,
             topics_weak: result.topics_weak,
             subjects_in_notebook: result.subjects_in_notebook,
           })

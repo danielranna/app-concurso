@@ -507,11 +507,23 @@ export default function CoachHojePage() {
                     </p>
                   )}
                   {(plan.generation_meta.inbox_drafts.flashcards > 0 ||
-                    plan.generation_meta.inbox_drafts.summaries > 0) && (
+                    plan.generation_meta.inbox_drafts.summaries > 0 ||
+                    (plan.generation_meta.inbox_drafts.errors ?? 0) > 0) && (
                     <p>
                       Rascunhos na Inbox:{" "}
-                      {plan.generation_meta.inbox_drafts.flashcards} flashcards,{" "}
-                      {plan.generation_meta.inbox_drafts.summaries} resumos
+                      {[
+                        plan.generation_meta.inbox_drafts.flashcards > 0
+                          ? `${plan.generation_meta.inbox_drafts.flashcards} flashcards`
+                          : null,
+                        (plan.generation_meta.inbox_drafts.errors ?? 0) > 0
+                          ? `${plan.generation_meta.inbox_drafts.errors} erros`
+                          : null,
+                        plan.generation_meta.inbox_drafts.summaries > 0
+                          ? `${plan.generation_meta.inbox_drafts.summaries} resumos`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
                     </p>
                   )}
                   {plan.generation_meta.subject_pick_diagnostics &&
