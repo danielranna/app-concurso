@@ -8,8 +8,7 @@ import {
   mergeUnifiedExplainIntoErrors,
   runBehavioralAuditForNotebook,
 } from "./agents/behavioral-audit"
-import { filterGreenNoteQuestions } from "./behavioral-audit-helpers"
-import { splitPendingNoteEntries } from "../note-entry-utils"
+import { runNotebookNoteClarifications } from "./note-clarifications"
 import { runReportAgent } from "./agents/report"
 import { loadSubjectBrain } from "./context-builder"
 import { getEffectiveReportPreferences } from "./context-builder"
@@ -31,18 +30,6 @@ import {
   resolveNotebookQuestionIdsBySubject,
 } from "./notebook-subject-split"
 import { enqueueJob } from "./jobs/queue"
-
-function hasPendingGreenNoteExplains(
-  questions: Awaited<ReturnType<typeof buildNotebookAuditPayload>>["questions"]
-): boolean {
-  for (const q of filterGreenNoteQuestions(questions)) {
-    const entries = (q.note_entries ?? []).filter((e) => e.body.trim())
-    if (entries.length === 0 && q.user_note.trim()) return true
-    const { pending } = splitPendingNoteEntries(entries)
-    if (pending.length > 0) return true
-  }
-  return false
-}
 
 function unwrapQuestion(
   q: { tec_id: number; tec_topic: string; statement: string } | { tec_id: number; tec_topic: string; statement: string }[] | null
@@ -390,8 +377,7 @@ export async function generateNotebookReport(
   let perQuestionErrors = classifyResult.items
 
   const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
-  const pendingGreenNotes = hasPendingGreenNoteExplains(payload.questions)
-  const skipAuditLlm = atDailyCap && !pendingGreenNotes
+  const skipAuditLlm = atDailyCap
 
   const auditResult = await runBehavioralAuditForNotebook(
     notebookId,
@@ -399,11 +385,28 @@ export async function generateNotebookReport(
     subjectId,
     {
       skipLlm: skipAuditLlm,
-      prioritizeGreenNotes: atDailyCap && pendingGreenNotes,
       payload,
       taxonomyByQuestion: classifyResult.byQuestionId,
     }
   )
+
+  const reportsAfterAudit = auditResult.usedLlm ? reportsToday + 1 : reportsToday
+  const skipNoteClarifyLlm =
+    reportsAfterAudit >= prefs.max_llm_explanations_per_day
+
+  const { audit: auditWithClarifications, result: clarifyResult } =
+    await runNotebookNoteClarifications({
+      userId,
+      subjectId,
+      payload: auditResult.payload,
+      audit: auditResult.audit,
+      taxonomyByQuestion: classifyResult.byQuestionId,
+      skipLlm: skipNoteClarifyLlm,
+    })
+
+  auditResult.audit = auditWithClarifications
+  if (clarifyResult.usedLlm) reportsToday = reportsAfterAudit + 1
+
   perQuestionErrors = mergeUnifiedExplainIntoErrors(
     perQuestionErrors,
     auditResult.audit,
@@ -428,8 +431,10 @@ export async function generateNotebookReport(
     ? ((snapshot.subject_brain as Record<string, unknown> | null) ?? null)
     : null
 
-  const reportsAfterAudit = auditResult.usedLlm ? reportsToday + 1 : reportsToday
-  const skipLlm = reportsAfterAudit >= prefs.max_llm_explanations_per_day
+  const reportsAfterClarify = clarifyResult.usedLlm
+    ? reportsToday
+    : reportsAfterAudit
+  const skipLlm = reportsAfterClarify >= prefs.max_llm_explanations_per_day
 
   const result = await runReportAgent({
     userId,
@@ -524,8 +529,7 @@ export async function regenerateBehavioralAuditOnly(
     : (prior.per_question_errors ?? [])
 
   const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
-  const pendingGreenNotes = hasPendingGreenNoteExplains(payload.questions)
-  const skipAuditLlm = atDailyCap && !pendingGreenNotes
+  const skipAuditLlm = atDailyCap
 
   const auditResult = await runBehavioralAuditForNotebook(
     existing.notebook_id,
@@ -533,11 +537,25 @@ export async function regenerateBehavioralAuditOnly(
     existing.subject_id,
     {
       skipLlm: skipAuditLlm,
-      prioritizeGreenNotes: atDailyCap && pendingGreenNotes,
       payload,
       taxonomyByQuestion: classifyResult.byQuestionId,
     }
   )
+
+  const reportsAfterAudit = auditResult.usedLlm ? reportsToday + 1 : reportsToday
+  const skipNoteClarifyLlm =
+    reportsAfterAudit >= prefs.max_llm_explanations_per_day
+
+  const { audit: auditWithClarifications } = await runNotebookNoteClarifications({
+    userId,
+    subjectId: existing.subject_id,
+    payload: auditResult.payload,
+    audit: auditResult.audit,
+    taxonomyByQuestion: classifyResult.byQuestionId,
+    skipLlm: skipNoteClarifyLlm,
+  })
+
+  auditResult.audit = auditWithClarifications
 
   const merged = mergeUnifiedExplainIntoErrors(
     perQuestionErrors,

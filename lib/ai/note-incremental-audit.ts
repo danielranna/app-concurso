@@ -14,6 +14,7 @@ import {
   buildFallbackAuditItem,
   type ExplainMode,
 } from "./behavioral-audit-helpers"
+import { isSubstantiveClarification } from "./note-clarifications"
 import type { QuestionOption } from "./question-option-utils"
 
 export type ExplainWorkItem = {
@@ -76,12 +77,16 @@ export function cachedEntryToAuditItem(
     mode,
     taxonomyHint ?? classify?.taxonomy
   )
+  const clarification = isSubstantiveClarification(entry.ai_feedback)
+    ? entry.ai_feedback!.trim()
+    : undefined
   return {
     ...fallback,
     note_entry_id: entry.id,
     note_body: entry.body,
     user_note: entry.body,
-    feedback: entry.ai_feedback?.trim() || fallback.feedback,
+    feedback: mode === "green_note_only" ? "" : fallback.feedback,
+    note_clarification: clarification,
     misconception:
       classify?.specific_mistake ??
       (fallback as { misconception?: string }).misconception,

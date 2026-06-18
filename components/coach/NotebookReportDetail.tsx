@@ -79,6 +79,8 @@ function QuestionAuditCard({
     perQ?.note_body ?? auditItem?.note_body ?? perQ?.user_note ?? auditItem?.user_note
   const feedback =
     perQ?.feedback_detailed ?? perQ?.explanation ?? auditItem?.feedback
+  const noteClarification =
+    perQ?.note_clarification ?? auditItem?.note_clarification
   const feedbackSource =
     perQ?.feedback_source ??
     perQ?.explanation_source ??
@@ -194,6 +196,13 @@ function QuestionAuditCard({
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {note && noteClarification && (
+        <div className="mt-2 rounded border border-blue-100 bg-blue-50/50 p-2">
+          <p className="text-xs font-medium text-slate-600">Esclarecimento</p>
+          <p className="mt-1 whitespace-pre-wrap text-slate-800">{noteClarification}</p>
         </div>
       )}
     </li>
@@ -410,7 +419,7 @@ export default function NotebookReportDetail({
                   <QuestionAuditCard
                     key={eq.note_entry_id ?? `${eq.question_id}-gn-${i}`}
                     eq={eq}
-                    feedbackLabel="Esclarecimento da sua nota"
+                    feedbackLabel="Explicação IA"
                     zoneOverride="green"
                   />
                 ))}

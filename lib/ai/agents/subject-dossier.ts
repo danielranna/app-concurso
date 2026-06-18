@@ -3,6 +3,7 @@ import { runAgent } from "../run-agent"
 import type { SubjectDossierPayload } from "../subject-dossier-payload"
 import { compactDossierPayloadForLlm } from "../subject-dossier-payload"
 import { runAnnotationClarificationsAgent } from "./annotation-clarifications"
+import { isSubstantiveClarification } from "../note-clarifications"
 
 const SYSTEM = `Você é o "cérebro" do aluno nesta matéria — um tutor que escreve um relato de estudo personalizado em português do Brasil.
 
@@ -233,9 +234,10 @@ export function buildRuleBasedDossier(
           .map((a) => ({
             question_id: a.question_id,
             note_body: a.note_body,
-            answer_md:
-              a.cached_feedback ??
-              "Revise a explicação da questão no relatório do caderno ou adicione explicações com IA ao concluir o caderno.",
+            answer_md: isSubstantiveClarification(a.cached_feedback)
+              ? a.cached_feedback!.trim()
+              : a.cached_feedback?.trim() ||
+                "Revise a explicação da questão no relatório do caderno ou adicione explicações com IA ao concluir o caderno.",
             linked_topics: a.tec_topic ? [a.tec_topic] : [],
           }))
 

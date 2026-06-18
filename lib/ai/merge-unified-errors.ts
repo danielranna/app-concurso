@@ -33,6 +33,7 @@ export function mergeUnifiedExplainIntoErrors(
       explanation_source: source,
       explanation_citations: item.citations,
       explanation: undefined,
+      note_clarification: item.note_clarification,
     }
     if (item.misconception) {
       patch.specific_mistake = item.misconception

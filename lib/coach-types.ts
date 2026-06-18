@@ -102,6 +102,8 @@ export type PerQuestionError = {
   outcome_category?: string
   confidence_level?: string
   feedback_detailed?: string
+  /** Esclarecimento da nota do aluno (persistido em ai_feedback) */
+  note_clarification?: string
   /** Origem da taxonomia: IA dedicada ou heurística */
   classification_source?: "llm_classify" | "heuristic"
 }
@@ -119,6 +121,8 @@ export type BehavioralAuditQuestionItem = {
   outcome_category?: string
   confidence_level?: string
   feedback: string
+  /** Esclarecimento focado na anotação do aluno (separado da explicação de erro) */
+  note_clarification?: string
   misconception?: string
   error_taxonomy?: ErrorTaxonomy
   source?: FeedbackSource
