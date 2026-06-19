@@ -56,13 +56,13 @@ export default function MateriaOverviewPage({ subjectId }: Props) {
     brain?.topics.filter((t) => WEAK.has(t.status)).slice(0, 8) ?? []
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
           Desempenho em questões
         </h2>
         {subjectRow && subjectRow.total > 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 sm:p-5">
             <div className="mb-3 flex flex-wrap gap-4 text-sm">
               <span>
                 <strong className="text-slate-900">{subjectRow.total}</strong> resoluções
@@ -114,8 +114,8 @@ export default function MateriaOverviewPage({ subjectId }: Props) {
         <>
           <BrainOverviewCards overview={brain.overview} />
           <section className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-green-200 bg-green-50/50 p-4">
-              <h3 className="mb-2 font-semibold text-green-900">Onde estou bem</h3>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-emerald-900">Onde estou bem</h3>
               {strongTopics.length === 0 ? (
                 <p className="text-sm text-green-800/80">Nenhum tópico forte ainda.</p>
               ) : (
@@ -131,8 +131,8 @@ export default function MateriaOverviewPage({ subjectId }: Props) {
                 </ul>
               )}
             </div>
-            <div className="rounded-xl border border-red-200 bg-red-50/50 p-4">
-              <h3 className="mb-2 font-semibold text-red-900">Onde preciso melhorar</h3>
+            <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-rose-900">Onde preciso melhorar</h3>
               {weakTopics.length === 0 ? (
                 <p className="text-sm text-red-800/80">Nenhum ponto crítico no momento.</p>
               ) : (
