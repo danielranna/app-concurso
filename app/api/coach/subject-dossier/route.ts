@@ -28,7 +28,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       empty: true,
       reason:
-        "Nenhum Caderno da Matéria gerado ainda. Conclua um caderno com relatório IA.",
+        "Nenhum Caderno de erros gerado ainda. Conclua um caderno com relatório IA.",
       stale: latestReportIds.length > 0,
       latest_report_ids: latestReportIds,
     })
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         empty: true,
         reason:
-          "Não foi possível gerar o Caderno da Matéria. Verifique se há relatórios com erros explicados.",
+          "Não foi possível gerar o Caderno de erros. Verifique se há relatórios com erros explicados.",
         stale: loaded.stale,
       })
     }

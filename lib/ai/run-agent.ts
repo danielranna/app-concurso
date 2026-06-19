@@ -9,6 +9,7 @@ export type AgentType =
   | "edital"
   | "strategy"
   | "execution"
+  | "error_notebook_canvas"
 
 export type RunAgentParams = {
   agentType: AgentType

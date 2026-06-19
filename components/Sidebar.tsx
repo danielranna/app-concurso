@@ -8,6 +8,7 @@ import {
   HelpCircle,
   Home,
   Layers,
+  Library,
   LogOut,
   RotateCw,
   Sparkles,
@@ -19,6 +20,7 @@ import SidebarBrand from "@/components/sidebar/SidebarBrand"
 
 const links = [
   { href: "/", label: "Início", icon: Home, exact: true },
+  { href: "/materias", label: "Matérias", icon: Library },
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/questoes", label: "Questões", icon: HelpCircle },

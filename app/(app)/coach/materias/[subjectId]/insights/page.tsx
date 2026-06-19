@@ -733,7 +733,7 @@ export default function CoachInsightsPage() {
           Ver cadernos desta matéria →
         </Link>
         <Link
-          href={`/erros?subject=${subjectId}`}
+          href={`/materias/${subjectId}/erros`}
           className="text-sm font-medium text-violet-700 hover:underline"
         >
           Mapa de erros →

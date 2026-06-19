@@ -131,7 +131,7 @@ export default function SubjectDossierPanel({
       <section className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-6">
         <div className="flex items-center gap-2 text-slate-600">
           <Loader2 className="h-5 w-5 animate-spin" />
-          Carregando Caderno da Matéria…
+          Carregando Caderno de erros…
         </div>
       </section>
     )
@@ -146,7 +146,7 @@ export default function SubjectDossierPanel({
         <div>
           <div className="flex items-center gap-2">
             <BookOpen className="h-5 w-5 text-indigo-700" />
-            <h3 className="text-lg font-bold text-slate-900">Caderno da Matéria</h3>
+            <h3 className="text-lg font-bold text-slate-900">Caderno de erros</h3>
             {data?.stale && !isEmpty && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
                 Desatualizado
@@ -178,7 +178,7 @@ export default function SubjectDossierPanel({
           <Sparkles className="mx-auto h-8 w-8 text-indigo-400" />
           <p className="mt-3 text-sm text-slate-700">
             {data?.reason ??
-              "Conclua um caderno desta matéria com relatório IA para gerar seu Caderno da Matéria."}
+              "Conclua um caderno desta matéria com relatório IA para gerar seu Caderno de erros."}
           </p>
           <button
             type="button"

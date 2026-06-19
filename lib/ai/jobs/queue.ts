@@ -5,6 +5,7 @@ export type JobType =
   | "classify_wrong_attempts"
   | "brain_ingest_report"
   | "subject_dossier_generate"
+  | "error_notebook_ingest"
   | "strategy_recompute"
   | "strategy_recompute_all"
   | "execution_plan_today"

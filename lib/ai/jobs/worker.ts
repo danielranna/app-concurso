@@ -7,6 +7,7 @@ import { recomputeStrategicQueue } from "../strategic-queue"
 import { generateDailyStudyPlan } from "../execution-plan"
 import { filterReportStructuredForSubject } from "../notebook-subject-split"
 import { generateSubjectDossier } from "../subject-dossier"
+import { ingestErrorNotebookFromReport } from "../error-notebook-ingest"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -161,6 +162,32 @@ export async function processJob(job: {
           payload: { subject_id: subjectId, report_id: reportId },
           priority: 7,
         })
+
+        await enqueueJob({
+          userId,
+          jobType: "error_notebook_ingest",
+          idempotencyKey: `error_nb:${subjectId}:${reportId}`,
+          payload: { subject_id: subjectId, report_id: reportId },
+          priority: 6,
+        })
+        break
+      }
+
+      case "error_notebook_ingest": {
+        const subjectId = payload.subject_id as string
+        const reportId = payload.report_id as string
+        const { data: sub } = await supabaseServer
+          .from("subjects")
+          .select("name")
+          .eq("id", subjectId)
+          .maybeSingle()
+        const result = await ingestErrorNotebookFromReport({
+          userId,
+          subjectId,
+          subjectName: sub?.name ?? "Matéria",
+          reportId,
+        })
+        await completeJob(job.id, result)
         break
       }
 
