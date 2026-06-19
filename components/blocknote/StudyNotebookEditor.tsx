@@ -1,11 +1,10 @@
 "use client"
 
 import { useMemo } from "react"
-import {
-  BlockNoteViewRaw,
-  SuggestionMenuController,
-  useCreateBlockNote,
-} from "@blocknote/react"
+import { BlockNoteView } from "@blocknote/ariakit"
+import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react"
+import "@blocknote/core/style.css"
+import "@blocknote/ariakit/style.css"
 import "@blocknote/react/style.css"
 import type { StoredNotebookDocument } from "@/lib/blocknote/types"
 import { studyNotebookSchema } from "@/lib/blocknote/schema"
@@ -30,7 +29,7 @@ export default function StudyNotebookEditor({ document, onChange }: Props) {
 
   return (
     <div className="study-notebook-editor canvas-doc">
-      <BlockNoteViewRaw
+      <BlockNoteView
         editor={editor}
         theme="light"
         editable
@@ -52,7 +51,7 @@ export default function StudyNotebookEditor({ document, onChange }: Props) {
             )
           }}
         />
-      </BlockNoteViewRaw>
+      </BlockNoteView>
     </div>
   )
 }

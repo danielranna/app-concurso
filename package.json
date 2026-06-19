@@ -19,6 +19,7 @@
     "test:flashcard-due": "npx tsx lib/flashcard-due.test.ts"
   },
   "dependencies": {
+    "@blocknote/ariakit": "^0.51.4",
     "@blocknote/core": "^0.51.4",
     "@blocknote/react": "^0.51.4",
     "@radix-ui/react-progress": "^1.1.10",
