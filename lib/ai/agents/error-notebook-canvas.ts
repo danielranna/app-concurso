@@ -1,28 +1,28 @@
 import type { NotebookReportStructured } from "../../coach-types"
-import type { CanvasDocument, CanvasPatchOp } from "../../canvas-blocks/types"
+import type { BlockNotePatchOp, StoredNotebookDocument } from "../../blocknote/types"
 import { runAgent } from "../run-agent"
 
-const SYSTEM = `Você personaliza um caderno de erros de estudo em blocos visuais.
-Recebe o documento atual (JSON) e um novo relatório de erros.
+const SYSTEM = `Você personaliza um caderno de erros de estudo em blocos BlockNote.
+Recebe o documento atual (JSON v2 com blocks) e um novo relatório de erros.
 Retorne APENAS operações de patch JSON — não reescreva o documento inteiro.
 
-Tipos de bloco disponíveis: heading, paragraph, callout, timeline, mini_cards, pills, table, checklist, accordion, quote, bar_chart, chapter_header, section, columns, divider.
+Tipos de bloco disponíveis: heading, paragraph, studyAlert, timeline, miniCards, tableCompare, studyAccordion, quote, barChart, chapterHeader, studySection, arrowList, priorityList, flashcardFlip, flashcardStatic, textFigure, sketchPad, headingLine, headingChip, headingNumbered, checkListItem, numberedListItem, bulletListItem, divider, codeBlock.
 
 Operações:
-- {"op":"add","afterBlockId":"id-opcional","block":{...}}
-- {"op":"update","blockId":"id","props":{...}}
+- {"op":"add","afterBlockId":"id-opcional","block":{ "type": "...", "props": {...}, "content": [...] }}
+- {"op":"update","blockId":"id","update":{ "props": {...} }}
 - {"op":"remove","blockId":"id"}
 
-Priorize: correlacionar erros entre tópicos, usar callout pegadinha/atencao, timeline para evolução, table para confusões, accordion para questões.
+Priorize: correlacionar erros entre tópicos, usar studyAlert pegadinha/atencao, timeline para evolução, tableCompare para confusões, studyAccordion para questões.
 Máximo 8 operações. Português do Brasil.`
 
 export async function runErrorNotebookCanvasAgent(params: {
   userId: string
   subjectId: string
-  currentDocument: CanvasDocument
+  currentDocument: StoredNotebookDocument
   reportStructured: NotebookReportStructured
   skipLlm?: boolean
-}): Promise<{ patches: CanvasPatchOp[]; usedLlm: boolean }> {
+}): Promise<{ patches: BlockNotePatchOp[]; usedLlm: boolean }> {
   if (params.skipLlm) {
     return { patches: [], usedLlm: false }
   }
@@ -61,7 +61,7 @@ export async function runErrorNotebookCanvasAgent(params: {
   }
 
   try {
-    const parsed = JSON.parse(result.text) as { patches?: CanvasPatchOp[] }
+    const parsed = JSON.parse(result.text) as { patches?: BlockNotePatchOp[] }
     return { patches: parsed.patches ?? [], usedLlm: true }
   } catch {
     return { patches: [], usedLlm: false }

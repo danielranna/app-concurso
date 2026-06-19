@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import type { CanvasDocument } from "@/lib/canvas-blocks/types"
+import type { StoredNotebookDocument } from "@/lib/blocknote/types"
 import {
   getOrMigrateErrorNotebook,
   ingestErrorNotebookFromReport,
@@ -38,7 +38,7 @@ export async function GET(
   )
 
   return NextResponse.json({
-    document: document as CanvasDocument,
+    document: document as StoredNotebookDocument,
     source_report_ids: row?.source_report_ids ?? [],
     last_report_id: row?.last_report_id ?? null,
     model_used: row?.model_used ?? null,

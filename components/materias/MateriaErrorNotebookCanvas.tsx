@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { Loader2, RefreshCw } from "lucide-react"
-import type { CanvasDocument } from "@/lib/canvas-blocks/types"
-import CanvasDocumentRenderer from "@/components/canvas-blocks/CanvasDocumentRenderer"
+import type { StoredNotebookDocument } from "@/lib/blocknote/types"
+import StudyNotebookViewer from "@/components/blocknote/StudyNotebookViewer"
 
 type Props = {
   userId: string
@@ -17,7 +17,7 @@ export default function MateriaErrorNotebookCanvas({
   subjectId,
   subjectName,
 }: Props) {
-  const [document, setDocument] = useState<CanvasDocument | null>(null)
+  const [document, setDocument] = useState<StoredNotebookDocument | null>(null)
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [stale, setStale] = useState(false)
@@ -101,7 +101,7 @@ export default function MateriaErrorNotebookCanvas({
       </div>
 
       {document ? (
-        <CanvasDocumentRenderer blocks={document.blocks} />
+        <StudyNotebookViewer key={updatedAt ?? "empty"} document={document} />
       ) : (
         <p className="text-slate-500">
           Conclua um caderno de questões com relatório IA para gerar seu caderno de erros.

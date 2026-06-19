@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
-import type { CanvasDocument } from "@/lib/canvas-blocks/types"
-import { emptyDocument } from "@/lib/canvas-blocks/types"
+import { emptyNotebookDocument } from "@/lib/blocknote/helpers"
+import { normalizeNotebookDocument } from "@/lib/blocknote/migrate"
+import type { StoredNotebookDocument } from "@/lib/blocknote/types"
 
 export async function GET(
   req: Request,
@@ -28,13 +29,15 @@ export async function GET(
 
   if (!data) {
     return NextResponse.json({
-      document: emptyDocument(),
+      document: emptyNotebookDocument(),
       updated_at: null,
     })
   }
 
+  const document = normalizeNotebookDocument(data.document)
+
   return NextResponse.json({
-    document: data.document as CanvasDocument,
+    document,
     updated_at: data.updated_at,
   })
 }
@@ -54,13 +57,15 @@ export async function PUT(
     )
   }
 
+  const normalized = normalizeNotebookDocument(document) as StoredNotebookDocument
+
   const { data, error } = await supabaseServer
     .from("subject_user_notebooks")
     .upsert(
       {
         user_id,
         subject_id: subjectId,
-        document,
+        document: normalized,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,subject_id" }

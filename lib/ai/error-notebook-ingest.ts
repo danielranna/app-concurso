@@ -1,12 +1,13 @@
 import { supabaseServer } from "../supabase-server"
-import type { CanvasDocument } from "../canvas-blocks/types"
-import { applyCanvasPatches } from "../canvas-blocks/patch"
 import type { NotebookReportStructured } from "../coach-types"
 import {
-  dossierStructuredToCanvas,
-  emptyErrorNotebook,
-  reportToCanvasPatches,
-} from "./error-notebook-canvas"
+  dossierStructuredToBlockNote,
+  emptyErrorNotebookBlockNote,
+  reportToBlockNotePatches,
+} from "../blocknote/ai-error-notebook"
+import { normalizeNotebookDocument } from "../blocknote/migrate"
+import { applyBlockNotePatches } from "../blocknote/patch"
+import type { StoredNotebookDocument } from "../blocknote/types"
 import { loadSubjectDossier } from "./subject-dossier"
 import { runErrorNotebookCanvasAgent } from "./agents/error-notebook-canvas"
 
@@ -38,18 +39,18 @@ export async function getOrMigrateErrorNotebook(
   userId: string,
   subjectId: string,
   subjectName: string
-): Promise<CanvasDocument> {
+): Promise<StoredNotebookDocument> {
   const { row } = await loadAiErrorNotebook(userId, subjectId)
   if (row?.document) {
-    return row.document as CanvasDocument
+    return normalizeNotebookDocument(row.document)
   }
 
   const dossier = await loadSubjectDossier(userId, subjectId)
   if (dossier.row?.structured) {
-    return dossierStructuredToCanvas(dossier.row.structured, subjectName)
+    return dossierStructuredToBlockNote(dossier.row.structured, subjectName)
   }
 
-  return emptyErrorNotebook(subjectName)
+  return emptyErrorNotebookBlockNote(subjectName)
 }
 
 export async function ingestErrorNotebookFromReport(params: {
@@ -77,8 +78,8 @@ export async function ingestErrorNotebookFromReport(params: {
     params.subjectName
   )
 
-  const rulePatches = reportToCanvasPatches(structured, params.reportId)
-  document = applyCanvasPatches(document, rulePatches)
+  const rulePatches = reportToBlockNotePatches(structured, params.reportId)
+  document = applyBlockNotePatches(document, rulePatches)
 
   if (!params.skipLlm) {
     const agentResult = await runErrorNotebookCanvasAgent({
@@ -88,7 +89,7 @@ export async function ingestErrorNotebookFromReport(params: {
       reportStructured: structured,
     })
     if (agentResult.patches.length > 0) {
-      document = applyCanvasPatches(document, agentResult.patches)
+      document = applyBlockNotePatches(document, agentResult.patches)
     }
   }
 

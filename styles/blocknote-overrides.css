@@ -1,0 +1,37 @@
+/* BlockNote overrides for matéria notebook cards */
+
+.study-notebook-editor,
+.study-notebook-viewer {
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--cb-ink);
+  --bn-font-family: inherit;
+}
+
+.study-notebook-editor .bn-container,
+.study-notebook-viewer .bn-container {
+  background: transparent;
+}
+
+.study-notebook-editor .bn-editor,
+.study-notebook-viewer .bn-editor {
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--cb-ink);
+}
+
+.study-notebook-editor .bn-block-outer,
+.study-notebook-viewer .bn-block-outer {
+  margin-bottom: 0.25rem;
+}
+
+.study-notebook-viewer .bn-side-menu,
+.study-notebook-viewer .bn-formatting-toolbar {
+  display: none !important;
+}
+
+.study-notebook-editor .bn-inline-content:empty::before {
+  color: var(--cb-ink-faint);
+}
