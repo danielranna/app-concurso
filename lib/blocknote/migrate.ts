@@ -153,11 +153,27 @@ function migrateBlock(block: CanvasBlock): StudyNotebookBlock[] {
       return out
     }
     case "columns": {
-      const out: StudyNotebookBlock[] = []
-      for (const child of block.children ?? []) {
-        out.push(...migrateBlock(child))
+      const children = block.children ?? []
+      if (children.length === 0) {
+        return [
+          {
+            type: "columnList",
+            children: [
+              { type: "column", children: [{ type: "paragraph" }] },
+              { type: "column", children: [{ type: "paragraph" }] },
+            ],
+          },
+        ]
       }
-      return out
+      return [
+        {
+          type: "columnList",
+          children: children.map((child) => ({
+            type: "column" as const,
+            children: migrateBlock(child),
+          })),
+        },
+      ]
     }
     default:
       return [

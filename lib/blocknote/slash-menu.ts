@@ -1,5 +1,6 @@
 import type { BlockNoteEditor } from "@blocknote/core"
 import { combineByGroup } from "@blocknote/core"
+import { insertOrUpdateBlockForSlashMenu } from "@blocknote/core/extensions"
 import {
   getDefaultReactSlashMenuItems,
   type DefaultReactSuggestionItem,
@@ -112,6 +113,33 @@ function customItems(editor: Editor): DefaultReactSuggestionItem[] {
       type: "studySection",
       props: { title: "" },
     }),
+    {
+      title: "Duas colunas",
+      group: "Organização",
+      aliases: ["colunas", "lado", "2 colunas", "columns"],
+      onItemClick: () =>
+        insertOrUpdateBlockForSlashMenu(editor, {
+          type: "columnList",
+          children: [
+            { type: "column", children: [{ type: "paragraph" }] },
+            { type: "column", children: [{ type: "paragraph" }] },
+          ],
+        }),
+    },
+    {
+      title: "Três colunas",
+      group: "Organização",
+      aliases: ["3 colunas", "tres colunas"],
+      onItemClick: () =>
+        insertOrUpdateBlockForSlashMenu(editor, {
+          type: "columnList",
+          children: [
+            { type: "column", children: [{ type: "paragraph" }] },
+            { type: "column", children: [{ type: "paragraph" }] },
+            { type: "column", children: [{ type: "paragraph" }] },
+          ],
+        }),
+    },
   ]
 }
 

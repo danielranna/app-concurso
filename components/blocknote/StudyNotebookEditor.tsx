@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { BlockNoteView } from "@blocknote/ariakit"
 import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react"
 import "@blocknote/core/style.css"
@@ -9,6 +9,7 @@ import "@blocknote/react/style.css"
 import type { StoredNotebookDocument } from "@/lib/blocknote/types"
 import { studyNotebookSchema } from "@/lib/blocknote/schema"
 import { getStudySlashMenuItems } from "@/lib/blocknote/slash-menu"
+import { uploadNotebookImage } from "@/lib/blocknote/upload-image"
 
 type Props = {
   document: StoredNotebookDocument
@@ -18,9 +19,15 @@ type Props = {
 export default function StudyNotebookEditor({ document, onChange }: Props) {
   const initialContent = useMemo(() => document.blocks, [document.blocks])
 
+  const uploadFile = useCallback(async (file: File) => {
+    const url = await uploadNotebookImage(file)
+    return url
+  }, [])
+
   const editor = useCreateBlockNote({
     schema: studyNotebookSchema,
     initialContent,
+    uploadFile,
     placeholders: {
       default: "Digite '/' para inserir blocos",
       emptyDocument: "Digite '/' para inserir blocos",
@@ -34,6 +41,7 @@ export default function StudyNotebookEditor({ document, onChange }: Props) {
         theme="light"
         editable
         slashMenu={false}
+        filePanel={true}
         onChange={() => {
           onChange({ version: 2, blocks: editor.document })
         }}

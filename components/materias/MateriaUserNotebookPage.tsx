@@ -80,7 +80,8 @@ export default function MateriaUserNotebookPage({ subjectId }: Props) {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-slate-600">
           Sua página de estudos personalizada. Digite &apos;/&apos; para inserir
-          blocos. As alterações são salvas automaticamente.
+          blocos (ex.: &quot;duas colunas&quot;, &quot;imagem&quot;). Cole imagens
+          com Ctrl+V. As alterações são salvas automaticamente.
         </p>
         <span className="text-xs text-slate-400">
           {saving
