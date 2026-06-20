@@ -32,8 +32,15 @@
   display: none !important;
 }
 
-.study-notebook-editor .bn-inline-content:empty::before {
-  color: var(--cb-ink-faint);
+.study-notebook-editor .bn-block-outer:has(.nota-caixa),
+.study-notebook-viewer .bn-block-outer:has(.nota-caixa) {
+  margin-bottom: 0.5rem;
+}
+
+.study-notebook-editor .bn-block-content,
+.study-notebook-viewer .bn-block-content {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* Multi-column layout */

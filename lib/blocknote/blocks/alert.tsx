@@ -1,25 +1,18 @@
 "use client"
 
 import { createReactBlockSpec } from "@blocknote/react"
-import { BlockField, updateProps } from "./shared"
-
-const VARIANTS = [
-  "atencao",
-  "dica",
-  "definicao",
-  "exemplo",
-  "pegadinha",
-  "info",
-  "prova",
-  "resumo",
-  "destaque",
-] as const
+import {
+  ALERT_META,
+  ALERT_VARIANTS,
+  type AlertVariant,
+} from "./catalog-meta"
+import { updateProps } from "./shared"
 
 export const createStudyAlert = createReactBlockSpec(
   {
     type: "studyAlert",
     propSchema: {
-      variant: { default: "dica", values: VARIANTS },
+      variant: { default: "dica", values: ALERT_VARIANTS },
       title: { default: "" },
     },
     content: "inline",
@@ -27,33 +20,50 @@ export const createStudyAlert = createReactBlockSpec(
   {
     render: ({ block, editor, contentRef }) => {
       const readOnly = !editor.isEditable
-      const variant = block.props.variant
+      const variant = block.props.variant as AlertVariant
+      const meta = ALERT_META[variant] ?? ALERT_META.dica
+      const title = block.props.title || meta.label
+
       return (
-        <div className={`cb-callout cb-callout-${variant}`}>
-          <div className="cb-callout-title">
-            <BlockField
-              value={block.props.title}
-              readOnly={readOnly}
-              placeholder="Título do destaque"
-              onChange={(title) => updateProps(editor, block.id, { title })}
-            />
+        <div className={`nota-caixa ${meta.css}`}>
+          <div className="nota-cabecalho">
+            <span className="nota-icone" aria-hidden="true">
+              {meta.icon}
+            </span>
+            {readOnly ? (
+              <span>{title}</span>
+            ) : (
+              <input
+                className="nota-titulo-input"
+                value={block.props.title}
+                placeholder={meta.label}
+                onChange={(e) =>
+                  updateProps(editor, block.id, { title: e.target.value })
+                }
+              />
+            )}
+            <span className="nota-rotulo">{meta.short}</span>
           </div>
+          <div ref={contentRef} className="nota-corpo" />
           {!readOnly && (
-            <select
-              value={variant}
-              onChange={(e) =>
-                updateProps(editor, block.id, { variant: e.target.value })
-              }
-              className="mb-2 rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600"
-            >
-              {VARIANTS.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
+            <div className="nota-variantes">
+              {ALERT_VARIANTS.map((v) => {
+                const m = ALERT_META[v]
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`nota-variante-chip${variant === v ? " is-active" : ""}`}
+                    onClick={() => updateProps(editor, block.id, { variant: v })}
+                    title={m.label}
+                  >
+                    <span aria-hidden="true">{m.icon}</span>
+                    {m.short}
+                  </button>
+                )
+              })}
+            </div>
           )}
-          <div ref={contentRef} className="cb-paragraph min-h-[1.25rem]" />
         </div>
       )
     },

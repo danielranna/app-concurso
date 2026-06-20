@@ -24,12 +24,14 @@ export const createStudyAccordion = createReactBlockSpec(
       return (
         <div className="cb-accordion">
           {items.map((item, i) => (
-            <details key={i} open={i === 0}>
+            <details key={i} className="accordion-item" open={i === 0}>
               <summary>
+                <span className="pergunta-marca">Q{i + 1}</span>
                 <BlockField
                   value={item.title}
                   readOnly={readOnly}
-                  placeholder="Título"
+                  placeholder="Título da seção"
+                  className="cb-field flex-1 font-semibold"
                   onChange={(title) => {
                     const next = [...items]
                     next[i] = { ...next[i], title }
@@ -37,11 +39,13 @@ export const createStudyAccordion = createReactBlockSpec(
                   }}
                 />
               </summary>
-              <div className="cb-accordion-body">
+              <div className="accordion-conteudo">
                 <BlockField
                   value={item.body}
                   readOnly={readOnly}
                   multiline
+                  placeholder="Conteúdo"
+                  className="cb-field cb-field-multiline"
                   onChange={(body) => {
                     const next = [...items]
                     next[i] = { ...next[i], body }
@@ -81,6 +85,7 @@ export const createStudySection = createReactBlockSpec(
             value={block.props.title}
             readOnly={readOnly}
             placeholder="Seção"
+            className="cb-field font-bold uppercase tracking-widest"
             onChange={(title) => updateProps(editor, block.id, { title })}
           />
         </div>

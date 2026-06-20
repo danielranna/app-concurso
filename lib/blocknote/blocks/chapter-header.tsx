@@ -22,6 +22,7 @@ export const createChapterHeader = createReactBlockSpec(
             <BlockField
               value={block.props.numeral}
               readOnly={readOnly}
+              className="cb-field uppercase tracking-widest"
               onChange={(numeral) => updateProps(editor, block.id, { numeral })}
             />
           </div>
@@ -30,6 +31,7 @@ export const createChapterHeader = createReactBlockSpec(
               value={block.props.period}
               readOnly={readOnly}
               placeholder="Período"
+              className="cb-field"
               onChange={(period) => updateProps(editor, block.id, { period })}
             />
           </div>
@@ -38,6 +40,7 @@ export const createChapterHeader = createReactBlockSpec(
               value={block.props.title}
               readOnly={readOnly}
               placeholder="Título do capítulo"
+              className="cb-field font-bold"
               onChange={(title) => updateProps(editor, block.id, { title })}
             />
           </div>

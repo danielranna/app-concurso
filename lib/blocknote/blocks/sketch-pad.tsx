@@ -52,7 +52,7 @@ export const createSketchPad = createReactBlockSpec(
       }
 
       return (
-        <div>
+        <div className="canvas-esboco-wrap">
           <canvas
             ref={canvasRef}
             width={560}

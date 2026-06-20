@@ -30,6 +30,7 @@ export const createTimeline = createReactBlockSpec(
                   value={item.date}
                   readOnly={readOnly}
                   placeholder="Data / período"
+                  className="cb-field uppercase tracking-wide"
                   onChange={(date) => {
                     const next = [...items]
                     next[i] = { ...next[i], date }
@@ -42,6 +43,7 @@ export const createTimeline = createReactBlockSpec(
                 readOnly={readOnly}
                 multiline
                 placeholder="Conteúdo"
+                className="cb-field"
                 onChange={(content) => {
                   const next = [...items]
                   next[i] = { ...next[i], content }

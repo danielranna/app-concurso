@@ -4,6 +4,15 @@ import { createReactBlockSpec } from "@blocknote/react"
 import { parseJsonProp, stringifyJsonProp } from "../helpers"
 import { BlockActions, BlockField, SmallButton, updateProps } from "./shared"
 
+const PRIORITY_LEVELS = ["alta", "media", "baixa"] as const
+type PriorityLevel = (typeof PRIORITY_LEVELS)[number]
+
+const levelLabel: Record<PriorityLevel, string> = {
+  alta: "Alta",
+  media: "Média",
+  baixa: "Baixa",
+}
+
 export const createArrowList = createReactBlockSpec(
   {
     type: "arrowList",
@@ -20,14 +29,14 @@ export const createArrowList = createReactBlockSpec(
         updateProps(editor, block.id, { itemsJson: stringifyJsonProp(next) })
 
       return (
-        <ul className="list-none space-y-2 pl-0">
+        <ul className="lista-setas">
           {items.map((item, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className="mt-0.5 text-[var(--cb-blue)]">→</span>
+            <li key={i}>
               <BlockField
                 value={item}
                 readOnly={readOnly}
                 placeholder="Item"
+                className="cb-field flex-1"
                 onChange={(v) => {
                   const next = [...items]
                   next[i] = v
@@ -63,52 +72,44 @@ export const createPriorityList = createReactBlockSpec(
   {
     render: ({ block, editor }) => {
       const readOnly = !editor.isEditable
-      const items = parseJsonProp<{ text: string; level: "alta" | "media" | "baixa" }[]>(
+      const items = parseJsonProp<{ text: string; level: PriorityLevel }[]>(
         block.props.itemsJson,
         []
       )
-      const setItems = (
-        next: { text: string; level: "alta" | "media" | "baixa" }[]
-      ) => updateProps(editor, block.id, { itemsJson: stringifyJsonProp(next) })
-
-      const levelClass = {
-        alta: "bg-[var(--cb-red-bg)] text-[var(--cb-red)]",
-        media: "bg-[var(--cb-yellow-bg)] text-[var(--cb-yellow)]",
-        baixa: "bg-[var(--cb-green-bg)] text-[var(--cb-green)]",
-      }
+      const setItems = (next: { text: string; level: PriorityLevel }[]) =>
+        updateProps(editor, block.id, { itemsJson: stringifyJsonProp(next) })
 
       return (
-        <ul className="space-y-2">
+        <ul className="lista-prioridade">
           {items.map((item, i) => (
-            <li key={i} className="flex items-start gap-2">
-              {!readOnly ? (
-                <select
-                  value={item.level}
-                  onChange={(e) => {
-                    const next = [...items]
-                    next[i] = {
-                      ...next[i],
-                      level: e.target.value as "alta" | "media" | "baixa",
-                    }
-                    setItems(next)
-                  }}
-                  className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs"
-                >
-                  <option value="alta">Alta</option>
-                  <option value="media">Média</option>
-                  <option value="baixa">Baixa</option>
-                </select>
-              ) : (
-                <span
-                  className={`rounded px-2 py-0.5 text-xs font-medium ${levelClass[item.level]}`}
-                >
-                  {item.level}
+            <li key={i}>
+              {readOnly ? (
+                <span className={`prioridade-badge prioridade-${item.level}`}>
+                  {levelLabel[item.level]}
                 </span>
+              ) : (
+                <div className="prioridade-picker">
+                  {PRIORITY_LEVELS.map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      className={`prioridade-badge prioridade-${level}${item.level === level ? " is-active" : ""}`}
+                      onClick={() => {
+                        const next = [...items]
+                        next[i] = { ...next[i], level }
+                        setItems(next)
+                      }}
+                    >
+                      {levelLabel[level]}
+                    </button>
+                  ))}
+                </div>
               )}
               <BlockField
                 value={item.text}
                 readOnly={readOnly}
-                className="flex-1"
+                placeholder="Descrição"
+                className="cb-field flex-1"
                 onChange={(text) => {
                   const next = [...items]
                   next[i] = { ...next[i], text }

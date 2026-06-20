@@ -30,6 +30,7 @@ export const createMiniCards = createReactBlockSpec(
                   value={card.title}
                   readOnly={readOnly}
                   placeholder="Título"
+                  className="cb-field font-semibold"
                   onChange={(title) => {
                     const next = [...cards]
                     next[i] = { ...next[i], title }
@@ -42,7 +43,7 @@ export const createMiniCards = createReactBlockSpec(
                 readOnly={readOnly}
                 multiline
                 placeholder="Conteúdo"
-                className="cb-paragraph"
+                className="cb-field cb-paragraph"
                 onChange={(body) => {
                   const next = [...cards]
                   next[i] = { ...next[i], body }

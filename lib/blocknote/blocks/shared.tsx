@@ -30,7 +30,7 @@ export function BlockField({
   if (readOnly) {
     return (
       <span className={className}>
-        {value || <span className="text-slate-400">{placeholder}</span>}
+        {value || <span className="cb-placeholder">{placeholder}</span>}
       </span>
     )
   }
@@ -41,7 +41,7 @@ export function BlockField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={3}
-        className={`w-full resize-none border-0 bg-transparent outline-none ${className ?? ""}`}
+        className={`w-full resize-none border-0 bg-transparent outline-none cb-field cb-field-multiline ${className ?? ""}`}
       />
     )
   }
@@ -50,7 +50,7 @@ export function BlockField({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full border-0 bg-transparent outline-none ${className ?? ""}`}
+      className={`w-full border-0 bg-transparent outline-none cb-field ${className ?? ""}`}
     />
   )
 }
@@ -63,7 +63,7 @@ export function BlockActions({
   readOnly?: boolean
 }) {
   if (readOnly) return null
-  return <div className="mt-2 flex flex-wrap gap-1">{children}</div>
+  return <div className="cb-block-actions">{children}</div>
 }
 
 export function SmallButton({
@@ -77,7 +77,7 @@ export function SmallButton({
     <button
       type="button"
       onClick={onClick}
-      className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+      className="cb-btn-ghost"
     >
       {children}
     </button>

@@ -1,7 +1,6 @@
 "use client"
 
 import { createReactBlockSpec } from "@blocknote/react"
-import { BlockField, updateProps } from "./shared"
 
 export const createHeadingLine = createReactBlockSpec(
   {
@@ -10,12 +9,9 @@ export const createHeadingLine = createReactBlockSpec(
     content: "inline",
   },
   {
-    render: ({ block, editor, contentRef }) => (
+    render: ({ contentRef }) => (
       <div className="cb-block">
-        <div
-          ref={contentRef}
-          className="cb-heading-1 min-h-[1.5rem] border-b border-[var(--cb-border)] pb-2"
-        />
+        <div ref={contentRef} className="titulo-linha min-h-[1.5rem]" />
       </div>
     ),
   }
@@ -30,10 +26,7 @@ export const createHeadingChip = createReactBlockSpec(
   {
     render: ({ contentRef }) => (
       <div className="cb-block">
-        <div
-          ref={contentRef}
-          className="inline-block rounded-lg bg-[var(--cb-gold-bg)] px-3 py-1 text-base font-semibold text-[var(--cb-ink)]"
-        />
+        <div ref={contentRef} className="titulo-fundo min-h-[1.25rem]" />
       </div>
     ),
   }
@@ -51,16 +44,23 @@ export const createHeadingNumbered = createReactBlockSpec(
     render: ({ block, editor, contentRef }) => {
       const readOnly = !editor.isEditable
       return (
-        <div className="cb-block flex items-start gap-2">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--cb-blue-bg)] text-sm font-bold text-[var(--cb-blue)]">
-            <BlockField
-              value={block.props.number}
-              readOnly={readOnly}
-              className="w-7 text-center text-sm font-bold"
-              onChange={(number) => updateProps(editor, block.id, { number })}
-            />
+        <div className="cb-block subtitulo-numerado">
+          <span className="num">
+            {readOnly ? (
+              block.props.number
+            ) : (
+              <input
+                className="cb-field w-6 bg-transparent text-center text-[0.85rem] font-bold text-[var(--cb-paper)]"
+                value={block.props.number}
+                onChange={(e) =>
+                  editor.updateBlock(block.id, {
+                    props: { number: e.target.value },
+                  })
+                }
+              />
+            )}
           </span>
-          <div ref={contentRef} className="cb-heading-3 min-h-[1.25rem] flex-1" />
+          <div ref={contentRef} className="min-h-[1.25rem] flex-1" />
         </div>
       )
     },

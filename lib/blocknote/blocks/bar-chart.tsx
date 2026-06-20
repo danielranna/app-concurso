@@ -29,10 +29,10 @@ export const createBarChart = createReactBlockSpec(
             value={block.props.title}
             readOnly={readOnly}
             placeholder="Título do gráfico"
-            className="mb-2 font-semibold"
+            className="cb-field mb-3 w-full font-semibold"
             onChange={(title) => updateProps(editor, block.id, { title })}
           />
-          <div className="cb-bar-chart">
+          <div className="canvas-card cb-bar-chart !min-h-[160px] !items-end !p-4">
             {items.map((item, i) => (
               <div key={i} className="cb-bar-col">
                 <div
@@ -63,7 +63,7 @@ export const createBarChart = createReactBlockSpec(
                       }
                       setItems(next)
                     }}
-                    className="w-12 rounded border border-slate-200 px-1 text-center text-xs"
+                    className="cb-field cb-bar-value w-12 text-center text-xs"
                   />
                 )}
               </div>

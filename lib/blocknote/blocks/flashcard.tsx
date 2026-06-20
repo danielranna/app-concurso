@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { createReactBlockSpec } from "@blocknote/react"
-import { BlockField, updateProps } from "./shared"
+import { updateProps } from "./shared"
 
 export const createFlashcardFlip = createReactBlockSpec(
   {
@@ -19,36 +19,55 @@ export const createFlashcardFlip = createReactBlockSpec(
       const [flipped, setFlipped] = useState(false)
 
       return (
-        <div className="cb-mini-card">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Flashcard
-            </span>
-            <button
-              type="button"
-              onClick={() => setFlipped((f) => !f)}
-              className="text-xs text-violet-700 hover:underline"
-            >
-              {flipped ? "Ver frente" : "Virar"}
-            </button>
+        <div
+          className={`flashcard${flipped ? " is-flipped" : ""}`}
+          onClick={() => setFlipped((f) => !f)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              setFlipped((f) => !f)
+            }
+          }}
+          role="button"
+          tabIndex={0}
+        >
+          <div className="flashcard-inner">
+            <div className="flashcard-face frente">
+              <span className="flashcard-eyebrow">Pergunta</span>
+              {readOnly ? (
+                <p className="m-0 font-semibold">{block.props.front || "—"}</p>
+              ) : (
+                <textarea
+                  className="cb-field cb-field-multiline m-0 w-full font-semibold"
+                  value={block.props.front}
+                  placeholder="Frente do cartão"
+                  rows={3}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) =>
+                    updateProps(editor, block.id, { front: e.target.value })
+                  }
+                />
+              )}
+              <span className="flashcard-hint">Clique para virar</span>
+            </div>
+            <div className="flashcard-face verso">
+              <span className="flashcard-eyebrow">Resposta</span>
+              {readOnly ? (
+                <p className="resposta m-0">{block.props.back || "—"}</p>
+              ) : (
+                <textarea
+                  className="cb-field cb-field-multiline resposta m-0 w-full"
+                  value={block.props.back}
+                  placeholder="Verso do cartão"
+                  rows={3}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) =>
+                    updateProps(editor, block.id, { back: e.target.value })
+                  }
+                />
+              )}
+            </div>
           </div>
-          {!flipped ? (
-            <BlockField
-              value={block.props.front}
-              readOnly={readOnly}
-              multiline
-              placeholder="Frente"
-              onChange={(front) => updateProps(editor, block.id, { front })}
-            />
-          ) : (
-            <BlockField
-              value={block.props.back}
-              readOnly={readOnly}
-              multiline
-              placeholder="Verso"
-              onChange={(back) => updateProps(editor, block.id, { back })}
-            />
-          )}
         </div>
       )
     },
@@ -68,23 +87,32 @@ export const createFlashcardStatic = createReactBlockSpec(
     render: ({ block, editor }) => {
       const readOnly = !editor.isEditable
       return (
-        <div className="cb-mini-card border-l-4 border-l-[var(--cb-purple)]">
-          <div className="cb-mini-card-title">
-            <BlockField
+        <div className="flashcard-estatico">
+          {readOnly ? (
+            <h4>{block.props.title || "Resumo"}</h4>
+          ) : (
+            <input
+              className="cb-field mb-2 w-full font-semibold"
               value={block.props.title}
-              readOnly={readOnly}
               placeholder="Título"
-              onChange={(title) => updateProps(editor, block.id, { title })}
+              onChange={(e) =>
+                updateProps(editor, block.id, { title: e.target.value })
+              }
             />
-          </div>
-          <BlockField
-            value={block.props.body}
-            readOnly={readOnly}
-            multiline
-            placeholder="Resumo"
-            className="cb-paragraph"
-            onChange={(body) => updateProps(editor, block.id, { body })}
-          />
+          )}
+          {readOnly ? (
+            <p className="m-0 text-[var(--cb-ink-soft)]">{block.props.body}</p>
+          ) : (
+            <textarea
+              className="cb-field cb-field-multiline w-full text-[var(--cb-ink-soft)]"
+              value={block.props.body}
+              placeholder="Conteúdo do resumo"
+              rows={3}
+              onChange={(e) =>
+                updateProps(editor, block.id, { body: e.target.value })
+              }
+            />
+          )}
         </div>
       )
     },

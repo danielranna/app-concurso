@@ -28,8 +28,8 @@ export const createTableCompare = createReactBlockSpec(
 
       return (
         <div>
-          <div className="cb-table-wrap">
-            <table className="cb-table">
+          <div className="tabela-wrapper">
+            <table className="tabela-comparativa cb-table">
               <thead>
                 <tr>
                   {headers.map((h, i) => (
@@ -37,6 +37,7 @@ export const createTableCompare = createReactBlockSpec(
                       <BlockField
                         value={h}
                         readOnly={readOnly}
+                        className="cb-field text-inherit"
                         onChange={(v) => {
                           const next = [...headers]
                           next[i] = v
@@ -55,6 +56,7 @@ export const createTableCompare = createReactBlockSpec(
                         <BlockField
                           value={row[ci] ?? ""}
                           readOnly={readOnly}
+                          className="cb-field"
                           onChange={(v) => {
                             const next = rows.map((r) => [...r])
                             if (!next[ri]) next[ri] = []
@@ -71,9 +73,7 @@ export const createTableCompare = createReactBlockSpec(
           </div>
           <BlockActions readOnly={readOnly}>
             <SmallButton
-              onClick={() =>
-                setRows([...rows, headers.map(() => "")])
-              }
+              onClick={() => setRows([...rows, headers.map(() => "")])}
             >
               + linha
             </SmallButton>

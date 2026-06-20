@@ -16,9 +16,9 @@ export const createTextFigure = createReactBlockSpec(
     render: ({ block, editor, contentRef }) => {
       const readOnly = !editor.isEditable
       return (
-        <div className="cb-columns cb-columns-2">
-          <div ref={contentRef} className="cb-paragraph min-h-[4rem]" />
-          <div>
+        <div className="colunas-2">
+          <div ref={contentRef} className="nota-corpo min-h-[4rem]" />
+          <figure className="figura-ficticia m-0">
             {!readOnly && (
               <input
                 type="url"
@@ -27,7 +27,7 @@ export const createTextFigure = createReactBlockSpec(
                   updateProps(editor, block.id, { imageUrl: e.target.value })
                 }
                 placeholder="URL da imagem"
-                className="mb-2 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                className="cb-field mb-2 w-full rounded-md border border-[var(--cb-paper-line)] bg-[var(--cb-paper)] px-2 py-1.5 text-sm"
               />
             )}
             {block.props.imageUrl ? (
@@ -35,19 +35,22 @@ export const createTextFigure = createReactBlockSpec(
               <img
                 src={block.props.imageUrl}
                 alt={block.props.caption || "Figura"}
-                className="max-h-48 w-full rounded-lg border border-[var(--cb-border)] object-cover"
               />
             ) : (
-              <div className="cb-sketch">Sem imagem</div>
+              <div className="cb-sketch flex min-h-[140px] items-center justify-center text-sm text-[var(--cb-ink-faint)]">
+                Cole a URL ou use /imagem
+              </div>
             )}
-            <BlockField
-              value={block.props.caption}
-              readOnly={readOnly}
-              placeholder="Legenda"
-              className="mt-2 text-xs text-slate-500"
-              onChange={(caption) => updateProps(editor, block.id, { caption })}
-            />
-          </div>
+            <figcaption className="figura-legenda">
+              <BlockField
+                value={block.props.caption}
+                readOnly={readOnly}
+                placeholder="Legenda da figura"
+                className="cb-field text-center text-xs"
+                onChange={(caption) => updateProps(editor, block.id, { caption })}
+              />
+            </figcaption>
+          </figure>
         </div>
       )
     },
