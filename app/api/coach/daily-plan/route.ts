@@ -46,10 +46,48 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, force, pin, refresh_queue } = body
+  const { user_id, force, pin, refresh_queue, stream } = body
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
+  }
+
+  if (stream) {
+    const encoder = new TextEncoder()
+    const readable = new ReadableStream({
+      async start(controller) {
+        const write = (obj: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"))
+        }
+        try {
+          const plan = await generateDailyStudyPlan(user_id, Boolean(force), {
+            pin: pin === true ? true : pin === false ? false : undefined,
+            refreshQueue: Boolean(refresh_queue),
+            onProgress: (step) => write({ type: "step", step }),
+          })
+          write({
+            type: "done",
+            plan: {
+              ...plan,
+              plan_date: plan.date,
+              combined_notebook_id: plan.combined_notebook_id,
+            },
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Erro"
+          write({ type: "error", error: msg })
+        } finally {
+          controller.close()
+        }
+      },
+    })
+
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache",
+      },
+    })
   }
 
   try {

@@ -3,6 +3,7 @@ import type {
   DailyStudyBlock,
   DailyStudyPlan,
   PlanGenerationMeta,
+  PlanGenerationStep,
   SubjectPickDiagnostic,
 } from "../coach-types"
 import { buildExecutionContext } from "./context-builder"
@@ -21,10 +22,7 @@ import {
   getTodayCycleBlocks,
   getTodayCycleDay,
 } from "../study-cycle-db"
-import {
-  buildDailyBlocksFromCycleBlocks,
-  resolveCombinedNotebookForCycleBlocks,
-} from "../cycle-block-executor"
+import { buildDailyBlocksFromCycleBlocks } from "../cycle-block-executor"
 import {
   buildRoundRobinQuestionSet,
   buildTopNQuestionSet,
@@ -42,6 +40,7 @@ export type GenerateDailyStudyPlanOptions = {
   refreshQueue?: boolean
   subjectId?: string
   recentWrongTopics?: string[]
+  onProgress?: (step: PlanGenerationStep) => void
 }
 
 function aggregatePickDiagnostics(
@@ -65,6 +64,7 @@ function aggregatePickDiagnostics(
             ? prev.source
             : row.source,
       skip_reason: row.picked > 0 ? undefined : prev.skip_reason ?? row.skip_reason,
+      topics_tried: [...(prev.topics_tried ?? []), ...(row.topics_tried ?? [])],
     })
   }
   return [...bySubject.values()]
@@ -75,6 +75,14 @@ export async function generateDailyStudyPlan(
   force = false,
   options?: GenerateDailyStudyPlanOptions
 ): Promise<DailyStudyPlan & { user_pinned?: boolean; completed_block_keys?: string[] }> {
+  const generationSteps: PlanGenerationStep[] = []
+  const emit = (step: PlanGenerationStep) => {
+    generationSteps.push(step)
+    options?.onProgress?.(step)
+  }
+
+  emit({ phase: "loading_context", message: "Carregando preferências e fila…" })
+
   let ctx = await buildExecutionContext(userId)
   const execPrefs = await getExecutorStudyPreferences(userId)
 
@@ -179,214 +187,212 @@ export async function generateDailyStudyPlan(
 
   const pool = await resolveExecutorSubjectPool(userId, queue)
   const { subjectNames, orderedForCycle: poolOrdered } = pool
-  let orderedForCycle = poolOrdered
 
-  if (cycleContext?.day?.subject_ids?.length) {
-    const cycleSubjects = cycleContext.day.subject_ids.filter((id) =>
-      pool.allowlist.includes(id)
-    )
-    if (cycleSubjects.length) orderedForCycle = cycleSubjects
-  }
+  // Pré-edital: executor usa todas as matérias elegíveis (fila cérebro), não só o dia do ciclo
+  const orderedForExecutor =
+    mode === "pre_edital"
+      ? poolOrdered
+      : cycleContext?.day?.subject_ids?.length
+        ? cycleContext.day.subject_ids.filter((id) => pool.allowlist.includes(id)).length
+          ? cycleContext.day.subject_ids.filter((id) => pool.allowlist.includes(id))
+          : poolOrdered
+        : poolOrdered
+
+  const subjectLabels = orderedForExecutor
+    .map((id) => subjectNames.get(id))
+    .filter(Boolean) as string[]
+
+  emit({
+    phase: "subjects_selected",
+    message: `Matérias selecionadas: ${subjectLabels.join(", ") || "nenhuma"}`,
+    detail: {
+      subject_ids: orderedForExecutor,
+      subject_names: subjectLabels,
+    },
+  })
+
+  emit({
+    phase: "queue_loaded",
+    message: `Fila ${mode === "pre_edital" ? "cérebro (pré-edital)" : "cruzada"}: ${queue.length} tópico(s) prioritário(s)`,
+    detail: { queue_size: queue.length, study_mode: mode },
+  })
 
   const manualCycleBlocks = cycleBlockCtx?.blocks ?? []
   const useManualBlocks = useCycle && manualCycleBlocks.length > 0
 
-  let allQuestionIds: string[] = []
-  let combinedNotebookId: string | null = null
-  let questionResult: Awaited<ReturnType<typeof buildRoundRobinQuestionSet>> = {
-    questionIds: [],
-    rounds: [],
-    topicsUsed: [],
-    subject_pick_diagnostics: [],
-  }
-  let summaryDrafts = 0
-  let flashDrafts = 0
-  let errorDrafts = 0
-  let planSource: PlanGenerationMeta["source"] = useCycle
-    ? "executor"
-    : "consultancy"
-  let rotation_note = ""
-
-  if (useManualBlocks && cycleContext) {
-    planSource = "cycle_manual"
-    const cycleBlocks = await buildDailyBlocksFromCycleBlocks(
-      userId,
-      manualCycleBlocks,
-      subjectNames
-    )
-    blocks.push(...cycleBlocks)
-
-    allQuestionIds = cycleBlocks
-      .filter((b) => b.type === "questions")
-      .flatMap((b) => (b.params.question_ids as string[]) ?? [])
-
-    const primarySubjectId =
-      manualCycleBlocks[0]?.subject_id ?? orderedForCycle[0] ?? pool.allowlist[0] ?? null
-
-    if (allQuestionIds.length > 0 && primarySubjectId) {
-      combinedNotebookId = await resolveCombinedNotebookForCycleBlocks(
-        userId,
-        cycleBlocks,
-        primarySubjectId,
-        ctx.today
-      )
-      for (const b of blocks) {
-        if (b.type === "questions" && combinedNotebookId) {
-          b.params.notebook_id = combinedNotebookId
-        }
-      }
-    }
-
-    rotation_note = `Ciclo manual — dia ${cycleContext.cycle.current_day_index + 1}/${cycleContext.cycle.total_days}: ${manualCycleBlocks.length} bloco(s). Fila: cérebro (pré-edital).`
-  } else {
-    const rotate =
-      execPrefs.rotate_subjects && mode !== "reta_final"
-
-    planSource =
-      useCycle && cycleContext ? "cycle" : useCycle ? "executor" : "consultancy"
-
-    const perRound = Math.max(
-      1,
-      Number(execPrefs.questions_per_subject_round ?? 5)
-    )
-
-    questionResult = rotate
-      ? await buildRoundRobinQuestionSet({
-          userId,
-          orderedSubjectIds: orderedForCycle,
-          queueBySubject,
-          subjectNames,
-          budget: questionsBudget,
-          perSubjectRound: perRound,
-          distributionMode: execPrefs.question_distribution_mode,
-        })
-      : await buildTopNQuestionSet({
-          userId,
-          queue: queue.filter((q) => pool.allowlist.includes(q.subject_id)),
-          subjectNames,
-          budget: questionsBudget,
-          allowlist: orderedForCycle.filter((id) => pool.allowlist.includes(id)),
-        })
-
-    allQuestionIds = questionResult.questionIds
-    const primarySubjectId =
-      questionResult.rounds[0]?.subject_id ??
-      orderedForCycle[0] ??
-      pool.allowlist[0] ??
-      null
-
-    const subjectsInNotebook = [
-      ...new Set(questionResult.rounds.map((r) => r.subject_id)),
-    ]
-
-    if (allQuestionIds.length > 0 && primarySubjectId) {
-      const subjectLabels = subjectsInNotebook
-        .map((id) => subjectNames.get(id))
-        .filter(Boolean)
-        .slice(0, 5)
-
-      combinedNotebookId = await createNotebookFromQuestionIds(
-        userId,
-        `Plano ${ctx.today}${subjectLabels.length ? ` — ${subjectLabels.join(", ")}` : ""}`.slice(
-          0,
-          120
-        ),
-        primarySubjectId,
-        allQuestionIds,
-        null,
-        false
-      )
-
-      blocks.push({
-        subject_id: primarySubjectId,
-        subject_name: subjectLabels.join(" · ") || "Várias matérias",
-        type: "questions",
-        count: allQuestionIds.length,
-        minutes: Math.min(90, allQuestionIds.length * 4),
-        label: `Caderno do dia (${allQuestionIds.length} questões erradas)`,
-        params: {
-          block_key: `questions:${primarySubjectId}:combined`,
-          question_ids: allQuestionIds,
-          notebook_id: combinedNotebookId,
-          is_combined: true,
-          subject_ids: subjectsInNotebook,
-          topic_keys: questionResult.topicsUsed.slice(0, 8),
-        },
-      })
-    }
-
-    const cycleSubjects =
-      subjectsInNotebook.length > 0 ? subjectsInNotebook : orderedForCycle
-
-    const summaryResult = await buildComprehensionSummaryBlocks({
-      userId,
-      subjectIds: cycleSubjects,
-      queueBySubject,
-      summariesBudget,
-      subjectNames,
-    })
-    blocks.push(...summaryResult.blocks)
-    summaryDrafts = summaryResult.inboxDrafts
-
-    flashDrafts = await enqueueExecutorFlashcardDrafts({
-      userId,
-      subjectIds: cycleSubjects,
-      queueBySubject,
-      limit: flashBudget,
-    })
-
-    errorDrafts = await enqueueExecutorErrorDrafts({
-      userId,
-      subjectIds: cycleSubjects,
-      queueBySubject,
-      limit: limits.error_reviews,
-    })
-
-    const totalInboxDrafts = flashDrafts + summaryDrafts + errorDrafts
-    if (totalInboxDrafts > 0) {
-      const parts: string[] = []
-      if (flashDrafts > 0) parts.push("flashcards")
-      if (errorDrafts > 0) parts.push("erros")
-      if (summaryDrafts > 0) parts.push("resumos")
-      blocks.push({
-        subject_id:
-          questionResult.rounds[0]?.subject_id ?? cycleSubjects[0] ?? "",
-        subject_name: "Inbox",
-        type: "inbox_pending",
-        count: totalInboxDrafts,
-        minutes: totalInboxDrafts * 2,
-        label: `${totalInboxDrafts} rascunho(s) na Inbox (${parts.join(" e ")})`,
-        params: {
-          block_key: `inbox_pending:${ctx.today}`,
-          href: "/coach/inbox",
-          flashcard_drafts: flashDrafts,
-          summary_drafts: summaryDrafts,
-          error_drafts: errorDrafts,
-        },
-      })
-    }
-
-    rotation_note = useCycle && cycleContext
-      ? `Ciclo ativo — dia ${cycleContext.cycle.current_day_index + 1}/${cycleContext.cycle.total_days}: ${orderedForCycle.map((id) => subjectNames.get(id)).filter(Boolean).join(", ")}. Fila: cérebro (pré-edital).`
-      : rotate
-        ? `Rodízio: ${perRound} questões erradas por matéria. ${orderedForCycle.length} matérias.`
-        : `Top da fila ${mode === "pre_edital" ? "cérebro" : "cruzada"} até ${questionsBudget} questões.`
-  }
+  const rotate =
+    execPrefs.rotate_subjects && mode !== "reta_final"
 
   const perRound = Math.max(
     1,
     Number(execPrefs.questions_per_subject_round ?? 5)
   )
 
+  const questionResult = rotate
+    ? await buildRoundRobinQuestionSet({
+        userId,
+        orderedSubjectIds: orderedForExecutor,
+        queueBySubject,
+        subjectNames,
+        budget: questionsBudget,
+        perSubjectRound: perRound,
+        distributionMode: execPrefs.question_distribution_mode,
+        onProgress: emit,
+      })
+    : await buildTopNQuestionSet({
+        userId,
+        queue: queue.filter((q) => pool.allowlist.includes(q.subject_id)),
+        subjectNames,
+        budget: questionsBudget,
+        allowlist: orderedForExecutor.filter((id) => pool.allowlist.includes(id)),
+        onProgress: emit,
+      })
+
+  const allQuestionIds = questionResult.questionIds
+  let combinedNotebookId: string | null = null
+
+  const primarySubjectId =
+    questionResult.rounds[0]?.subject_id ??
+    orderedForExecutor[0] ??
+    pool.allowlist[0] ??
+    null
+
+  const subjectsInNotebook = [
+    ...new Set(questionResult.rounds.map((r) => r.subject_id)),
+  ]
+
+  if (allQuestionIds.length > 0 && primarySubjectId) {
+    const notebookLabels = subjectsInNotebook
+      .map((id) => subjectNames.get(id))
+      .filter(Boolean)
+      .slice(0, 5)
+
+    combinedNotebookId = await createNotebookFromQuestionIds(
+      userId,
+      `Plano ${ctx.today}${notebookLabels.length ? ` — ${notebookLabels.join(", ")}` : ""}`.slice(
+        0,
+        120
+      ),
+      primarySubjectId,
+      allQuestionIds,
+      null,
+      false
+    )
+
+    emit({
+      phase: "notebook_created",
+      message: `Caderno montado com ${allQuestionIds.length} questão(ões)`,
+      detail: {
+        notebook_id: combinedNotebookId,
+        question_count: allQuestionIds.length,
+      },
+    })
+
+    blocks.push({
+      subject_id: primarySubjectId,
+      subject_name: notebookLabels.join(" · ") || "Várias matérias",
+      type: "questions",
+      count: allQuestionIds.length,
+      minutes: Math.min(90, allQuestionIds.length * 4),
+      label: `Caderno do dia (${allQuestionIds.length} questões erradas)`,
+      params: {
+        block_key: `questions:${primarySubjectId}:combined`,
+        question_ids: allQuestionIds,
+        notebook_id: combinedNotebookId,
+        is_combined: true,
+        subject_ids: subjectsInNotebook,
+        topic_keys: questionResult.topicsUsed.slice(0, 8),
+      },
+    })
+  }
+
+  if (useManualBlocks && cycleContext) {
+    const cycleBlocks = await buildDailyBlocksFromCycleBlocks(
+      userId,
+      manualCycleBlocks,
+      subjectNames,
+      { skipQuestionBlocks: true }
+    )
+    blocks.push(...cycleBlocks)
+  }
+
+  const cycleSubjects =
+    subjectsInNotebook.length > 0 ? subjectsInNotebook : orderedForExecutor
+
+  const summaryResult = await buildComprehensionSummaryBlocks({
+    userId,
+    subjectIds: cycleSubjects,
+    queueBySubject,
+    summariesBudget,
+    subjectNames,
+  })
+  blocks.push(...summaryResult.blocks)
+  const summaryDrafts = summaryResult.inboxDrafts
+
+  const flashDrafts = await enqueueExecutorFlashcardDrafts({
+    userId,
+    subjectIds: cycleSubjects,
+    queueBySubject,
+    limit: flashBudget,
+  })
+
+  const errorDrafts = await enqueueExecutorErrorDrafts({
+    userId,
+    subjectIds: cycleSubjects,
+    queueBySubject,
+    limit: limits.error_reviews,
+  })
+
+  const totalInboxDrafts = flashDrafts + summaryDrafts + errorDrafts
+  if (totalInboxDrafts > 0) {
+    const parts: string[] = []
+    if (flashDrafts > 0) parts.push("flashcards")
+    if (errorDrafts > 0) parts.push("erros")
+    if (summaryDrafts > 0) parts.push("resumos")
+    blocks.push({
+      subject_id:
+        questionResult.rounds[0]?.subject_id ?? cycleSubjects[0] ?? "",
+      subject_name: "Inbox",
+      type: "inbox_pending",
+      count: totalInboxDrafts,
+      minutes: totalInboxDrafts * 2,
+      label: `${totalInboxDrafts} rascunho(s) na Inbox (${parts.join(" e ")})`,
+      params: {
+        block_key: `inbox_pending:${ctx.today}`,
+        href: "/coach/inbox",
+        flashcard_drafts: flashDrafts,
+        summary_drafts: summaryDrafts,
+        error_drafts: errorDrafts,
+      },
+    })
+  }
+
+  const planSource: PlanGenerationMeta["source"] = useManualBlocks
+    ? "cycle_manual"
+    : useCycle && cycleContext
+      ? "cycle"
+      : useCycle
+        ? "executor"
+        : "consultancy"
+
+  let rotation_note = ""
+  if (useManualBlocks && cycleContext) {
+    rotation_note = `Ciclo manual — dia ${cycleContext.cycle.current_day_index + 1}/${cycleContext.cycle.total_days}: ${manualCycleBlocks.length} bloco(s) auxiliares. Caderno único pela fila cérebro (pré-edital).`
+  } else if (useCycle && cycleContext) {
+    rotation_note = `Ciclo ativo — dia ${cycleContext.cycle.current_day_index + 1}/${cycleContext.cycle.total_days}: ${orderedForExecutor.map((id) => subjectNames.get(id)).filter(Boolean).join(", ")}. Fila: cérebro (pré-edital).`
+  } else if (rotate) {
+    rotation_note = `Rodízio: ${perRound} questões erradas por matéria. ${orderedForExecutor.length} matérias.`
+  } else {
+    rotation_note = `Top da fila ${mode === "pre_edital" ? "cérebro" : "cruzada"} até ${questionsBudget} questões.`
+  }
+
+  emit({ phase: "done", message: "Plano montado." })
+
   const generation_meta: PlanGenerationMeta = {
-    question_mode: useManualBlocks
-      ? "top_queue"
-      : execPrefs.rotate_subjects && mode !== "reta_final"
-        ? "round_robin"
-        : "top_queue",
+    question_mode: rotate ? "round_robin" : "top_queue",
     distribution_mode: execPrefs.question_distribution_mode,
     questions_per_round: perRound,
-    subject_order: orderedForCycle.map((id) => ({
+    subject_order: orderedForExecutor.map((id) => ({
       subject_id: id,
       name: subjectNames.get(id) ?? id,
     })),
@@ -400,6 +406,7 @@ export async function generateDailyStudyPlan(
     subject_pick_diagnostics: aggregatePickDiagnostics(
       questionResult.subject_pick_diagnostics
     ),
+    generation_steps: generationSteps,
     source: planSource,
     cycle_day_index: cycleContext?.cycle.current_day_index,
     cycle_id: cycleContext?.cycle.id,

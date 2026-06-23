@@ -7,16 +7,18 @@ import { getContentBlock } from "./study-cycle-content-blocks-db"
 export async function buildDailyBlocksFromCycleBlocks(
   userId: string,
   cycleBlocks: StudyCycleBlock[],
-  subjectNames: Map<string, string>
+  subjectNames: Map<string, string>,
+  options?: { skipQuestionBlocks?: boolean }
 ): Promise<DailyStudyBlock[]> {
   const blocks: DailyStudyBlock[] = []
-  const questionIdsAll: string[] = []
+  const skipQuestionBlocks = options?.skipQuestionBlocks ?? false
 
   for (const cb of cycleBlocks.sort((a, b) => a.sort_order - b.sort_order)) {
     const subjectName = subjectNames.get(cb.subject_id) ?? cb.subject_name ?? "Matéria"
     const blockKey = `cycle:${cb.day_index}:${cb.sort_order}:${cb.block_type}`
 
     if (cb.block_type === "questions") {
+      if (skipQuestionBlocks) continue
       let notebookId = cb.params.notebook_id ?? null
       let nodeName = cb.content_node_name ?? cb.label
 
@@ -114,7 +116,6 @@ export async function buildDailyBlocksFromCycleBlocks(
       }
 
       if (questionIds.length) {
-        questionIdsAll.push(...questionIds)
         blocks.push({
           subject_id: cb.subject_id,
           subject_name: subjectName,

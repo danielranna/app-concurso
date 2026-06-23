@@ -8,7 +8,9 @@ import type {
   DailyStudyBlock,
   DailyStudyPlan,
   PlanGenerationMeta,
+  PlanGenerationStep,
 } from "@/lib/coach-types"
+import { PlanBuildProgress } from "@/components/coach/PlanBuildProgress"
 import {
   Loader2,
   RefreshCw,
@@ -37,8 +39,75 @@ const PICK_SOURCE_LABELS: Record<string, string> = {
 const SKIP_REASON_LABELS: Record<string, string> = {
   no_wrongs: "Sem erros elegíveis",
   all_consolidated: "Tópicos consolidados no cérebro",
-  no_queue: "Sem tópico na fila cruzada",
+  no_queue: "Sem tópico na fila",
   no_mapping: "Mapeamento TEC ausente",
+}
+
+function skipReasonLabel(
+  reason: string | undefined,
+  mode?: DailyStudyPlan["mode"]
+): string {
+  if (!reason) return "—"
+  if (reason === "no_queue" && mode === "pre_edital") {
+    return "Sem tópico na fila cérebro"
+  }
+  return SKIP_REASON_LABELS[reason] ?? reason
+}
+
+function formatTopicsTried(
+  topics?: { topic: string; picked: number; skip_reason?: string }[]
+): string {
+  if (!topics?.length) return "—"
+  return topics
+    .map((t) => {
+      if (t.picked > 0) return `${t.topic} (${t.picked})`
+      if (t.skip_reason === "consolidated") return `${t.topic} (consolidado)`
+      return `${t.topic} (0)`
+    })
+    .join("; ")
+}
+
+function SubjectDiagnosticsTable({
+  diagnostics,
+  mode,
+}: {
+  diagnostics: NonNullable<PlanGenerationMeta["subject_pick_diagnostics"]>
+  mode?: DailyStudyPlan["mode"]
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-amber-200 bg-white">
+      <table className="w-full text-xs">
+        <thead className="bg-amber-100 text-left">
+          <tr>
+            <th className="px-2 py-1">Matéria</th>
+            <th className="px-2 py-1">Pedido</th>
+            <th className="px-2 py-1">Pegou</th>
+            <th className="px-2 py-1">Origem</th>
+            <th className="px-2 py-1">Motivo</th>
+            <th className="px-2 py-1">Tópicos tentados</th>
+          </tr>
+        </thead>
+        <tbody>
+          {diagnostics.map((d, idx) => (
+            <tr key={idx} className="border-t border-amber-50">
+              <td className="px-2 py-1">{d.subject_name}</td>
+              <td className="px-2 py-1">{d.requested}</td>
+              <td className="px-2 py-1">{d.picked}</td>
+              <td className="px-2 py-1">
+                {PICK_SOURCE_LABELS[d.source] ?? d.source}
+              </td>
+              <td className="px-2 py-1">
+                {skipReasonLabel(d.skip_reason, mode)}
+              </td>
+              <td className="max-w-xs px-2 py-1 text-[11px] leading-snug">
+                {formatTopicsTried(d.topics_tried)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 function blockKey(block: DailyStudyBlock): string {
@@ -125,6 +194,7 @@ export default function CoachHojePage() {
   const [completingKey, setCompletingKey] = useState<string | null>(null)
   const [metaExpanded, setMetaExpanded] = useState(false)
   const [dailyWrongCount, setDailyWrongCount] = useState<number | null>(null)
+  const [buildSteps, setBuildSteps] = useState<PlanGenerationStep[]>([])
 
   const load = useCallback((uid: string) => {
     setLoading(true)
@@ -155,18 +225,64 @@ export default function CoachHojePage() {
     })
   }, [router, load])
 
+  useEffect(() => {
+    const total =
+      plan?.generation_meta?.total_questions ?? plan?.combined_question_count ?? 0
+    if (plan && total === 0) {
+      setMetaExpanded(true)
+    }
+  }, [plan?.id, plan?.generation_meta?.total_questions, plan?.combined_question_count])
+
   async function generate() {
     if (!userId) return
     setGenerating(true)
+    setBuildSteps([])
     try {
       const res = await fetch("/api/coach/daily-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, force: true, pin: false }),
+        body: JSON.stringify({
+          user_id: userId,
+          force: true,
+          pin: false,
+          stream: true,
+        }),
       })
-      const data = await res.json()
-      if (data.error) alert(data.error)
-      else if (data.plan) setPlan(parsePlanFromApi(data.plan))
+
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}))
+        if (data.error) alert(data.error)
+        return
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? ""
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const payload = JSON.parse(line) as {
+            type: string
+            step?: PlanGenerationStep
+            plan?: Record<string, unknown>
+            error?: string
+          }
+          if (payload.type === "step" && payload.step) {
+            setBuildSteps((prev) => [...prev, payload.step!])
+          } else if (payload.type === "done" && payload.plan) {
+            setPlan(parsePlanFromApi(payload.plan))
+          } else if (payload.type === "error") {
+            alert(payload.error ?? "Erro ao gerar plano")
+          }
+        }
+      }
     } finally {
       setGenerating(false)
     }
@@ -303,6 +419,17 @@ export default function CoachHojePage() {
         </div>
       </header>
 
+      {(generating || buildSteps.length > 0) && (
+        <PlanBuildProgress
+          steps={
+            buildSteps.length > 0
+              ? buildSteps
+              : plan?.generation_meta?.generation_steps ?? []
+          }
+          active={generating}
+        />
+      )}
+
       {dailyWrongCount != null && dailyWrongCount > 0 && (
         <Link
           href="/questoes/revisao"
@@ -356,44 +483,27 @@ export default function CoachHojePage() {
                 Nenhuma questão errada elegível hoje
               </p>
               <p className="mt-1 text-sm text-amber-800">
-                O rodízio listou as matérias, mas não encontrou erradas para
-                montar o caderno (fila vazia, tópicos consolidados ou sem
-                histórico). Ajuste o Executor ou regenere após novas tentativas.
+                O executor percorreu as matérias pela fila cérebro, mas não
+                encontrou erradas elegíveis (fila vazia, tópicos consolidados ou
+                sem histórico). Ajuste o Executor ou regenere após novas
+                tentativas.
               </p>
+              {plan.generation_meta?.subject_order &&
+                plan.generation_meta.subject_order.length > 0 && (
+                  <p className="mt-2 text-sm text-amber-900">
+                    <span className="font-medium">Matérias consideradas: </span>
+                    {plan.generation_meta.subject_order
+                      .map((s) => s.name)
+                      .join(" → ")}
+                  </p>
+                )}
               {plan.generation_meta?.subject_pick_diagnostics &&
                 plan.generation_meta.subject_pick_diagnostics.length > 0 && (
-                  <div className="mt-3 overflow-x-auto rounded-lg border border-amber-200 bg-white">
-                    <table className="w-full text-xs">
-                      <thead className="bg-amber-100 text-left">
-                        <tr>
-                          <th className="px-2 py-1">Matéria</th>
-                          <th className="px-2 py-1">Pedido</th>
-                          <th className="px-2 py-1">Pegou</th>
-                          <th className="px-2 py-1">Origem</th>
-                          <th className="px-2 py-1">Motivo</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {plan.generation_meta.subject_pick_diagnostics.map(
-                          (d, idx) => (
-                            <tr key={idx} className="border-t border-amber-50">
-                              <td className="px-2 py-1">{d.subject_name}</td>
-                              <td className="px-2 py-1">{d.requested}</td>
-                              <td className="px-2 py-1">{d.picked}</td>
-                              <td className="px-2 py-1">
-                                {PICK_SOURCE_LABELS[d.source] ?? d.source}
-                              </td>
-                              <td className="px-2 py-1">
-                                {d.skip_reason
-                                  ? SKIP_REASON_LABELS[d.skip_reason] ??
-                                    d.skip_reason
-                                  : "—"}
-                              </td>
-                            </tr>
-                          )
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="mt-3">
+                    <SubjectDiagnosticsTable
+                      diagnostics={plan.generation_meta.subject_pick_diagnostics}
+                      mode={plan.mode}
+                    />
                   </div>
                 )}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -491,7 +601,9 @@ export default function CoachHojePage() {
                     <strong>
                       {plan.generation_meta.question_mode === "round_robin"
                         ? "Rodízio por matéria"
-                        : "Top da fila cruzada"}
+                        : plan.mode === "pre_edital"
+                          ? "Top da fila cérebro"
+                          : "Top da fila cruzada"}
                     </strong>
                     {" · "}
                     {plan.generation_meta.distribution_mode === "equal_split"
@@ -526,41 +638,33 @@ export default function CoachHojePage() {
                         .join(", ")}
                     </p>
                   )}
+                  {plan.generation_meta.generation_steps &&
+                    plan.generation_meta.generation_steps.length > 0 && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <p className="text-xs font-medium text-slate-700">
+                          Passos da montagem
+                        </p>
+                        <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs text-slate-600">
+                          {plan.generation_meta.generation_steps.map(
+                            (step, idx) => (
+                              <li key={idx}>{step.message}</li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                    )}
                   {plan.generation_meta.subject_pick_diagnostics &&
                     plan.generation_meta.subject_pick_diagnostics.length > 0 && (
-                      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                        <p className="border-b border-slate-100 bg-slate-50 px-2 py-1 text-xs font-medium">
+                      <div>
+                        <p className="mb-1 text-xs font-medium text-slate-700">
                           Diagnóstico por matéria
                         </p>
-                        <table className="w-full text-xs">
-                          <thead className="bg-slate-100 text-left">
-                            <tr>
-                              <th className="px-2 py-1">Matéria</th>
-                              <th className="px-2 py-1">Pedido</th>
-                              <th className="px-2 py-1">Pegou</th>
-                              <th className="px-2 py-1">Origem</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {plan.generation_meta.subject_pick_diagnostics.map(
-                              (d, idx) => (
-                                <tr
-                                  key={idx}
-                                  className="border-t border-slate-100"
-                                >
-                                  <td className="px-2 py-1">
-                                    {d.subject_name}
-                                  </td>
-                                  <td className="px-2 py-1">{d.requested}</td>
-                                  <td className="px-2 py-1">{d.picked}</td>
-                                  <td className="px-2 py-1">
-                                    {PICK_SOURCE_LABELS[d.source] ?? d.source}
-                                  </td>
-                                </tr>
-                              )
-                            )}
-                          </tbody>
-                        </table>
+                        <SubjectDiagnosticsTable
+                          diagnostics={
+                            plan.generation_meta.subject_pick_diagnostics
+                          }
+                          mode={plan.mode}
+                        />
                       </div>
                     )}
                   {plan.generation_meta.rounds.length > 0 && (

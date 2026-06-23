@@ -171,6 +171,12 @@ export type NotebookReportStructured = {
   }[]
 }
 
+export type TopicPickTried = {
+  topic: string
+  picked: number
+  skip_reason?: "consolidated" | "no_wrongs" | "no_mapping"
+}
+
 export type SubjectPickDiagnostic = {
   subject_id: string
   subject_name: string
@@ -179,6 +185,22 @@ export type SubjectPickDiagnostic = {
   source: "queue_topic" | "subject_fallback" | "none"
   skip_reason?: "no_wrongs" | "all_consolidated" | "no_queue" | "no_mapping"
   round?: number
+  topics_tried?: TopicPickTried[]
+}
+
+export type PlanGenerationStepPhase =
+  | "loading_context"
+  | "subjects_selected"
+  | "queue_loaded"
+  | "picking_subject"
+  | "topic_tried"
+  | "notebook_created"
+  | "done"
+
+export type PlanGenerationStep = {
+  phase: PlanGenerationStepPhase
+  message: string
+  detail?: Record<string, unknown>
 }
 
 export type TopicBrainEntry = {
@@ -298,6 +320,7 @@ export type PlanGenerationMeta = {
   total_questions: number
   inbox_drafts: { flashcards: number; summaries: number; errors: number }
   subject_pick_diagnostics?: SubjectPickDiagnostic[]
+  generation_steps?: PlanGenerationStep[]
   source?: "cycle" | "consultancy" | "executor" | "cycle_manual"
   cycle_day_index?: number
   cycle_id?: string

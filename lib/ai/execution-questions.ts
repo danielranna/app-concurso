@@ -1,4 +1,9 @@
-import type { SubjectBrainState } from "../coach-types"
+import type {
+  PlanGenerationStep,
+  SubjectBrainState,
+  SubjectPickDiagnostic,
+  TopicPickTried,
+} from "../coach-types"
 import { pickQuestionIdsFromPerformance } from "../notebook-from-performance"
 import { supabaseServer } from "../supabase-server"
 import { topicBrainKey, findTopicEntry } from "./brain-helpers"
@@ -14,16 +19,6 @@ export type QueueRow = {
 }
 
 export type PickSource = "queue_topic" | "subject_fallback" | "none"
-
-export type SubjectPickDiagnostic = {
-  subject_id: string
-  subject_name: string
-  requested: number
-  picked: number
-  source: PickSource
-  skip_reason?: "no_wrongs" | "all_consolidated" | "no_queue" | "no_mapping"
-  round?: number
-}
 
 export type QuestionRoundEntry = {
   round: number
@@ -41,6 +36,8 @@ export type QuestionSetResult = {
   topicsUsed: string[]
   subject_pick_diagnostics: SubjectPickDiagnostic[]
 }
+
+export type PickProgressCallback = (step: PlanGenerationStep) => void
 
 const CONSOLIDATED_STATUSES = new Set(["dominado", "forte"])
 
@@ -120,11 +117,18 @@ async function pickSubjectWrongFallback(
 function inferSkipReason(
   topics: QueueRow[],
   picked: number,
-  hadQueue: boolean
+  hadQueue: boolean,
+  topicsTried: TopicPickTried[]
 ): SubjectPickDiagnostic["skip_reason"] | undefined {
   if (picked > 0) return undefined
   if (!hadQueue) return "no_queue"
   if (!topics.length) return "no_queue"
+  if (
+    topicsTried.length > 0 &&
+    topicsTried.every((t) => t.skip_reason === "consolidated")
+  ) {
+    return "all_consolidated"
+  }
   return "no_wrongs"
 }
 
@@ -133,23 +137,46 @@ async function pickFromSubjectTopics(
   subjectId: string,
   topics: QueueRow[],
   limit: number,
-  seenQ: Set<string>
+  seenQ: Set<string>,
+  options?: {
+    subjectName?: string
+    onProgress?: PickProgressCallback
+  }
 ): Promise<{
   ids: string[]
   topic?: string
   reason?: string
   source: PickSource
+  topics_tried: TopicPickTried[]
 }> {
   const brain = await loadSubjectBrain(userId, subjectId)
   const ids: string[] = []
+  const topics_tried: TopicPickTried[] = []
   let usedTopic: string | undefined
   let usedReason: string | undefined
+  const subjectName = options?.subjectName ?? subjectId
+
+  const emitTopic = (topic: string, picked: number, skip_reason?: TopicPickTried["skip_reason"]) => {
+    topics_tried.push({ topic, picked, skip_reason })
+    options?.onProgress?.({
+      phase: "topic_tried",
+      message:
+        picked > 0
+          ? `${topic}: ${picked} questão(ões)`
+          : `${topic}: 0 elegíveis${skip_reason === "consolidated" ? " (consolidado)" : ""}`,
+      detail: { subject_id: subjectId, subject_name: subjectName, topic, picked, skip_reason },
+    })
+  }
 
   for (const row of topics) {
     if (ids.length >= limit) break
     const topic = row.topic_label ?? row.topic_key
     if (!topic) continue
-    if (isTopicConsolidatedInBrain(brain, topic, row.topic_key)) continue
+
+    if (isTopicConsolidatedInBrain(brain, topic, row.topic_key)) {
+      emitTopic(topic, 0, "consolidated")
+      continue
+    }
 
     const picked = await pickWrongNonConsolidated(
       userId,
@@ -158,36 +185,22 @@ async function pickFromSubjectTopics(
       limit - ids.length,
       brain
     )
+
+    let addedFromTopic = 0
     for (const qid of picked) {
       if (seenQ.has(qid)) continue
       seenQ.add(qid)
       ids.push(qid)
+      addedFromTopic++
       usedTopic = topic
       usedReason = row.reason ?? undefined
-      if (ids.length >= limit) {
-        return { ids, topic: usedTopic, reason: usedReason, source: "queue_topic" }
-      }
+      if (ids.length >= limit) break
     }
-  }
 
-  if (!ids.length && topics.length) {
-    const topic = topics[0]!.topic_label ?? topics[0]!.topic_key
-    const extra = await pickWrongNonConsolidated(
-      userId,
-      subjectId,
-      topic,
-      limit,
-      brain
-    )
-    for (const qid of extra) {
-      if (seenQ.has(qid)) continue
-      seenQ.add(qid)
-      ids.push(qid)
-      usedTopic = topic
-      usedReason = topics[0]!.reason ?? undefined
-    }
-    if (ids.length) {
-      return { ids, topic: usedTopic, reason: usedReason, source: "queue_topic" }
+    emitTopic(topic, addedFromTopic, addedFromTopic === 0 ? "no_wrongs" : undefined)
+
+    if (ids.length >= limit) {
+      return { ids, topic: usedTopic, reason: usedReason, source: "queue_topic", topics_tried }
     }
   }
 
@@ -200,11 +213,17 @@ async function pickFromSubjectTopics(
       brain
     )
     if (fallback.length) {
+      options?.onProgress?.({
+        phase: "topic_tried",
+        message: `Histórico da matéria: ${fallback.length} questão(ões)`,
+        detail: { subject_id: subjectId, subject_name: subjectName, source: "subject_fallback" },
+      })
       return {
         ids: fallback,
         topic: usedTopic ?? topics[0]?.topic_label,
         reason: usedReason ?? "Histórico de erros da matéria",
         source: "subject_fallback",
+        topics_tried,
       }
     }
   }
@@ -214,6 +233,7 @@ async function pickFromSubjectTopics(
     topic: usedTopic ?? topics[0]?.topic_label,
     reason: usedReason,
     source: ids.length ? "queue_topic" : "none",
+    topics_tried,
   }
 }
 
@@ -225,6 +245,7 @@ export async function buildRoundRobinQuestionSet(params: {
   budget: number
   perSubjectRound: number
   distributionMode: QuestionDistributionMode
+  onProgress?: PickProgressCallback
 }): Promise<QuestionSetResult> {
   const {
     userId,
@@ -234,6 +255,7 @@ export async function buildRoundRobinQuestionSet(params: {
     budget,
     perSubjectRound,
     distributionMode,
+    onProgress,
   } = params
 
   const seenQ = new Set<string>()
@@ -267,23 +289,32 @@ export async function buildRoundRobinQuestionSet(params: {
       if (take <= 0) continue
 
       const topics = queueBySubject.get(subjectId) ?? []
-      const { ids, topic, reason, source } = await pickFromSubjectTopics(
+      const subjectName = subjectNames.get(subjectId) ?? subjectId
+
+      onProgress?.({
+        phase: "picking_subject",
+        message: `Buscando erradas em ${subjectName}…`,
+        detail: { subject_id: subjectId, subject_name: subjectName, round: roundNum },
+      })
+
+      const { ids, topic, reason, source, topics_tried } = await pickFromSubjectTopics(
         userId,
         subjectId,
         topics,
         take,
-        seenQ
+        seenQ,
+        { subjectName, onProgress }
       )
 
-      const subjectName = subjectNames.get(subjectId) ?? subjectId
       subject_pick_diagnostics.push({
         subject_id: subjectId,
         subject_name: subjectName,
         requested: take,
         picked: ids.length,
         source,
-        skip_reason: inferSkipReason(topics, ids.length, topics.length > 0),
+        skip_reason: inferSkipReason(topics, ids.length, topics.length > 0, topics_tried),
         round: roundNum,
+        topics_tried,
       })
 
       if (!ids.length) {
@@ -320,13 +351,15 @@ export async function buildTopNQuestionSet(params: {
   subjectNames: Map<string, string>
   budget: number
   allowlist?: string[]
+  onProgress?: PickProgressCallback
 }): Promise<QuestionSetResult> {
-  const { userId, queue, subjectNames, budget, allowlist } = params
+  const { userId, queue, subjectNames, budget, allowlist, onProgress } = params
   const seenQ = new Set<string>()
   const questionIds: string[] = []
   const rounds: QuestionRoundEntry[] = []
   const topicsUsed: string[] = []
   const subject_pick_diagnostics: SubjectPickDiagnostic[] = []
+  const diagnosticsBySubject = new Map<string, SubjectPickDiagnostic>()
   const pickedBySubject = new Map<string, number>()
   let remaining = budget
 
@@ -334,14 +367,48 @@ export async function buildTopNQuestionSet(params: {
     (a, b) => Number(b.priority_score) - Number(a.priority_score)
   )
 
+  const recordTopicForSubject = (
+    subjectId: string,
+    topicTried: TopicPickTried
+  ) => {
+    const existing = diagnosticsBySubject.get(subjectId)
+    if (existing) {
+      existing.topics_tried = [...(existing.topics_tried ?? []), topicTried]
+    } else {
+      diagnosticsBySubject.set(subjectId, {
+        subject_id: subjectId,
+        subject_name: subjectNames.get(subjectId) ?? subjectId,
+        requested: 0,
+        picked: 0,
+        source: "none",
+        topics_tried: [topicTried],
+      })
+    }
+  }
+
   for (const row of sorted) {
     if (remaining <= 0) break
     const topic = row.topic_label ?? row.topic_key
     if (!topic) continue
     if (topicsUsed.includes(topic)) continue
 
+    const subjectName = subjectNames.get(row.subject_id) ?? row.subject_id
+    onProgress?.({
+      phase: "picking_subject",
+      message: `Buscando erradas em ${subjectName}…`,
+      detail: { subject_id: row.subject_id, subject_name: subjectName },
+    })
+
     const brain = await loadSubjectBrain(userId, row.subject_id)
-    if (isTopicConsolidatedInBrain(brain, topic, row.topic_key)) continue
+    if (isTopicConsolidatedInBrain(brain, topic, row.topic_key)) {
+      recordTopicForSubject(row.subject_id, { topic, picked: 0, skip_reason: "consolidated" })
+      onProgress?.({
+        phase: "topic_tried",
+        message: `${topic}: 0 elegíveis (consolidado)`,
+        detail: { subject_id: row.subject_id, subject_name: subjectName, topic },
+      })
+      continue
+    }
 
     const picked = await pickWrongNonConsolidated(
       userId,
@@ -359,6 +426,20 @@ export async function buildTopNQuestionSet(params: {
       if (ids.length >= remaining) break
     }
 
+    recordTopicForSubject(row.subject_id, {
+      topic,
+      picked: ids.length,
+      skip_reason: ids.length === 0 ? "no_wrongs" : undefined,
+    })
+    onProgress?.({
+      phase: "topic_tried",
+      message:
+        ids.length > 0
+          ? `${topic}: ${ids.length} questão(ões)`
+          : `${topic}: 0 elegíveis`,
+      detail: { subject_id: row.subject_id, subject_name: subjectName, topic, picked: ids.length },
+    })
+
     if (!ids.length) continue
 
     for (const qid of ids) questionIds.push(qid)
@@ -369,10 +450,18 @@ export async function buildTopNQuestionSet(params: {
       (pickedBySubject.get(row.subject_id) ?? 0) + ids.length
     )
 
+    const diag = diagnosticsBySubject.get(row.subject_id)
+    if (diag) {
+      diag.picked += ids.length
+      diag.requested = Math.max(diag.requested, ids.length)
+      diag.source = "queue_topic"
+      diag.skip_reason = undefined
+    }
+
     rounds.push({
       round: rounds.length + 1,
       subject_id: row.subject_id,
-      subject_name: subjectNames.get(row.subject_id) ?? row.subject_id,
+      subject_name: subjectName,
       count: ids.length,
       topic,
       reason: row.reason ?? undefined,
@@ -389,26 +478,38 @@ export async function buildTopNQuestionSet(params: {
     const already = pickedBySubject.get(subjectId) ?? 0
     if (already > 0) continue
 
-    const { ids, topic, reason, source } = await pickFromSubjectTopics(
+    const subjectName = subjectNames.get(subjectId) ?? subjectId
+    const subjectTopics = queueBySubjectFromRows(sorted, subjectId)
+
+    onProgress?.({
+      phase: "picking_subject",
+      message: `Buscando erradas em ${subjectName}…`,
+      detail: { subject_id: subjectId, subject_name: subjectName },
+    })
+
+    const { ids, topic, reason, source, topics_tried } = await pickFromSubjectTopics(
       userId,
       subjectId,
-      queueBySubjectFromRows(sorted, subjectId),
+      subjectTopics,
       remaining,
-      seenQ
+      seenQ,
+      { subjectName, onProgress }
     )
 
     if (!ids.length) {
       subject_pick_diagnostics.push({
         subject_id: subjectId,
-        subject_name: subjectNames.get(subjectId) ?? subjectId,
+        subject_name: subjectName,
         requested: remaining,
         picked: 0,
         source: "none",
         skip_reason: inferSkipReason(
-          queueBySubjectFromRows(sorted, subjectId),
+          subjectTopics,
           0,
-          sorted.some((r) => r.subject_id === subjectId)
+          sorted.some((r) => r.subject_id === subjectId),
+          topics_tried
         ),
+        topics_tried,
       })
       continue
     }
@@ -419,20 +520,42 @@ export async function buildTopNQuestionSet(params: {
 
     subject_pick_diagnostics.push({
       subject_id: subjectId,
-      subject_name: subjectNames.get(subjectId) ?? subjectId,
+      subject_name: subjectName,
       requested: ids.length,
       picked: ids.length,
       source,
+      topics_tried,
     })
 
     rounds.push({
       round: rounds.length + 1,
       subject_id: subjectId,
-      subject_name: subjectNames.get(subjectId) ?? subjectId,
+      subject_name: subjectName,
       count: ids.length,
       topic,
       reason,
       source,
+    })
+  }
+
+  for (const [subjectId, diag] of diagnosticsBySubject) {
+    if (subject_pick_diagnostics.some((d) => d.subject_id === subjectId)) continue
+    const picked = pickedBySubject.get(subjectId) ?? diag.picked
+    const subjectTopics = queueBySubjectFromRows(sorted, subjectId)
+    subject_pick_diagnostics.push({
+      ...diag,
+      requested: picked || diag.requested,
+      picked,
+      source: picked > 0 ? "queue_topic" : diag.source,
+      skip_reason:
+        picked > 0
+          ? undefined
+          : inferSkipReason(
+              subjectTopics,
+              0,
+              sorted.some((r) => r.subject_id === subjectId),
+              diag.topics_tried ?? []
+            ),
     })
   }
 
