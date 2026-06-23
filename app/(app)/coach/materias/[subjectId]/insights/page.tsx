@@ -73,6 +73,54 @@ export default function CoachInsightsPage() {
   const [brainTableExpanded, setBrainTableExpanded] = useState(false)
   const [studyMode, setStudyMode] = useState<string>("pre_edital")
   const [queuePrioritySource, setQueuePrioritySource] = useState<string>("brain")
+  const [queueHydratedFrom, setQueueHydratedFrom] = useState<
+    "database" | "recompute" | "breakdown" | undefined
+  >(undefined)
+
+  function mapQueueItemsFromApi(
+    items: {
+      id?: string
+      topic_key: string
+      topic_label?: string
+      priority_score: number
+      incidence_weight?: number
+      edital_weight?: number
+      gap_score?: number
+      retention_penalty?: number
+      reason?: string | null
+      dominio?: number
+      wrong_count?: number
+      brain_status?: string
+      attempts?: number
+    }[]
+  ): QueueItem[] {
+    return items.map((i) => ({
+      id: i.id,
+      topic_key: i.topic_key,
+      topic_label: i.topic_label,
+      priority_score: Number(i.priority_score),
+      incidence_weight: i.incidence_weight,
+      edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
+      gap_score: i.gap_score,
+      retention_penalty: i.retention_penalty,
+      reason: i.reason,
+      dominio: i.dominio,
+      wrong_count: i.wrong_count,
+      brain_status: i.brain_status,
+      attempts: i.attempts,
+    }))
+  }
+
+  async function loadQueue(uid: string) {
+    const res = await fetch(
+      `/api/coach/strategic-queue?user_id=${uid}&subject_id=${subjectId}`
+    )
+    const data = await res.json()
+    if (data.error) return
+    setQueuePrioritySource(data.priority_source ?? "brain")
+    setQueueHydratedFrom(data.hydrated_from)
+    setQueueItems(mapQueueItemsFromApi(data.items ?? []))
+  }
 
   const brainByTopic: Record<string, BrainTopicHint> | undefined = brain
     ? Object.fromEntries(
@@ -133,31 +181,8 @@ export default function CoachInsightsPage() {
         setBrainLastReportId(brainRes.last_report_id ?? null)
         setStudyMode(prefsRes?.study?.study_mode ?? "pre_edital")
         setQueuePrioritySource(queueRes.priority_source ?? "brain")
-        setQueueItems(
-          (queueRes.items ?? []).map(
-            (i: {
-              id: string
-              topic_key: string
-              topic_label?: string
-              priority_score: number
-              incidence_weight?: number
-              edital_weight?: number
-              gap_score?: number
-              retention_penalty?: number
-              reason?: string
-            }) => ({
-              id: i.id,
-              topic_key: i.topic_key,
-              topic_label: i.topic_label,
-              priority_score: Number(i.priority_score),
-              incidence_weight: i.incidence_weight,
-              edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
-              gap_score: i.gap_score,
-              retention_penalty: i.retention_penalty,
-              reason: i.reason,
-            })
-          )
-        )
+        setQueueHydratedFrom(queueRes.hydrated_from)
+        setQueueItems(mapQueueItemsFromApi(queueRes.items ?? []))
         if (explainRes?.explain_wrong === null || explainRes?.explain_wrong === undefined) {
           setExplainMode("global")
         } else if (explainRes.explain_wrong) {
@@ -201,39 +226,20 @@ export default function CoachInsightsPage() {
   async function refreshQueue() {
     if (!userId) return
     setLoadingQueue(true)
-    const res = await fetch("/api/coach/strategic-queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, subject_id: subjectId }),
-    })
-    const data = await res.json()
-    setLoadingQueue(false)
-    if (data.items) {
-      setQueueItems(
-        data.items.map(
-          (i: {
-            id: string
-            topic_key: string
-            topic_label?: string
-            priority_score: number
-            incidence_weight?: number
-            edital_weight?: number
-            gap_score?: number
-            retention_penalty?: number
-            reason?: string
-          }) => ({
-            id: i.id,
-            topic_key: i.topic_key,
-            topic_label: i.topic_label,
-            priority_score: Number(i.priority_score),
-            incidence_weight: i.incidence_weight,
-            edital_weight: i.edital_weight != null ? Number(i.edital_weight) : undefined,
-            gap_score: i.gap_score,
-            retention_penalty: i.retention_penalty,
-            reason: i.reason,
-          })
-        )
-      )
+    try {
+      const res = await fetch("/api/coach/priorities-breakdown", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, subject_id: subjectId }),
+      })
+      const data = await res.json()
+      if (data.error) {
+        alert(data.error)
+        return
+      }
+      await loadQueue(userId)
+    } finally {
+      setLoadingQueue(false)
     }
   }
 
@@ -393,11 +399,23 @@ export default function CoachInsightsPage() {
         >
           Ver prioridades completas (Edital × Cérebro × Cruzado) →
         </Link>
+        {queueHydratedFrom === "breakdown" && (
+          <p className="mb-2 text-xs text-violet-700">
+            Fila sincronizada a partir do seu desempenho. Clique em Recalcular
+            para salvar no banco.
+          </p>
+        )}
+        {queueHydratedFrom === "recompute" && (
+          <p className="mb-2 text-xs text-violet-700">
+            Fila recalculada e salva agora.
+          </p>
+        )}
         <StrategicQueueList
           items={queueItems}
           loading={loading && !queueItems.length}
           collapseAfter={5}
           brainByTopic={brainByTopic}
+          variant={queuePrioritySource === "brain" ? "brain" : "crossed"}
         />
       </section>
 

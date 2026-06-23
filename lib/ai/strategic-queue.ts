@@ -2,6 +2,7 @@ import { supabaseServer } from "../supabase-server"
 import { fetchEditalSubjectRank } from "../edital-subject-rank-db"
 import { topicBrainKey } from "./brain-helpers"
 import { runStrategyNarrativeAgent } from "./agents/strategy"
+import type { PrioritySource } from "../priority-source"
 import { resolvePrioritySource } from "../priority-source"
 import { getExecutorStudyPreferences } from "./execution-subjects"
 import {
@@ -16,6 +17,7 @@ import {
   shouldUseStrategyLlm,
   type StrategicQueueRow,
 } from "./strategy-helpers"
+import type { PriorityBreakdownRow } from "./priority-breakdown"
 
 export type RecomputeQueueResult = {
   rows: StrategicQueueRow[]
@@ -25,6 +27,135 @@ export type RecomputeQueueResult = {
   recent_boost_count: number
   top_topic?: string
   top_topic_label?: string
+}
+
+export type LoadStrategicQueueResult = {
+  items: Record<string, unknown>[]
+  priority_source: PrioritySource
+  hydrated_from?: "database" | "recompute" | "breakdown"
+}
+
+function breakdownRowsToQueueItems(
+  rows: PriorityBreakdownRow[],
+  userId: string,
+  subjectId: string,
+  prioritySource: PrioritySource
+): Record<string, unknown>[] {
+  return rows.map((r) => ({
+    user_id: userId,
+    subject_id: subjectId,
+    topic_key: r.topic_key,
+    topic_label: r.topic_label,
+    priority_score: r.score,
+    incidence_weight: r.incidence_weight,
+    edital_weight: r.edital_weight,
+    gap_score: r.gap_score ?? 0,
+    retention_penalty: r.retention_penalty ?? 1,
+    reason: r.reason ?? null,
+    source: "sql",
+    priority_source: prioritySource,
+    dominio: r.dominio,
+    wrong_count: r.wrong_count,
+    brain_status: r.brain_status,
+    attempts: r.attempts,
+  }))
+}
+
+async function fetchPersistedQueueItems(
+  userId: string,
+  subjectId: string,
+  prioritySource: PrioritySource
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabaseServer
+    .from("strategic_queue_items")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("subject_id", subjectId)
+    .eq("priority_source", prioritySource)
+    .order("priority_score", { ascending: false })
+    .limit(50)
+
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+export async function loadStrategicQueueForSubject(
+  userId: string,
+  subjectId: string,
+  options?: { autoRecompute?: boolean }
+): Promise<LoadStrategicQueueResult> {
+  const prefs = await getExecutorStudyPreferences(userId)
+  const prioritySource = resolvePrioritySource(prefs.study_mode)
+
+  let items = await fetchPersistedQueueItems(userId, subjectId, prioritySource)
+  let hydrated_from: LoadStrategicQueueResult["hydrated_from"] = items.length
+    ? "database"
+    : undefined
+
+  if (!items.length && options?.autoRecompute) {
+    await recomputeStrategicQueue(userId, subjectId, {
+      withLlmNarrative: false,
+      autoLlm: false,
+    })
+    items = await fetchPersistedQueueItems(userId, subjectId, prioritySource)
+    if (items.length) hydrated_from = "recompute"
+  }
+
+  if (!items.length) {
+    const breakdown = await computePriorityBreakdown(userId, subjectId)
+    const rows =
+      prioritySource === "brain"
+        ? breakdown.brain_performance
+        : breakdown.crossed
+    if (rows.length) {
+      items = breakdownRowsToQueueItems(
+        rows,
+        userId,
+        subjectId,
+        prioritySource
+      )
+      hydrated_from = "breakdown"
+    }
+  }
+
+  return { items, priority_source: prioritySource, hydrated_from }
+}
+
+/** Colunas opcionais exigem sql-study-cycle.sql aplicado no Supabase. */
+async function insertStrategicQueueRows(
+  toInsert: Record<string, unknown>[]
+): Promise<void> {
+  if (!toInsert.length) return
+
+  const { error } = await supabaseServer
+    .from("strategic_queue_items")
+    .insert(toInsert)
+
+  if (!error) return
+
+  const optionalColumns = new Set([
+    "topic_label",
+    "subject_priority",
+    "recent_boost",
+    "edital_weight",
+  ])
+  const fallback = toInsert.map((item) => {
+    const copy = { ...item } as Record<string, unknown>
+    for (const col of optionalColumns) {
+      delete copy[col]
+    }
+    return copy
+  })
+
+  const retry = await supabaseServer
+    .from("strategic_queue_items")
+    .insert(fallback)
+
+  if (retry.error) {
+    throw new Error(
+      `Falha ao salvar fila estratégica. Confira se sql-study-cycle.sql foi aplicado: ${retry.error.message}`
+    )
+  }
 }
 
 export async function recomputeStrategicQueue(
@@ -84,24 +215,7 @@ export async function recomputeStrategicQueue(
   }))
 
   if (toInsert.length) {
-    const { error } = await supabaseServer
-      .from("strategic_queue_items")
-      .insert(toInsert)
-    if (error) {
-      const fallback = toInsert.map((item) => {
-        const copy = { ...item } as Record<string, unknown>
-        delete copy.topic_label
-        delete copy.subject_priority
-        delete copy.recent_boost
-        delete copy.edital_weight
-        delete copy.priority_source
-        return copy
-      })
-      const retry = await supabaseServer
-        .from("strategic_queue_items")
-        .insert(fallback)
-      if (retry.error) throw new Error(retry.error.message)
-    }
+    await insertStrategicQueueRows(toInsert)
   }
 
   let llm_used = false

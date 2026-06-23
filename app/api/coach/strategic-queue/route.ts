@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server"
-import { recomputeStrategicQueue, recomputeAllSubjectsQueue } from "@/lib/ai/strategic-queue"
+import {
+  loadStrategicQueueForSubject,
+  recomputeStrategicQueue,
+  recomputeAllSubjectsQueue,
+} from "@/lib/ai/strategic-queue"
 import { supabaseServer } from "@/lib/supabase-server"
 import { getExecutorStudyPreferences } from "@/lib/ai/execution-subjects"
 import { resolvePrioritySource } from "@/lib/priority-source"
@@ -13,10 +17,26 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
+  if (subject_id) {
+    try {
+      const result = await loadStrategicQueueForSubject(user_id, subject_id, {
+        autoRecompute: true,
+      })
+      return NextResponse.json({
+        items: result.items,
+        priority_source: result.priority_source,
+        hydrated_from: result.hydrated_from,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro"
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+  }
+
   const prefs = await getExecutorStudyPreferences(user_id)
   const prioritySource = resolvePrioritySource(prefs.study_mode)
 
-  let query = supabaseServer
+  const { data, error } = await supabaseServer
     .from("strategic_queue_items")
     .select("*")
     .eq("user_id", user_id)
@@ -24,9 +44,6 @@ export async function GET(req: Request) {
     .order("priority_score", { ascending: false })
     .limit(50)
 
-  if (subject_id) query = query.eq("subject_id", subject_id)
-
-  const { data, error } = await query
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
@@ -68,6 +85,7 @@ export async function POST(req: Request) {
       subject_priority: result.subject_priority,
       llm_used: result.llm_used,
       narrative: result.narrative,
+      hydrated_from: "recompute",
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
