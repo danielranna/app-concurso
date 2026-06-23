@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import NotebookFolderSelect from "@/components/questions/NotebookFolderSelect"
+import { QuestoesPageHeader } from "@/components/questions/questoes-shell"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
 
 import { encodeTecTopicPair } from "@/lib/tec-facets"
 import type { TecSubjectTreeResponse } from "@/lib/tec-subject-tree-types"
@@ -144,11 +150,11 @@ function SubjectCollapsible({
   const [open, setOpen] = useState(defaultOpen)
   const boxClass =
     variant === "organized"
-      ? "border-violet-200 bg-violet-50/40"
-      : "border-slate-200 bg-slate-50/80"
+      ? "border-violet-200/80 bg-violet-50/40"
+      : "border-slate-200/80 bg-slate-50/50"
 
   return (
-    <div className={`rounded-lg border p-3 ${boxClass}`}>
+    <Card className={cn("p-3", boxClass)}>
       <div className="flex items-start gap-2">
         <button
           type="button"
@@ -181,7 +187,7 @@ function SubjectCollapsible({
         </div>
       </div>
       {open && <div className="mt-2 border-t border-slate-200/80 pt-2">{children}</div>}
-    </div>
+    </Card>
   )
 }
 
@@ -357,44 +363,47 @@ export default function BancoPage() {
   ]
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col p-4">
-      <Link href="/questoes" className="mb-2 inline-flex items-center gap-1 text-sm text-slate-600">
-        <ArrowLeft className="h-4 w-4" /> Voltar
-      </Link>
-      <h1 className="text-xl font-bold">Banco de questões</h1>
-      <p className="mt-1 text-xs text-slate-500">
-        Matéria e assunto TEC vêm juntos no PDF. Ao marcar um assunto, a matéria dele entra no filtro.
-      </p>
-      <div className="mt-4 flex min-h-0 flex-1 gap-4">
-        <nav className="w-44 shrink-0 space-y-1 border-r pr-2">
+    <div className="flex h-[calc(100vh-8rem)] flex-col space-y-4">
+      <QuestoesPageHeader
+        title="Banco de questões"
+        description="Matéria e assunto TEC vêm juntos no PDF. Ao marcar um assunto, a matéria dele entra no filtro."
+        className="space-y-2"
+      />
+      <div className="flex min-h-0 flex-1 gap-4">
+        <nav className="w-48 shrink-0 space-y-1">
           {CATEGORIES.map((c) => (
             <button
               key={c.key}
               type="button"
               onClick={() => setActiveCategory(c.key)}
-              className={`block w-full rounded px-3 py-2 text-left text-sm ${
-                activeCategory === c.key ? "bg-blue-50 font-medium text-blue-800" : ""
-              }`}
+              className={cn(
+                "block w-full rounded-xl px-3 py-2 text-left text-sm transition",
+                activeCategory === c.key
+                  ? "bg-teal-600 font-medium text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              )}
             >
               {c.label}
             </button>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto border-r pr-4">
-          <p className="mb-2 text-sm font-medium text-slate-600">{activeCategory}</p>
+        <Card className="min-w-0 flex-1 overflow-hidden">
+          <CardContent className="h-full overflow-y-auto p-4">
+          <p className="mb-3 text-sm font-medium text-slate-600">{activeCategory}</p>
 
           {activeCategory === "tec_topic" && facets?.tec_groups.length ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => userId && loadFacets(userId)}
                   disabled={facetsLoading || !userId}
-                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${facetsLoading ? "animate-spin" : ""}`} />
                   Atualizar assuntos
-                </button>
+                </Button>
               </div>
               {(filters.tec_subject?.length ?? 0) > 0 && (
                 <p className="text-xs text-slate-500">
@@ -542,25 +551,34 @@ export default function BancoPage() {
               ))}
             </ul>
           )}
-        </div>
-        <div className="flex w-72 shrink-0 flex-col">
-          <p className="text-sm font-medium">Filtros ativos: {activeFilters.length}</p>
-          <ul className="mt-2 flex-1 overflow-y-auto text-xs text-slate-600">
+          </CardContent>
+        </Card>
+        <Card className="flex w-72 shrink-0 flex-col">
+          <CardContent className="flex flex-1 flex-col p-4">
+          <p className="text-sm font-medium text-slate-700">
+            Filtros ativos{" "}
+            <Badge variant="secondary" className="ml-1">
+              {activeFilters.length}
+            </Badge>
+          </p>
+          <ul className="mt-3 flex-1 space-y-1 overflow-y-auto">
             {activeFilters.map(({ k, v }) => (
-              <li key={`${k}-${v}`} className="mb-1 rounded bg-slate-100 px-2 py-1">
-                {k === "tec_subject" ? "matéria" : k === "tec_topic" ? "assunto" : k}: {v}
+              <li key={`${k}-${v}`}>
+                <Badge variant="outline" className="w-full justify-start font-normal">
+                  {k === "tec_subject" ? "matéria" : k === "tec_topic" ? "assunto" : k}: {v}
+                </Badge>
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-lg font-semibold text-blue-700">
-            {total.toLocaleString("pt-BR")} questões encontradas
+          <p className="mt-4 text-2xl font-semibold tracking-tight text-teal-700">
+            {total.toLocaleString("pt-BR")}
           </p>
-          <div className="mt-4 space-y-2 border-t pt-4">
-            <input
+          <p className="text-xs text-slate-500">questões encontradas</p>
+          <div className="mt-4 space-y-2 border-t border-slate-200/80 pt-4">
+            <Input
               value={cadernoName}
               onChange={(e) => setCadernoName(e.target.value)}
               placeholder="Nome do novo caderno"
-              className="w-full rounded border px-2 py-1 text-sm"
             />
             <select
               value={subjectId}
@@ -568,7 +586,7 @@ export default function BancoPage() {
                 setSubjectId(e.target.value)
                 setFolderId("")
               }}
-              className="w-full rounded border px-2 py-1 text-sm"
+              className="flex h-10 w-full rounded-xl border border-slate-200/80 bg-white px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/30"
             >
               <option value="">Sua matéria (organização)</option>
               {subjects.map((s) => (
@@ -585,19 +603,20 @@ export default function BancoPage() {
                 onChange={setFolderId}
                 label="Subpasta (opcional)"
                 className="block text-sm"
-                selectClassName="w-full rounded border px-2 py-1 text-sm"
+                selectClassName="flex h-10 w-full rounded-xl border border-slate-200/80 bg-white px-3 py-2 text-sm shadow-sm"
               />
             )}
-            <button
+            <Button
               type="button"
               onClick={createFromFilter}
               disabled={!cadernoName || !subjectId || total === 0}
-              className="w-full rounded bg-slate-900 py-2 text-sm text-white disabled:opacity-50"
+              className="w-full"
             >
               Criar caderno com filtro
-            </button>
+            </Button>
           </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

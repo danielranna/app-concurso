@@ -4,6 +4,10 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { ExternalLink, Loader2 } from "lucide-react"
 import type { DailyWrongItem } from "@/lib/daily-wrong-attempts-types"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { QuestoesEmptyState } from "@/components/questions/questoes-shell"
 
 type Props = {
   userId: string
@@ -86,46 +90,43 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
   }
 
   if (error) {
-    return <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</p>
+    return (
+      <Card className="border-red-200 bg-red-50/60">
+        <CardContent className="p-4 text-sm text-red-800">{error}</CardContent>
+      </Card>
+    )
   }
 
   if (!items.length) {
     return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
-        <p className="font-medium text-green-800">Nenhum erro neste dia — ótimo!</p>
-        <p className="mt-1 text-sm text-green-700">
-          Quando você errar questões, elas aparecem aqui com gabarito e link para o TEC.
-        </p>
-      </div>
+      <QuestoesEmptyState
+        title="Nenhum erro neste dia — ótimo!"
+        description="Quando você errar questões, elas aparecem aqui com gabarito e link para o TEC."
+      />
     )
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-600">
-          <strong className="text-slate-900">{items.length}</strong>{" "}
-          {items.length === 1 ? "questão errada" : "questões erradas"}
-        </p>
-        <button
-          type="button"
-          onClick={openAllInTec}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-        >
+        <Badge variant="secondary">
+          {items.length} {items.length === 1 ? "questão errada" : "questões erradas"}
+        </Badge>
+        <Button variant="secondary" size="sm" onClick={openAllInTec}>
           Abrir todos no TEC
-        </button>
+        </Button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <ul className="divide-y divide-slate-100">
+      <Card>
+        <CardContent className="divide-y divide-slate-100 p-0">
           {items.map((item) => {
             const ctx = contextLabel(item)
             return (
-              <li
+              <div
                 key={item.attempt_id}
-                className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="min-w-0 flex-1 space-y-1">
+                <div className="min-w-0 flex-1 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs tabular-nums text-slate-400">
                       {formatTime(item.created_at)}
@@ -134,30 +135,31 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
                       href={item.tec_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-medium text-blue-700 hover:underline"
+                      className="inline-flex items-center gap-1 text-sm font-medium text-teal-700 hover:underline"
                     >
                       TEC #{item.tec_id}
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   </div>
-                  {ctx && <p className="text-sm text-slate-600">{ctx}</p>}
+                  {ctx && <p className="text-sm text-slate-500">{ctx}</p>}
                   <p className="text-sm text-slate-800">
-                    Marcou <strong>{item.selected_answer}</strong>
+                    Marcou <strong className="text-red-700">{item.selected_answer}</strong>
                     {" → "}
-                    Gabarito <strong>{item.correct_answer}</strong>
+                    Gabarito <strong className="text-emerald-700">{item.correct_answer}</strong>
                   </p>
                 </div>
-                <Link
-                  href={`/questoes/questao/${item.question_id}?return=${encodeURIComponent("/questoes/revisao")}`}
-                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                >
-                  Ver no app
-                </Link>
-              </li>
+                <Button variant="secondary" size="sm" asChild>
+                  <Link
+                    href={`/questoes/questao/${item.question_id}?return=${encodeURIComponent("/questoes/revisao")}`}
+                  >
+                    Ver no app
+                  </Link>
+                </Button>
+              </div>
             )
           })}
-        </ul>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

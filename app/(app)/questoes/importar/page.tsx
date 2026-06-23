@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, Suspense } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Loader2, Upload } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Loader2, Upload } from "lucide-react"
 import ImportQuestionReviewCard from "@/components/questions/ImportQuestionReviewCard"
 import PdfTextCorrectionsPanel from "@/components/questions/PdfTextCorrectionsPanel"
 import ImportSharedContentStep, {
@@ -14,6 +14,9 @@ import NotebookFolderSelect, {
   useNotebookFolders,
 } from "@/components/questions/NotebookFolderSelect"
 import BulkImportPanel from "@/components/questions/BulkImportPanel"
+import { QuestoesPageHeader } from "@/components/questions/questoes-shell"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import type { ParsedTecQuestion } from "@/lib/question-types"
 import type {
   ImportNotebookParseResult,
@@ -327,44 +330,45 @@ function ImportarContent() {
 
   return (
     <div
-      className={`mx-auto p-6 ${
+      className={`mx-auto space-y-6 ${
         importMode === "bulk" ? "max-w-3xl" : step === 3 ? "max-w-6xl" : "max-w-3xl"
       }`}
     >
-      <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
-        <ArrowLeft className="h-4 w-4" /> Voltar
-      </Link>
-      <h1 className="text-2xl font-bold">Importar PDF do TEC</h1>
-      <p className="mt-2 text-sm text-slate-600">
-        {importMode === "bulk"
-          ? "Envie vários PDFs de uma vez — processados em fila, um por vez."
-          : "Analise o PDF, revise as questões e, se quiser, vincule textos compartilhados antes de salvar."}
-      </p>
+      <QuestoesPageHeader
+        title="Importar PDF do TEC"
+        description={
+          importMode === "bulk"
+            ? "Envie vários PDFs de uma vez — processados em fila, um por vez."
+            : "Analise o PDF, revise as questões e, se quiser, vincule textos compartilhados antes de salvar."
+        }
+      />
 
-      <div className="mt-4 flex gap-2">
+      <nav className="flex w-full gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm shadow-slate-200/40">
         <button
           type="button"
           onClick={() => setImportMode("single")}
-          className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+          className={cn(
+            "flex-1 rounded-lg px-4 py-2 text-sm font-medium transition",
             importMode === "single"
-              ? "border-slate-900 bg-slate-900 text-white"
-              : "border-slate-200 bg-white text-slate-600"
-          }`}
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-50"
+          )}
         >
           Um PDF
         </button>
         <button
           type="button"
           onClick={() => setImportMode("bulk")}
-          className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+          className={cn(
+            "flex-1 rounded-lg px-4 py-2 text-sm font-medium transition",
             importMode === "bulk"
-              ? "border-slate-900 bg-slate-900 text-white"
-              : "border-slate-200 bg-white text-slate-600"
-          }`}
+              ? "bg-teal-600 text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-50"
+          )}
         >
           Vários PDFs
         </button>
-      </div>
+      </nav>
 
       {importMode === "bulk" && userId && (
         <BulkImportPanel
@@ -388,7 +392,7 @@ function ImportarContent() {
               key={n}
               className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-medium ${
                 step === n
-                  ? "border-slate-900 bg-slate-900 text-white"
+                  ? "border-teal-600 bg-teal-600 text-white shadow-sm"
                   : done
                     ? skipped
                       ? "border-slate-200 bg-slate-100 text-slate-400 line-through"
@@ -455,19 +459,14 @@ function ImportarContent() {
               )}
             </div>
           )}
-          <button
-            type="button"
-            onClick={handleParse}
-            disabled={!file || loading}
-            className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
+          <Button type="button" onClick={handleParse} disabled={!file || loading}>
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Upload className="h-4 w-4" />
             )}
             {loading ? "Analisando PDF…" : "Analisar PDF"}
-          </button>
+          </Button>
           <PdfTextCorrectionsPanel />
 
           {parseResult && (
@@ -782,7 +781,7 @@ function ImportarContent() {
               >
                 {linkSharedContent === true ? "Voltar aos conteúdos" : "Voltar à revisão"}
               </button>
-              <button
+              <Button
                 type="button"
                 onClick={handleCommit}
                 disabled={
@@ -790,11 +789,10 @@ function ImportarContent() {
                   missingGabarito.length > 0 ||
                   (linkSharedContent === true && questionsToImport.length === 0)
                 }
-                className="inline-flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Adicionar ao banco
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">

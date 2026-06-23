@@ -13,6 +13,10 @@ import NotebookBulkToolbar from "@/components/questions/NotebookBulkToolbar"
 import MoveNotebookModal from "@/components/questions/MoveNotebookModal"
 import { useNotebookSelection } from "@/hooks/useNotebookSelection"
 import { bulkDeleteNotebooks } from "@/lib/notebook-bulk-actions"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { QuestoesSection } from "@/components/questions/questoes-shell"
 
 type FolderRow = {
   id: string
@@ -139,21 +143,18 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
   }
 
   return (
-    <div className={embedded ? "" : "p-6"}>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Link
-          href={`/questoes/importar?subject_id=${subjectId}`}
-          className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
-        >
-          <Plus className="h-4 w-4" /> Importar PDF
-        </Link>
-        {!embedded && (
-          <Link
-            href="/questoes"
-            className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm"
-          >
-            Voltar às questões
+    <div className={embedded ? "space-y-6" : "space-y-6"}>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild>
+          <Link href={`/questoes/importar?subject_id=${subjectId}`}>
+            <Plus className="h-4 w-4" />
+            Importar PDF
           </Link>
+        </Button>
+        {!embedded && (
+          <Button variant="secondary" asChild>
+            <Link href="/questoes">Voltar às questões</Link>
+          </Button>
         )}
       </div>
 
@@ -173,22 +174,17 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
         busy={busy}
       />
 
-      <section className="mt-6">
-        <h2 className="mb-3 font-semibold text-slate-700">Subpastas</h2>
-        <div className="mb-3 flex gap-2">
-          <input
+      <QuestoesSection title="Subpastas">
+        <div className="mb-4 flex gap-2">
+          <Input
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
             placeholder="Nova subpasta"
-            className="rounded border px-3 py-2 text-sm"
+            className="max-w-xs"
           />
-          <button
-            type="button"
-            onClick={createFolder}
-            className="rounded bg-slate-100 px-3 py-2 text-sm"
-          >
+          <Button variant="secondary" onClick={createFolder}>
             Criar
-          </button>
+          </Button>
         </div>
         {folders.map((f) => {
           const expanded = expandedFolders[f.id] ?? false
@@ -201,13 +197,14 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
 
           return (
             <div key={f.id} className="mb-2">
-              <div className="flex items-center justify-between rounded-lg border bg-white px-4 py-3">
+              <Card>
+              <CardContent className="flex items-center justify-between p-4">
                 <button
                   type="button"
                   onClick={() =>
                     setExpandedFolders((prev) => ({ ...prev, [f.id]: !prev[f.id] }))
                   }
-                  className="flex flex-1 items-center gap-2 text-left hover:text-blue-700"
+                  className="flex flex-1 items-center gap-2 text-left hover:text-teal-700"
                 >
                   <ChevronDown
                     className={`h-4 w-4 shrink-0 transition-transform ${
@@ -215,19 +212,21 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
                     }`}
                   />
                   <Folder className="h-5 w-5 shrink-0 text-slate-400" />
-                  <span className="font-medium">{f.name}</span>
+                  <span className="font-medium text-slate-900">{f.name}</span>
                   <span className="text-sm text-slate-500">
                     {folderStatsLabel(notebookCount, questionTotal)}
                   </span>
                 </button>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
                   onClick={() => deleteFolder(f.id)}
-                  className="ml-2 text-red-600"
                 >
                   <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+                </Button>
+              </CardContent>
+              </Card>
               {expanded && userId && (
                 <div className="mt-2 space-y-0">
                   {folderNotebooks.map((nb) => (
@@ -249,10 +248,9 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
             </div>
           )
         })}
-      </section>
+      </QuestoesSection>
 
-      <section className="mt-8">
-        <h2 className="mb-3 font-semibold text-slate-700">Cadernos na raiz</h2>
+      <QuestoesSection title="Cadernos na raiz">
         {userId &&
           rootNotebooks.map((nb) => (
             <MateriaNotebookRow
@@ -270,7 +268,7 @@ export default function MateriaQuestoesContent({ subjectId, embedded = false }: 
         {rootNotebooks.length === 0 && (
           <p className="text-sm text-slate-500">Nenhum caderno na raiz.</p>
         )}
-      </section>
+      </QuestoesSection>
 
       {userId && moveTarget && (
         <MoveNotebookModal

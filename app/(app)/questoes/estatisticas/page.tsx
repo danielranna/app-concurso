@@ -16,6 +16,8 @@ import {
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import PerformanceStackBar from "@/components/questions/PerformanceStackBar"
+import { Card, CardContent } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 import type {
   QuestionStatisticsResult,
   StatsPeriod,
@@ -110,7 +112,7 @@ function SubjectBlock({
             ) : (
               <span className="inline-block w-4" />
             )}
-            <span className="font-medium text-blue-700">{row.name}</span>
+            <span className="font-medium text-slate-900">{row.name}</span>
           </button>
         </td>
         <td className="py-3 text-center text-sm font-medium tabular-nums text-slate-700">
@@ -257,22 +259,22 @@ export default function QuestoesEstatisticasPage() {
   const allSelected = selectedSubjects.size === allSubjects.length
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Estatísticas</h1>
-        <p className="mt-1 text-sm text-slate-500">
+    <div className="space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Estatísticas</h1>
+        <p className="max-w-2xl text-sm text-slate-500">
           Cada resposta em um caderno conta separadamente. No estudo combinado da semana, a
           mesma questão aparece uma vez na fila (mesmo em vários cadernos).
         </p>
-      </div>
+      </header>
 
-      <div className="mb-6 flex flex-wrap items-end gap-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-slate-600">Período</span>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate-500">Período</span>
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value as StatsPeriod)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="flex h-10 rounded-xl border border-slate-200/80 bg-white px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/30"
           >
             {PERIOD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -284,8 +286,9 @@ export default function QuestoesEstatisticasPage() {
       </div>
 
       {allSubjects.length > 0 && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <Card>
+          <CardContent className="p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium text-slate-700">Filtrar matérias</p>
             <button
               type="button"
@@ -294,7 +297,7 @@ export default function QuestoesEstatisticasPage() {
                   allSelected ? new Set() : new Set(allSubjects.map((s) => s.id))
                 )
               }
-              className="text-xs font-medium text-blue-600 hover:underline"
+              className="text-xs font-medium text-teal-700 hover:underline"
             >
               {allSelected ? "Desmarcar todas" : "Marcar todas"}
             </button>
@@ -315,7 +318,8 @@ export default function QuestoesEstatisticasPage() {
               </label>
             ))}
           </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {loading ? (

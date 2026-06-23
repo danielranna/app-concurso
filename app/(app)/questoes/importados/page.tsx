@@ -4,12 +4,21 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, FileStack, Play, Trash2 } from "lucide-react"
+import { FileStack, Play, Trash2 } from "lucide-react"
 import OrganizeContentModal from "@/components/shared-assets/OrganizeContentModal"
 import MoveNotebookModal from "@/components/questions/MoveNotebookModal"
 import NotebookBulkToolbar from "@/components/questions/NotebookBulkToolbar"
 import { useNotebookSelection } from "@/hooks/useNotebookSelection"
 import { bulkDeleteNotebooks } from "@/lib/notebook-bulk-actions"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import {
+  QuestoesEmptyState,
+  QuestoesPageHeader,
+} from "@/components/questions/questoes-shell"
+import { cn } from "@/lib/utils"
 
 type Notebook = {
   id: string
@@ -80,14 +89,11 @@ export default function ImportadosPage() {
   }
 
   return (
-    <div className="p-6">
-      <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
-        <ArrowLeft className="h-4 w-4" /> Voltar
-      </Link>
-      <h1 className="text-2xl font-bold">Cadernos importados</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        Cadernos ainda sem vínculo com sua matéria. Selecione vários para mover ou excluir de uma vez.
-      </p>
+    <div className="space-y-6">
+      <QuestoesPageHeader
+        title="Cadernos importados"
+        description="Cadernos ainda sem vínculo com sua matéria. Selecione vários para mover ou excluir de uma vez."
+      />
 
       <NotebookBulkToolbar
         selectedCount={selection.selectedCount}
@@ -105,72 +111,84 @@ export default function ImportadosPage() {
         busy={busy}
       />
 
-      <div className="mt-6 space-y-3">
+      <div className="space-y-2">
         {notebooks.map((nb) => {
           const checked = selection.isSelected(nb.id)
+          const pct =
+            nb.question_count > 0
+              ? Math.round((nb.answered_count / nb.question_count) * 100)
+              : 0
           return (
-            <div
+            <Card
               key={nb.id}
-              className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 ${
-                checked ? "border-slate-400 ring-1 ring-slate-300" : ""
-              }`}
+              className={cn(checked && "border-teal-300 ring-1 ring-teal-200")}
             >
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
               <div className="flex min-w-0 flex-1 items-start gap-3">
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => selection.toggle(nb.id)}
-                  className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                  className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-teal-600 focus:ring-teal-500/30"
                   aria-label={`Selecionar ${nb.name}`}
                 />
-                <div className="min-w-0">
-                  <p className="font-semibold text-blue-700">{nb.name}</p>
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium text-slate-900">{nb.name}</p>
+                    {nb.completed_at && <Badge variant="success">Concluído</Badge>}
+                  </div>
                   <p className="text-sm text-slate-500">
                     {nb.answered_count}/{nb.question_count} respondidas
-                    {nb.completed_at && " · Concluído"}
                   </p>
+                  {nb.question_count > 0 && <Progress value={pct} className="h-1 max-w-xs" />}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setMoveTarget({ ids: [nb.id], label: nb.name })}
-                  className="rounded border px-2 py-1.5 text-sm hover:bg-slate-50"
                 >
                   Mover para outra pasta…
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-violet-200 text-violet-800 hover:bg-violet-50"
                   onClick={() => setOrganizeNotebook(nb)}
-                  className="inline-flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm text-violet-800 hover:bg-violet-100"
                 >
-                  <FileStack className="h-4 w-4" /> Organizar conteúdos
-                </button>
-                <Link
-                  href={`/questoes/cadernos/${nb.id}`}
-                  className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1.5 text-sm text-white"
-                >
-                  <Play className="h-4 w-4" /> Resolver
-                </Link>
-                <button
-                  type="button"
+                  <FileStack className="h-4 w-4" />
+                  Organizar conteúdos
+                </Button>
+                <Button size="sm" asChild>
+                  <Link href={`/questoes/cadernos/${nb.id}`}>
+                    <Play className="h-4 w-4" />
+                    Resolver
+                  </Link>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
                   onClick={() => deleteNotebook(nb.id)}
-                  className="inline-flex items-center gap-1 rounded border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
                   title="Excluir caderno"
                 >
-                  <Trash2 className="h-4 w-4" /> Excluir
-                </button>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
-            </div>
+              </CardContent>
+            </Card>
           )
         })}
         {notebooks.length === 0 && (
-          <p className="text-slate-500">
-            Nenhum caderno pendente.{" "}
-            <Link href="/questoes/importar" className="text-blue-600 underline">
-              Importar PDF
-            </Link>
-          </p>
+          <QuestoesEmptyState
+            title="Nenhum caderno pendente"
+            action={
+              <Button asChild>
+                <Link href="/questoes/importar">Importar PDF</Link>
+              </Button>
+            }
+          />
         )}
       </div>
 

@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import TecOrganizePanel from "@/components/questions/TecOrganizePanel"
+import { QuestoesPageHeader } from "@/components/questions/questoes-shell"
+import { cn } from "@/lib/utils"
 
 type TecSubjectOverview = {
   tec_subject: string
@@ -222,78 +224,63 @@ export default function MapeamentoPage() {
 
   const panelItem = tab === "subjects" ? selectedSubject : tab === "topics" ? selectedTopic : null
 
-  return (
-    <div className="p-6">
-      <Link
-        href="/questoes"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600"
-      >
-        <ArrowLeft className="h-4 w-4" /> Voltar
-      </Link>
-      <h1 className="text-2xl font-bold">Associar matérias e assuntos</h1>
-      <p className="mt-1 max-w-2xl text-sm text-slate-600">
-        Cada <strong>matéria TEC</strong> traz os <strong>assuntos</strong> dela no PDF. Vincule a
-        matéria à sua uma vez — todas as questões dessa matéria passam para ela. Depois vincule
-        cada <strong>assunto</strong> ao seu tema (ou crie um novo). Se já existir um tema com o
-        mesmo nome na sua matéria, o app associa automaticamente ao resolver/importar.
-      </p>
+  const tabs: { id: Tab; label: string; onClick: () => void }[] = [
+    {
+      id: "subjects",
+      label: `Matérias TEC (${pendingSubjectCount} pendentes)`,
+      onClick: () => {
+        setTab("subjects")
+        setSelectedTopic(null)
+      },
+    },
+    {
+      id: "topics",
+      label: `Assuntos TEC (${unmappedTopics.length})`,
+      onClick: () => {
+        setTab("topics")
+        setSelectedSubject(null)
+      },
+    },
+    {
+      id: "organize",
+      label: "Organizar",
+      onClick: () => setTab("organize"),
+    },
+    {
+      id: "mapped",
+      label: `Já mapeados (${mappedRows.length})`,
+      onClick: () => {
+        setTab("mapped")
+        setSelectedSubject(null)
+        setSelectedTopic(null)
+      },
+    },
+  ]
 
-      <div className="mt-4 flex gap-2 border-b">
-        <button
-          type="button"
-          onClick={() => {
-            setTab("subjects")
-            setSelectedTopic(null)
-          }}
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${
-            tab === "subjects"
-              ? "border-slate-900 text-slate-900"
-              : "border-transparent text-slate-500"
-          }`}
-        >
-          Matérias TEC ({pendingSubjectCount} pendentes)
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setTab("topics")
-            setSelectedSubject(null)
-          }}
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${
-            tab === "topics"
-              ? "border-slate-900 text-slate-900"
-              : "border-transparent text-slate-500"
-          }`}
-        >
-          Assuntos TEC ({unmappedTopics.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("organize")}
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${
-            tab === "organize"
-              ? "border-slate-900 text-slate-900"
-              : "border-transparent text-slate-500"
-          }`}
-        >
-          Organizar
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setTab("mapped")
-            setSelectedSubject(null)
-            setSelectedTopic(null)
-          }}
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${
-            tab === "mapped"
-              ? "border-slate-900 text-slate-900"
-              : "border-transparent text-slate-500"
-          }`}
-        >
-          Já mapeados ({mappedRows.length})
-        </button>
-      </div>
+  return (
+    <div className="space-y-6">
+      <QuestoesPageHeader
+        title="Associar matérias e assuntos"
+        description="Cada matéria TEC traz os assuntos dela no PDF. Vincule a matéria à sua uma vez — todas as questões dessa matéria passam para ela. Depois vincule cada assunto ao seu tema (ou crie um novo)."
+      />
+
+      <nav className="flex w-full gap-1 overflow-x-auto rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm shadow-slate-200/40">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={t.onClick}
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition",
+              tab === t.id
+                ? "bg-teal-600 text-white shadow-sm"
+                : "text-slate-600 hover:bg-slate-50"
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
 
       {progress.length > 0 && tab !== "organize" && (
         <div className="mt-4 flex flex-wrap gap-2">

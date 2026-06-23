@@ -1,13 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import QuestionSolver from "@/components/questions/QuestionSolver"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import { clearDraftScope, draftScopeKey } from "@/lib/question-draft-cache"
+import { Button } from "@/components/ui/button"
+import { QuestoesPageHeader } from "@/components/questions/questoes-shell"
 
 export default function ResolverQuestaoAvulsaPage() {
   const params = useParams()
@@ -100,23 +100,17 @@ export default function ResolverQuestaoAvulsaPage() {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Link
-          href={returnHref}
-          className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Link>
-        <button
-          type="button"
-          onClick={handleRetry}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Resolver de novo
-        </button>
-      </div>
+    <div className="space-y-6">
+      <QuestoesPageHeader
+        title="Questão avulsa"
+        backHref={returnHref}
+        backLabel="Voltar"
+        actions={
+          <Button variant="secondary" size="sm" onClick={handleRetry}>
+            Resolver de novo
+          </Button>
+        }
+      />
       <QuestionSolver
         userId={userId}
         mode="solo"

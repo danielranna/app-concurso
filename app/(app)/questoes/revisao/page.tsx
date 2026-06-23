@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { todayDateString } from "@/lib/daily-wrong-attempts-utils"
 import DailyWrongReviewList from "@/components/questions/DailyWrongReviewList"
+import { Input } from "@/components/ui/input"
+import { QuestoesPageHeader } from "@/components/questions/questoes-shell"
 
 export default function QuestoesRevisaoPage() {
   const router = useRouter()
@@ -24,37 +24,30 @@ export default function QuestoesRevisaoPage() {
   }, [router])
 
   if (!userId) {
-    return <p className="p-8 text-slate-500">Carregando…</p>
+    return (
+      <div className="flex justify-center py-16">
+        <p className="text-sm text-slate-500">Carregando…</p>
+      </div>
+    )
   }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <header className="space-y-4">
-        <Link
-          href="/questoes"
-          className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar às questões
-        </Link>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Correções do dia</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Questões que você errou — gabarito e link direto para o TEC.
-            </p>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-500">Data</span>
-            <input
+      <QuestoesPageHeader
+        title="Correções do dia"
+        description="Questões que você errou — gabarito e link direto para o TEC."
+        actions={
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-xs font-medium text-slate-500">Data</span>
+            <Input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-slate-800"
+              className="w-auto"
             />
           </label>
-        </div>
-      </header>
+        }
+      />
 
       <DailyWrongReviewList userId={userId} date={date} />
     </div>
