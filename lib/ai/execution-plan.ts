@@ -29,6 +29,12 @@ import {
   type QueueRow,
 } from "./execution-questions"
 import {
+  buildQueueBySubject,
+  ensureQueuesForExecutorSubjects,
+  loadExecutorQueueForSubjects,
+} from "./executor-queue"
+import { resolvePrioritySource } from "../priority-source"
+import {
   buildComprehensionSummaryBlocks,
   enqueueExecutorErrorDrafts,
   enqueueExecutorFlashcardDrafts,
@@ -166,26 +172,25 @@ export async function generateDailyStudyPlan(
       (w) => w.weekday === todayWd
     )
     if (wdLimit?.daily_limits) {
-      questionsBudget = Number(wdLimit.daily_limits.questions ?? questionsBudget)
-      flashBudget = Number(wdLimit.daily_limits.flashcards ?? flashBudget)
-      summariesBudget = Number(wdLimit.daily_limits.summaries ?? summariesBudget)
+      const cycleQ = Number(wdLimit.daily_limits.questions)
+      const cycleF = Number(wdLimit.daily_limits.flashcards)
+      const cycleS = Number(wdLimit.daily_limits.summaries)
+      if (Number.isFinite(cycleQ) && cycleQ > 0) {
+        questionsBudget = Math.min(limits.questions, cycleQ)
+      }
+      if (Number.isFinite(cycleF) && cycleF > 0) {
+        flashBudget = Math.min(limits.flashcards, cycleF)
+      }
+      if (Number.isFinite(cycleS) && cycleS > 0) {
+        summariesBudget = Math.min(limits.summaries, cycleS)
+      }
     }
   }
 
   const blocks: DailyStudyBlock[] = []
 
-  const queue = ctx.queue as QueueRow[]
-  const queueBySubject = new Map<string, QueueRow[]>()
-  for (const item of queue) {
-    const list = queueBySubject.get(item.subject_id) ?? []
-    list.push(item)
-    queueBySubject.set(item.subject_id, list)
-  }
-  for (const [, list] of queueBySubject) {
-    list.sort((a, b) => Number(b.priority_score) - Number(a.priority_score))
-  }
-
-  const pool = await resolveExecutorSubjectPool(userId, queue)
+  const prioritySource = resolvePrioritySource(mode)
+  const pool = await resolveExecutorSubjectPool(userId, ctx.queue as QueueRow[])
   const { subjectNames, orderedForCycle: poolOrdered } = pool
 
   // Pré-edital: executor usa todas as matérias elegíveis (fila cérebro), não só o dia do ciclo
@@ -197,6 +202,23 @@ export async function generateDailyStudyPlan(
           ? cycleContext.day.subject_ids.filter((id) => pool.allowlist.includes(id))
           : poolOrdered
         : poolOrdered
+
+  let queue = await loadExecutorQueueForSubjects(
+    userId,
+    orderedForExecutor,
+    prioritySource
+  )
+  let queueBySubject = buildQueueBySubject(queue)
+
+  const ensured = await ensureQueuesForExecutorSubjects(
+    userId,
+    orderedForExecutor,
+    prioritySource,
+    queueBySubject,
+    { onProgress: emit, subjectNames }
+  )
+  queue = ensured.queue
+  queueBySubject = ensured.queueBySubject
 
   const subjectLabels = orderedForExecutor
     .map((id) => subjectNames.get(id))
@@ -213,8 +235,12 @@ export async function generateDailyStudyPlan(
 
   emit({
     phase: "queue_loaded",
-    message: `Fila ${mode === "pre_edital" ? "cérebro (pré-edital)" : "cruzada"}: ${queue.length} tópico(s) prioritário(s)`,
-    detail: { queue_size: queue.length, study_mode: mode },
+    message: `Limite do dia: ${questionsBudget} questão(ões) · Fila ${mode === "pre_edital" ? "cérebro" : "cruzada"}: ${queue.length} tópico(s)`,
+    detail: {
+      queue_size: queue.length,
+      study_mode: mode,
+      questions_budget: questionsBudget,
+    },
   })
 
   const manualCycleBlocks = cycleBlockCtx?.blocks ?? []
@@ -238,6 +264,7 @@ export async function generateDailyStudyPlan(
         perSubjectRound: perRound,
         distributionMode: execPrefs.question_distribution_mode,
         onProgress: emit,
+        prioritySource,
       })
     : await buildTopNQuestionSet({
         userId,
@@ -246,9 +273,10 @@ export async function generateDailyStudyPlan(
         budget: questionsBudget,
         allowlist: orderedForExecutor.filter((id) => pool.allowlist.includes(id)),
         onProgress: emit,
+        prioritySource,
       })
 
-  const allQuestionIds = questionResult.questionIds
+  const allQuestionIds = questionResult.questionIds.slice(0, questionsBudget)
   let combinedNotebookId: string | null = null
 
   const primarySubjectId =

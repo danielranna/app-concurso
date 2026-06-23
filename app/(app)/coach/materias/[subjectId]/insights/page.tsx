@@ -18,6 +18,7 @@ import StrategicQueueList, {
   type QueueItem,
 } from "@/components/coach/StrategicQueueList"
 import type { LearningSignal, SubjectBrainState } from "@/lib/coach-types"
+import { PRIORITY_SOURCE_LABELS } from "@/lib/priority-source"
 import {
   BRAIN_STATUS_LABELS,
   ERROR_TAXONOMY_LABELS,
@@ -70,6 +71,8 @@ export default function CoachInsightsPage() {
   const [explainMode, setExplainMode] = useState<"global" | "on" | "off">("global")
   const [savingExplain, setSavingExplain] = useState(false)
   const [brainTableExpanded, setBrainTableExpanded] = useState(false)
+  const [studyMode, setStudyMode] = useState<string>("pre_edital")
+  const [queuePrioritySource, setQueuePrioritySource] = useState<string>("brain")
 
   const brainByTopic: Record<string, BrainTopicHint> | undefined = brain
     ? Object.fromEntries(
@@ -117,8 +120,9 @@ export default function CoachInsightsPage() {
       fetch(
         `/api/coach/preferences/subject?user_id=${uid}&subject_id=${subjectId}`
       ).then((r) => r.json()),
+      fetch(`/api/coach/preferences?user_id=${uid}`).then((r) => r.json()),
     ])
-      .then(([subs, sig, reps, brainRes, queueRes, explainRes]) => {
+      .then(([subs, sig, reps, brainRes, queueRes, explainRes, prefsRes]) => {
         const sub = (subs ?? []).find((s: { id: string }) => s.id === subjectId)
         setSubjectName(sub?.name ?? "Matéria")
         setSignals(sig.signals ?? [])
@@ -127,6 +131,8 @@ export default function CoachInsightsPage() {
         setBrain(brainRes.state ?? null)
         setBrainSummary(brainRes.summary_md ?? null)
         setBrainLastReportId(brainRes.last_report_id ?? null)
+        setStudyMode(prefsRes?.study?.study_mode ?? "pre_edital")
+        setQueuePrioritySource(queueRes.priority_source ?? "brain")
         setQueueItems(
           (queueRes.items ?? []).map(
             (i: {
@@ -369,10 +375,17 @@ export default function CoachInsightsPage() {
           </button>
         </div>
         <p className="mb-2 text-xs text-slate-600">
-          Top {Math.min(5, queueItems.length)} do ranking <strong>cruzado</strong>{" "}
-          (edital × incidência × seu desempenho). Tópicos de alta incidência sem
-          nenhuma questão feita não entram aqui — aparecem na página de prioridades
-          em “Ainda não estudado”.
+          Top {Math.min(5, queueItems.length)} da fila{" "}
+          <strong>
+            {PRIORITY_SOURCE_LABELS[
+              (queuePrioritySource === "brain" ? "brain" : "crossed") as
+                | "brain"
+                | "crossed"
+            ]?.label ?? "estratégica"}
+          </strong>
+          {studyMode === "pre_edital"
+            ? " — prioriza tópicos onde você está mais fraco (com questões resolvidas)."
+            : " (edital × incidência × seu desempenho). Tópicos de alta incidência sem nenhuma questão feita não entram aqui — aparecem na página de prioridades em “Ainda não estudado”."}
         </p>
         <Link
           href={`/coach/materias/${subjectId}/prioridades`}
@@ -388,7 +401,7 @@ export default function CoachInsightsPage() {
         />
       </section>
 
-      {brain && Object.keys(brain.topic_map ?? {}).length > 0 && (
+      {brain && Object.keys(brain.topic_map ?? {}).length > 0 ? (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -545,6 +558,52 @@ export default function CoachInsightsPage() {
                   {brainTopicRows.length - BRAIN_TABLE_TOP === 1 ? "" : "s"} no cérebro
                 </>
               )}
+            </button>
+          )}
+        </section>
+      ) : (
+        <section className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/20 p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-800">
+            Cérebro da matéria
+          </h3>
+          <p className="mt-2 text-sm text-slate-700">
+            {topicStats.length > 0
+              ? "Você já tem desempenho por tópico (tabela abaixo), mas o cérebro ainda não foi montado a partir de relatórios de caderno. Conclua um caderno desta matéria ou clique em Atualizar cérebro."
+              : "Resolva questões mapeadas e conclua um caderno para o cérebro registrar fraquezas e equívocos por tópico."}
+          </p>
+          {userId && (
+            <button
+              type="button"
+              disabled={recomputingBrain}
+              onClick={async () => {
+                setRecomputingBrain(true)
+                try {
+                  const res = await fetch("/api/coach/brain/recompute", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      user_id: userId,
+                      subject_id: subjectId,
+                    }),
+                  })
+                  const data = await res.json()
+                  if (!res.ok) alert(data.error ?? "Erro")
+                  else {
+                    setBrain(data.state ?? null)
+                    setBrainSummary(data.summary_md ?? null)
+                  }
+                } finally {
+                  setRecomputingBrain(false)
+                }
+              }}
+              className="mt-3 inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {recomputingBrain ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Montar cérebro a partir do histórico
             </button>
           )}
         </section>

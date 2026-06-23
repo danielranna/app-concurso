@@ -9,6 +9,8 @@ import { supabaseServer } from "../supabase-server"
 import { topicBrainKey, findTopicEntry } from "./brain-helpers"
 import { loadSubjectBrain } from "./context-builder"
 import type { QuestionDistributionMode } from "./execution-subjects"
+import { computePriorityBreakdown } from "./priority-breakdown"
+import type { PrioritySource } from "../priority-source"
 
 export type QueueRow = {
   subject_id: string
@@ -132,6 +134,29 @@ function inferSkipReason(
   return "no_wrongs"
 }
 
+async function resolveTopicsForSubject(
+  userId: string,
+  subjectId: string,
+  topics: QueueRow[],
+  prioritySource: PrioritySource
+): Promise<QueueRow[]> {
+  if (topics.length) return topics
+
+  const breakdown = await computePriorityBreakdown(userId, subjectId)
+  const rows =
+    prioritySource === "brain"
+      ? breakdown.brain_performance
+      : breakdown.crossed
+
+  return rows.map((r) => ({
+    subject_id: subjectId,
+    topic_key: r.topic_key,
+    topic_label: r.topic_label,
+    priority_score: r.score,
+    reason: r.reason ?? null,
+  }))
+}
+
 async function pickFromSubjectTopics(
   userId: string,
   subjectId: string,
@@ -141,6 +166,7 @@ async function pickFromSubjectTopics(
   options?: {
     subjectName?: string
     onProgress?: PickProgressCallback
+    prioritySource?: PrioritySource
   }
 ): Promise<{
   ids: string[]
@@ -155,6 +181,22 @@ async function pickFromSubjectTopics(
   let usedTopic: string | undefined
   let usedReason: string | undefined
   const subjectName = options?.subjectName ?? subjectId
+  const prioritySource = options?.prioritySource ?? "brain"
+
+  const resolvedTopics = await resolveTopicsForSubject(
+    userId,
+    subjectId,
+    topics,
+    prioritySource
+  )
+
+  if (!topics.length && !resolvedTopics.length) {
+    topics_tried.push({
+      topic: "(sem tópicos na fila)",
+      picked: 0,
+      skip_reason: "no_wrongs",
+    })
+  }
 
   const emitTopic = (topic: string, picked: number, skip_reason?: TopicPickTried["skip_reason"]) => {
     topics_tried.push({ topic, picked, skip_reason })
@@ -168,7 +210,7 @@ async function pickFromSubjectTopics(
     })
   }
 
-  for (const row of topics) {
+  for (const row of resolvedTopics) {
     if (ids.length >= limit) break
     const topic = row.topic_label ?? row.topic_key
     if (!topic) continue
@@ -213,6 +255,10 @@ async function pickFromSubjectTopics(
       brain
     )
     if (fallback.length) {
+      topics_tried.push({
+        topic: "(histórico da matéria)",
+        picked: fallback.length,
+      })
       options?.onProgress?.({
         phase: "topic_tried",
         message: `Histórico da matéria: ${fallback.length} questão(ões)`,
@@ -246,6 +292,7 @@ export async function buildRoundRobinQuestionSet(params: {
   perSubjectRound: number
   distributionMode: QuestionDistributionMode
   onProgress?: PickProgressCallback
+  prioritySource?: PrioritySource
 }): Promise<QuestionSetResult> {
   const {
     userId,
@@ -256,6 +303,7 @@ export async function buildRoundRobinQuestionSet(params: {
     perSubjectRound,
     distributionMode,
     onProgress,
+    prioritySource = "brain",
   } = params
 
   const seenQ = new Set<string>()
@@ -303,7 +351,7 @@ export async function buildRoundRobinQuestionSet(params: {
         topics,
         take,
         seenQ,
-        { subjectName, onProgress }
+        { subjectName, onProgress, prioritySource }
       )
 
       subject_pick_diagnostics.push({
@@ -312,7 +360,12 @@ export async function buildRoundRobinQuestionSet(params: {
         requested: take,
         picked: ids.length,
         source,
-        skip_reason: inferSkipReason(topics, ids.length, topics.length > 0, topics_tried),
+        skip_reason: inferSkipReason(
+          topics,
+          ids.length,
+          topics.length > 0 || topics_tried.some((t) => !t.topic.startsWith("(")),
+          topics_tried
+        ),
         round: roundNum,
         topics_tried,
       })
@@ -352,8 +405,9 @@ export async function buildTopNQuestionSet(params: {
   budget: number
   allowlist?: string[]
   onProgress?: PickProgressCallback
+  prioritySource?: PrioritySource
 }): Promise<QuestionSetResult> {
-  const { userId, queue, subjectNames, budget, allowlist, onProgress } = params
+  const { userId, queue, subjectNames, budget, allowlist, onProgress, prioritySource = "brain" } = params
   const seenQ = new Set<string>()
   const questionIds: string[] = []
   const rounds: QuestionRoundEntry[] = []
@@ -493,7 +547,7 @@ export async function buildTopNQuestionSet(params: {
       subjectTopics,
       remaining,
       seenQ,
-      { subjectName, onProgress }
+      { subjectName, onProgress, prioritySource }
     )
 
     if (!ids.length) {
