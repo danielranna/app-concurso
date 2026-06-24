@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS flashcard_schedule_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
   weekday_limits JSONB DEFAULT '{"0":null,"1":null,"2":null,"3":null,"4":null,"5":null,"6":null}'::jsonb,
+  fsrs_parameters JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

@@ -16,6 +16,25 @@ type StudyCard = {
 
 type Preview = { again: string; hard: string; good: string; easy: string }
 
+const RATING_HELP: Record<number, { label: string; title: string }> = {
+  1: {
+    label: "Again",
+    title: "Errei — o card volta aos passos de aprendizado (1 min) e reaparece no fim da sessão.",
+  },
+  2: {
+    label: "Hard",
+    title: "Lembrei com dificuldade — intervalo menor que Good; repete antes.",
+  },
+  3: {
+    label: "Good",
+    title: "Lembrei — intervalo padrão FSRS (não é o SM-2 antigo do Anki).",
+  },
+  4: {
+    label: "Easy",
+    title: "Muito fácil — intervalo bem maior; use só quando for trivial.",
+  },
+}
+
 export default function StudyPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -133,25 +152,33 @@ export default function StudyPage() {
               Mostrar resposta
             </button>
           ) : (
-            <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {(
-                [
-                  ["Again", 1, preview?.again],
-                  ["Hard", 2, preview?.hard],
-                  ["Good", 3, preview?.good],
-                  ["Easy", 4, preview?.easy],
-                ] as const
-              ).map(([label, rating, interval]) => (
-                <button
-                  key={rating}
-                  onClick={() => answer(rating)}
-                  className="rounded-lg border border-slate-200 py-3 text-sm hover:bg-slate-50"
-                >
-                  <span className="block font-medium">{label}</span>
-                  {interval && <span className="text-xs text-slate-500">{interval}</span>}
-                </button>
-              ))}
-            </div>
+            <>
+              <p className="mb-3 text-xs text-slate-500">
+                FSRS agenda a próxima revisão pela dificuldade do card. Intervalos menores =
+                mais repetições. Passe o mouse nos botões para dicas.
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(
+                  [
+                    ["again", 1, preview?.again],
+                    ["hard", 2, preview?.hard],
+                    ["good", 3, preview?.good],
+                    ["easy", 4, preview?.easy],
+                  ] as const
+                ).map(([, rating, interval]) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    title={RATING_HELP[rating].title}
+                    onClick={() => answer(rating)}
+                    className="rounded-lg border border-slate-200 py-3 text-sm hover:bg-slate-50"
+                  >
+                    <span className="block font-medium">{RATING_HELP[rating].label}</span>
+                    {interval && <span className="text-xs text-slate-500">{interval}</span>}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       ) : null}

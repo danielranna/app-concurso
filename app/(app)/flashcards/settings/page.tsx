@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { DEFAULT_WEEKDAY_LIMITS, type WeekdayLimits } from "@/lib/flashcard-types"
+import {
+  DEFAULT_REQUEST_RETENTION,
+  DEFAULT_WEEKDAY_LIMITS,
+  type WeekdayLimits,
+} from "@/lib/flashcard-types"
 import { Link2, MessageCircle, RefreshCw, Unlink } from "lucide-react"
 
 const DAYS = [
@@ -31,6 +35,21 @@ export default function FlashcardsSettingsPage() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [limits, setLimits] = useState<WeekdayLimits>(DEFAULT_WEEKDAY_LIMITS)
+  const [requestRetention, setRequestRetention] = useState(DEFAULT_REQUEST_RETENTION)
+  const [retentionMin, setRetentionMin] = useState(0.8)
+  const [retentionMax, setRetentionMax] = useState(0.95)
+  const [optimizerStatus, setOptimizerStatus] = useState<{
+    review_count: number
+    card_count: number
+    can_optimize: boolean
+    min_reviews: number
+    min_cards: number
+    optimized_at: string | null
+    has_custom_w: boolean
+  } | null>(null)
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizerMessage, setOptimizerMessage] = useState<string | null>(null)
+  const [optimizerError, setOptimizerError] = useState<string | null>(null)
   const [bot, setBot] = useState({
     enabled: false,
     phone_e164: "",
@@ -109,13 +128,19 @@ export default function FlashcardsSettingsPage() {
         return
       }
       setUserId(user.id)
-      const [schedRes, keysRes] = await Promise.all([
+      const [schedRes, keysRes, optRes] = await Promise.all([
         fetch(`/api/flashcards/schedule-settings?user_id=${user.id}`),
         fetch(`/api/flashcards/api-keys?user_id=${user.id}`),
+        fetch(`/api/flashcards/fsrs/optimize?user_id=${user.id}`),
       ])
       const sched = await schedRes.json()
       const keys = await keysRes.json()
+      const opt = await optRes.json()
       setLimits(sched.weekday_limits ?? DEFAULT_WEEKDAY_LIMITS)
+      setRequestRetention(sched.request_retention ?? DEFAULT_REQUEST_RETENTION)
+      if (sched.retention_min) setRetentionMin(sched.retention_min)
+      if (sched.retention_max) setRetentionMax(sched.retention_max)
+      if (!opt.error) setOptimizerStatus(opt)
       setHasApiKey(Array.isArray(keys) && keys.length > 0)
       await loadBotSettings(user.id)
     })
@@ -287,7 +312,11 @@ export default function FlashcardsSettingsPage() {
       fetch("/api/flashcards/schedule-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, weekday_limits: limits }),
+        body: JSON.stringify({
+          user_id: userId,
+          weekday_limits: limits,
+          request_retention: requestRetention,
+        }),
       }),
       saveBotSettingsOnly(),
     ])
@@ -308,6 +337,35 @@ export default function FlashcardsSettingsPage() {
       setApiKeyInput(data.api_key)
       sessionStorage.setItem(apiKeyStorageKey(userId), data.api_key)
       setHasApiKey(true)
+    }
+  }
+
+  async function runOptimizer() {
+    if (!userId) return
+    setOptimizing(true)
+    setOptimizerError(null)
+    setOptimizerMessage(null)
+    try {
+      const res = await fetch("/api/flashcards/fsrs/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setOptimizerError(data.error ?? "Falha ao otimizar")
+        return
+      }
+      setOptimizerMessage(
+        `Parâmetros otimizados com ${data.review_count} revisões em ${data.card_count} cards.`
+      )
+      const statusRes = await fetch(`/api/flashcards/fsrs/optimize?user_id=${userId}`)
+      const status = await statusRes.json()
+      if (!status.error) setOptimizerStatus(status)
+    } catch {
+      setOptimizerError("Erro ao otimizar parâmetros FSRS.")
+    } finally {
+      setOptimizing(false)
     }
   }
 
@@ -346,6 +404,73 @@ export default function FlashcardsSettingsPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="mt-8 border-t pt-8">
+        <h2 className="font-medium text-slate-800">Algoritmo FSRS</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          O app usa FSRS (não o SM-2 antigo do Anki). A retenção desejada controla com que
+          frequência os cards voltam: valores menores = mais repetições.
+        </p>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-sm">
+            <label htmlFor="request-retention">Retenção desejada</label>
+            <span className="font-medium tabular-nums">{Math.round(requestRetention * 100)}%</span>
+          </div>
+          <input
+            id="request-retention"
+            type="range"
+            min={retentionMin}
+            max={retentionMax}
+            step={0.01}
+            value={requestRetention}
+            onChange={(e) => setRequestRetention(parseFloat(e.target.value))}
+            className="mt-2 w-full"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            {Math.round(retentionMin * 100)}% (mais repetições) — {Math.round(retentionMax * 100)}%
+            (menos repetições). Padrão: {Math.round(DEFAULT_REQUEST_RETENTION * 100)}%.
+          </p>
+        </div>
+
+        {optimizerStatus && (
+          <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-medium text-slate-800">Otimizador FSRS</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Treina os pesos do algoritmo com base no seu histórico de revisões (como no Anki
+              FSRS).
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              {optimizerStatus.review_count} revisões em {optimizerStatus.card_count} cards
+              {optimizerStatus.has_custom_w && optimizerStatus.optimized_at && (
+                <>
+                  {" "}
+                  · otimizado em{" "}
+                  {new Date(optimizerStatus.optimized_at).toLocaleDateString("pt-BR")}
+                </>
+              )}
+            </p>
+            {!optimizerStatus.can_optimize && (
+              <p className="mt-1 text-xs text-amber-700">
+                Mínimo: {optimizerStatus.min_reviews} revisões em {optimizerStatus.min_cards}{" "}
+                cards.
+              </p>
+            )}
+            {optimizerMessage && (
+              <p className="mt-2 text-sm text-emerald-700">{optimizerMessage}</p>
+            )}
+            {optimizerError && <p className="mt-2 text-sm text-red-600">{optimizerError}</p>}
+            <button
+              type="button"
+              onClick={runOptimizer}
+              disabled={optimizing || !optimizerStatus.can_optimize}
+              className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-100 disabled:opacity-50"
+            >
+              {optimizing ? "Otimizando..." : "Otimizar parâmetros FSRS"}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="mt-8 border-t pt-8">
@@ -548,7 +673,7 @@ export default function FlashcardsSettingsPage() {
         onClick={saveAll}
         className="mt-8 w-full rounded-lg bg-slate-900 py-3 text-white"
       >
-        {saved ? "Salvo!" : "Salvar horários e limites"}
+        {saved ? "Salvo!" : "Salvar configurações"}
       </button>
     </main>
   )

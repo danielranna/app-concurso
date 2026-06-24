@@ -42,8 +42,18 @@ export const DEFAULT_WEEKDAY_LIMITS: WeekdayLimits = {
   "6": null,
 }
 
+export type UserFsrsSettings = {
+  request_retention?: number
+  learning_steps?: readonly string[]
+  relearning_steps?: readonly string[]
+  w?: number[]
+  optimized_at?: string
+}
+
+export const DEFAULT_REQUEST_RETENTION = 0.85
+
 export const DEFAULT_FSRS_PARAMS = {
-  request_retention: 0.9,
+  request_retention: DEFAULT_REQUEST_RETENTION,
   maximum_interval: 36500,
   enable_fuzz: true,
   enable_short_term: true,

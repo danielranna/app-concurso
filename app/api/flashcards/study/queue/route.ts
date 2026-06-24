@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
 import { cardBackPayload, cardFrontPayload } from "@/lib/flashcard-content"
+import { resolveFsrsParams } from "@/lib/flashcard-fsrs-params"
 import { getStudyQueue } from "@/lib/flashcard-queue"
 import {
   buildScheduler,
   deserializeFsrsCard,
   previewLabels,
 } from "@/lib/fsrs-scheduler"
-import type { FSRSParameters } from "ts-fsrs"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
 
     const row = rows[0]
     const fc = row.flashcards
-    const deckParams = (fc.flashcard_decks?.fsrs_parameters ?? {}) as Partial<FSRSParameters>
+    const deckParams = await resolveFsrsParams(user_id, fc.deck_id)
     const fsrsCard = deserializeFsrsCard(row.state_data)
     const scheduler = buildScheduler(deckParams)
     const preview = scheduler.repeat(fsrsCard, new Date())

@@ -5,6 +5,7 @@ import {
   emptyFsrsCard,
   serializeFsrsCard,
 } from "./fsrs-scheduler"
+import { resolveFsrsParams } from "./flashcard-fsrs-params"
 import type { FSRSParameters } from "ts-fsrs"
 
 export async function ensureCardState(userId: string, cardId: string) {
@@ -69,7 +70,11 @@ export async function submitCardReview(
   return { nextCard, log, due_at: nextCard.due.toISOString() }
 }
 
-export async function getDeckFsrsParams(deckId: string): Promise<Partial<FSRSParameters>> {
+export async function getDeckFsrsParams(
+  deckId: string,
+  userId?: string
+): Promise<Partial<FSRSParameters>> {
+  if (userId) return resolveFsrsParams(userId, deckId)
   const { data } = await supabaseServer
     .from("flashcard_decks")
     .select("fsrs_parameters")

@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["@open-spaced-repetition/binding"],
   // Garante que as variáveis públicas do Supabase entrem no bundle do cliente no build da Vercel
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,

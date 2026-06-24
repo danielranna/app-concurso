@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getDeckFsrsParams, submitCardReview } from "@/lib/flashcard-review"
+import { resolveFsrsParams } from "@/lib/flashcard-fsrs-params"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function POST(req: Request) {
@@ -14,16 +15,16 @@ export async function POST(req: Request) {
   }
 
   try {
-    let deckParams = {}
-    if (deck_id) {
-      deckParams = await getDeckFsrsParams(deck_id)
-    } else {
+    let deckParams = await resolveFsrsParams(user_id, deck_id ?? null)
+    if (!deck_id) {
       const { data: card } = await supabaseServer
         .from("flashcards")
         .select("deck_id")
         .eq("id", card_id)
         .single()
-      if (card?.deck_id) deckParams = await getDeckFsrsParams(card.deck_id)
+      if (card?.deck_id) {
+        deckParams = await getDeckFsrsParams(card.deck_id, user_id)
+      }
     }
 
     const result = await submitCardReview(user_id, card_id, rating, deckParams)

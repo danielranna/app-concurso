@@ -34,7 +34,7 @@ export async function POST(
     .eq("id", dispatch.card_id)
     .single()
 
-  const deckParams = card?.deck_id ? await getDeckFsrsParams(card.deck_id) : {}
+  const deckParams = card?.deck_id ? await getDeckFsrsParams(card.deck_id, auth.userId) : {}
   const result = await submitCardReview(auth.userId, dispatch.card_id, rating, deckParams)
 
   await supabaseServer
