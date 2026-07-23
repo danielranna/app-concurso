@@ -27,12 +27,26 @@ const TABS: { id: AgendaTab; label: string }[] = [
   { id: "month", label: "Mês" },
 ]
 
+const DEFAULT_EVENT_COLOR = "#3b82f6"
+
+const EVENT_COLOR_PRESETS = [
+  "#3b82f6",
+  "#ef4444",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#0ea5e9",
+  "#64748b",
+]
+
 export default function HomeAgenda({ userId }: Props) {
   const [tab, setTab] = useState<AgendaTab>("day")
   const [anchor, setAnchor] = useState(() => new Date())
   const [events, setEvents] = useState<AgendaEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [eventColor, setEventColor] = useState(DEFAULT_EVENT_COLOR)
 
   const dayStr = toDateInputValue(anchor)
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor])
@@ -129,10 +143,12 @@ export default function HomeAgenda({ userId }: Props) {
         title,
         event_date,
         notes: String(fd.get("notes") || "").trim() || null,
+        color: eventColor,
       }),
     })
     if (res.ok) {
       e.currentTarget.reset()
+      setEventColor(DEFAULT_EVENT_COLOR)
       await reload()
     }
   }
@@ -272,6 +288,7 @@ export default function HomeAgenda({ userId }: Props) {
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
               />
             </label>
+            <EventColorPicker value={eventColor} onChange={setEventColor} />
             <button
               type="submit"
               className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
@@ -288,13 +305,20 @@ export default function HomeAgenda({ userId }: Props) {
                   key={ev.id}
                   className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2 text-sm"
                 >
-                  <span>
-                    <span className="font-medium text-slate-800">{ev.title}</span>
-                    <span className="ml-2 text-slate-500">
-                      {formatDayMonth(parseDateInput(ev.event_date))}
-                      {ev.end_date && ev.end_date !== ev.event_date
-                        ? ` – ${formatDayMonth(parseDateInput(ev.end_date))}`
-                        : ""}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full border border-black/10"
+                      style={{ backgroundColor: ev.color }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0">
+                      <span className="font-medium text-slate-800">{ev.title}</span>
+                      <span className="ml-2 text-slate-500">
+                        {formatDayMonth(parseDateInput(ev.event_date))}
+                        {ev.end_date && ev.end_date !== ev.event_date
+                          ? ` – ${formatDayMonth(parseDateInput(ev.end_date))}`
+                          : ""}
+                      </span>
                     </span>
                   </span>
                   <button
@@ -372,6 +396,7 @@ export default function HomeAgenda({ userId }: Props) {
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
               />
             </label>
+            <EventColorPicker value={eventColor} onChange={setEventColor} />
             <button
               type="submit"
               className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
@@ -383,5 +408,54 @@ export default function HomeAgenda({ userId }: Props) {
         </div>
       )}
     </section>
+  )
+}
+
+function EventColorPicker({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (color: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1 text-xs text-slate-600">
+      <span>Cor</span>
+      <div className="flex items-center gap-1.5">
+        {EVENT_COLOR_PRESETS.map((color) => (
+          <button
+            key={color}
+            type="button"
+            onClick={() => onChange(color)}
+            className={`h-7 w-7 rounded-full border-2 transition ${
+              value.toLowerCase() === color.toLowerCase()
+                ? "border-slate-900 scale-110"
+                : "border-transparent hover:scale-105"
+            }`}
+            style={{ backgroundColor: color }}
+            title={color}
+            aria-label={`Cor ${color}`}
+            aria-pressed={value.toLowerCase() === color.toLowerCase()}
+          />
+        ))}
+        <label
+          className="relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-slate-300"
+          title="Cor personalizada"
+        >
+          <span
+            className="absolute inset-0"
+            style={{ backgroundColor: value }}
+            aria-hidden
+          />
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 cursor-pointer opacity-0"
+            aria-label="Escolher cor personalizada"
+          />
+        </label>
+      </div>
+    </div>
   )
 }
