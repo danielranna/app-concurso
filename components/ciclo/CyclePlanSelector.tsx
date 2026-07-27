@@ -1,11 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import { ChevronDown } from "lucide-react"
 import type { CyclePlanSummary } from "@/lib/study-cycle-plans"
 import { cycleStatusLabel } from "@/lib/study-cycle-types"
-import { withCycleId } from "@/lib/cycle-plan-context"
+import { getStoredCycleId } from "@/lib/cycle-plan-context"
 import { useCyclePlanId } from "@/lib/use-cycle-plan-id"
 
 type Props = {
@@ -14,7 +13,6 @@ type Props = {
 }
 
 export default function CyclePlanSelector({ userId, plans: plansProp }: Props) {
-  const router = useRouter()
   const { cycleId, setCycleId } = useCyclePlanId()
   const [plans, setPlans] = useState<CyclePlanSummary[]>(plansProp ?? [])
   const [open, setOpen] = useState(false)
@@ -33,7 +31,10 @@ export default function CyclePlanSelector({ userId, plans: plansProp }: Props) {
   const current = plans.find((p) => p.id === cycleId) ?? plans[0]
 
   useEffect(() => {
-    if (!cycleId && plans[0]?.id) setCycleId(plans[0].id, { replaceUrl: true })
+    if (cycleId || !plans[0]?.id) return
+    // Only auto-pick when neither URL nor localStorage already chose a plan.
+    if (getStoredCycleId()) return
+    setCycleId(plans[0].id, { replaceUrl: true })
   }, [cycleId, plans, setCycleId])
 
   if (!plans.length) return null
@@ -72,7 +73,6 @@ export default function CyclePlanSelector({ userId, plans: plansProp }: Props) {
                   onClick={() => {
                     setCycleId(p.id)
                     setOpen(false)
-                    router.replace(withCycleId(window.location.pathname, p.id))
                   }}
                 >
                   <span className="font-medium">{p.name}</span>

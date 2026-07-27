@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -43,14 +43,17 @@ export default function CicloPlanejarPage() {
   const [showRegenModal, setShowRegenModal] = useState(false)
   const [pendingActivate, setPendingActivate] = useState(false)
   const [resetDayOnRegen, setResetDayOnRegen] = useState(true)
+  const loadSeq = useRef(0)
 
   const load = useCallback(async (uid: string, cid?: string | null) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     try {
       const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
       const ciclo = await fetch(`/api/ciclo?user_id=${uid}${q}`).then((r) =>
         r.json()
       )
+      if (seq !== loadSeq.current) return
       const c: StudyCycle | null = ciclo.cycle ?? null
       setCycle(c)
       if (c?.planning_mode) setMode(c.planning_mode)
@@ -60,7 +63,7 @@ export default function CicloPlanejarPage() {
       setSubjectsPerDay(ciclo.preferences?.subjects_per_cycle_day ?? 2)
       setDrift(ciclo.drift ?? null)
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [])
 
@@ -71,12 +74,12 @@ export default function CicloPlanejarPage() {
         return
       }
       setUserId(user.id)
-      load(user.id, cycleId)
     })
-  }, [router, load, cycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && cycleId) load(userId, cycleId)
+    if (!userId) return
+    load(userId, cycleId)
   }, [userId, cycleId, load])
 
   const fetchPreview = useCallback(async () => {

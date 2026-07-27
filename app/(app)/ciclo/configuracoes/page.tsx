@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -25,8 +25,10 @@ export default function CicloConfiguracoesPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const loadSeq = useRef(0)
 
   const load = useCallback((uid: string, cid?: string | null) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
     return Promise.all([
@@ -34,6 +36,7 @@ export default function CicloConfiguracoesPage() {
       fetch(`/api/coach/preferences?user_id=${uid}`).then((r) => r.json()),
     ])
       .then(([ciclo, prefs]) => {
+        if (seq !== loadSeq.current) return
         setCycle(ciclo.cycle ?? null)
         setPrioritySource(ciclo.priority_source ?? "brain")
         setSubjectsPerDay(
@@ -46,7 +49,9 @@ export default function CicloConfiguracoesPage() {
           setWeekdayLimits(ciclo.cycle.weekday_limits)
         }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -56,12 +61,12 @@ export default function CicloConfiguracoesPage() {
         return
       }
       setUserId(user.id)
-      load(user.id, cycleId)
     })
-  }, [router, load, cycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && cycleId) load(userId, cycleId)
+    if (!userId) return
+    load(userId, cycleId)
   }, [userId, cycleId, load])
 
   function updateWeekday(

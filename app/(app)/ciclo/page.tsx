@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -61,32 +61,43 @@ export default function CicloOverviewPage() {
   const [toggling, setToggling] = useState(false)
   const [pace, setPace] = useState<PaceAnalytics | null>(null)
   const [paceLoading, setPaceLoading] = useState(false)
+  const loadSeq = useRef(0)
 
   const load = useCallback((uid: string, cid?: string | null) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
     return fetch(`/api/ciclo?user_id=${uid}${q}`)
       .then((r) => r.json())
       .then((d) => {
+        if (seq !== loadSeq.current) return
         setData(d)
         const hasBlocks = (d.cycle?.cycle_blocks?.length ?? 0) > 0
+        const loadedCycleId = d.cycle?.id as string | undefined
         if (hasBlocks) {
           setPaceLoading(true)
           return fetch(`/api/ciclo/queue?user_id=${uid}`)
             .then((r) => r.json())
             .then((qd) => {
+              if (seq !== loadSeq.current) return
               setPace(qd.pace ?? null)
-              if (qd.cycle) {
+              // Queue API returns the active cycle only — never overwrite a different selected plan.
+              if (qd.cycle?.id && loadedCycleId && qd.cycle.id === loadedCycleId) {
                 setData((prev) =>
                   prev ? { ...prev, cycle: qd.cycle } : prev
                 )
               }
             })
-            .finally(() => setPaceLoading(false))
+            .finally(() => {
+              if (seq === loadSeq.current) setPaceLoading(false)
+            })
+        } else {
+          setPace(null)
         }
-        setPace(null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -96,12 +107,12 @@ export default function CicloOverviewPage() {
         return
       }
       setUserId(user.id)
-      load(user.id, cycleId)
     })
-  }, [router, load, cycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && cycleId) load(userId, cycleId)
+    if (!userId) return
+    load(userId, cycleId)
   }, [userId, cycleId, load])
 
   async function handleToggle(action: "pause" | "resume") {
@@ -235,7 +246,6 @@ export default function CicloOverviewPage() {
           onRefresh={() => load(userId, cycleId)}
           onSelect={(id) => {
             setCycleId(id)
-            load(userId, id)
           }}
         />
       )}

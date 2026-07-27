@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -23,8 +23,10 @@ export default function CicloMateriasPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const loadSeq = useRef(0)
 
   const load = useCallback(async (uid: string, cid?: string | null) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     try {
       const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
@@ -32,11 +34,13 @@ export default function CicloMateriasPage() {
         fetch(`/api/subjects?user_id=${uid}`).then((r) => r.json()),
         fetch(`/api/ciclo?user_id=${uid}${q}`).then((r) => r.json()),
       ])
+      if (seq !== loadSeq.current) return
       setAllSubjects(Array.isArray(subList) ? subList : [])
       const cycle = ciclo.cycle
       if (cycle?.id) {
         setCycleId(cycle.id)
-        setUrlCycleId(cycle.id)
+        // Only sync selection into URL when none was requested (API resolved default).
+        if (!cid) setUrlCycleId(cycle.id)
       }
       const map = new Map<string, number>()
       for (const s of (cycle?.subjects ?? []) as StudyCycleSubject[]) {
@@ -44,7 +48,7 @@ export default function CicloMateriasPage() {
       }
       setSelected(map)
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [setUrlCycleId])
 
@@ -55,12 +59,12 @@ export default function CicloMateriasPage() {
         return
       }
       setUserId(user.id)
-      load(user.id, urlCycleId)
     })
-  }, [router, load, urlCycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && urlCycleId) load(userId, urlCycleId)
+    if (!userId) return
+    load(userId, urlCycleId)
   }, [userId, urlCycleId, load])
 
   function toggleSubject(id: string) {

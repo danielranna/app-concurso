@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -48,71 +48,80 @@ export default function CicloBlocosPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [drift, setDrift] = useState<SetupDrift | null>(null)
   const [phaseFilter, setPhaseFilter] = useState<string>("all")
+  const subjectFromQuery = searchParams.get("subject_id")
+  const loadSeq = useRef(0)
+  const topicSeq = useRef(0)
 
-  const loadBlocks = useCallback(async (uid: string, cid?: string | null) => {
+  const loadBlocks = useCallback(async (uid: string, cid?: string | null, seq?: number) => {
     const q = cid ? `user_id=${uid}&cycle_id=${cid}` : `user_id=${uid}`
     const r = await fetch(`/api/ciclo/content-blocks?${q}`)
     const d = await r.json()
+    if (seq != null && seq !== loadSeq.current) return []
     if (d.cycle_id) setCycleId(d.cycle_id)
     setBlocks(d.blocks ?? [])
     return d.blocks ?? []
   }, [])
 
   const loadTopicTree = useCallback(async (uid: string, subjectId: string) => {
+    const seq = ++topicSeq.current
     setLoadingTopics(true)
     try {
       const r = await fetch(
         `/api/ciclo/content-blocks?user_id=${uid}&subject_id=${subjectId}&tec_tree=1`
       )
       const d = await r.json()
+      if (seq !== topicSeq.current) return
       setTrees(d.trees ?? [])
       setFlatTopics(d.flat_topics ?? [])
     } finally {
-      setLoadingTopics(false)
+      if (seq === topicSeq.current) setLoadingTopics(false)
     }
   }, [])
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
         router.push("/login")
         return
       }
       setUserId(user.id)
-      const cid = urlCycleId
-      const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
-      const ciclo = await fetch(`/api/ciclo?user_id=${user.id}${q}`).then((r) =>
-        r.json()
-      )
-      const subs: StudyCycleSubject[] = ciclo.cycle?.subjects ?? []
-      setCycleSubjects(subs)
-      const resolvedId = ciclo.cycle?.id ?? null
-      setCycleId(resolvedId)
-      if (resolvedId) setUrlCycleId(resolvedId)
-      setDrift(ciclo.drift ?? null)
-      if (subs.length) {
-        const fromQuery = searchParams.get("subject_id")
-        const initial =
-          fromQuery && subs.some((s) => s.subject_id === fromQuery)
-            ? fromQuery
-            : subs[0].subject_id
-        setSelectedSubjectId(initial)
-        await loadBlocks(user.id, resolvedId)
-        await loadTopicTree(user.id, initial)
-      }
-      setLoading(false)
     })
-  }, [router, loadBlocks, loadTopicTree, searchParams, urlCycleId, setUrlCycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && urlCycleId) {
-      const q = `&cycle_id=${encodeURIComponent(urlCycleId)}`
-      fetch(`/api/ciclo?user_id=${userId}${q}`)
-        .then((r) => r.json())
-        .then((d) => setDrift(d.drift ?? null))
-      loadBlocks(userId, urlCycleId)
-    }
-  }, [userId, urlCycleId, loadBlocks])
+    if (!userId) return
+    const seq = ++loadSeq.current
+    const cid = urlCycleId
+    setLoading(true)
+    const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
+    fetch(`/api/ciclo?user_id=${userId}${q}`)
+      .then((r) => r.json())
+      .then(async (ciclo) => {
+        if (seq !== loadSeq.current) return
+        const subs: StudyCycleSubject[] = ciclo.cycle?.subjects ?? []
+        setCycleSubjects(subs)
+        const resolvedId = (ciclo.cycle?.id as string | undefined) ?? null
+        setCycleId(resolvedId)
+        // Only sync into URL when none was requested (API resolved default).
+        if (!cid && resolvedId) setUrlCycleId(resolvedId)
+        setDrift(ciclo.drift ?? null)
+        if (subs.length) {
+          const initial =
+            subjectFromQuery &&
+            subs.some((s) => s.subject_id === subjectFromQuery)
+              ? subjectFromQuery
+              : subs[0].subject_id
+          setSelectedSubjectId(initial)
+          await loadBlocks(userId, resolvedId, seq)
+        } else {
+          setSelectedSubjectId(null)
+          setBlocks([])
+        }
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false)
+      })
+  }, [userId, urlCycleId, subjectFromQuery, loadBlocks, setUrlCycleId])
 
   useEffect(() => {
     if (userId && selectedSubjectId) {

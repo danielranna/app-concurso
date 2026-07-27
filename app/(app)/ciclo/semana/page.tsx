@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
@@ -23,27 +23,40 @@ export default function CicloSemanaPage() {
   const [view, setView] = useState<"grid" | "list">("grid")
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [queue, setQueue] = useState<QueueState | null>(null)
+  const loadSeq = useRef(0)
 
   const load = useCallback((uid: string, cid?: string | null) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     const q = cid ? `&cycle_id=${encodeURIComponent(cid)}` : ""
     return fetch(`/api/ciclo?user_id=${uid}${q}`)
       .then((r) => r.json())
       .then((d) => {
+        if (seq !== loadSeq.current) return
         setCycle(d.cycle ?? null)
         setCycleEnabled(d.preferences?.cycle_enabled ?? false)
         const hasBlocks = (d.cycle?.cycle_blocks?.length ?? 0) > 0
+        const loadedCycleId = d.cycle?.id as string | undefined
         if (hasBlocks) {
           return fetch(`/api/ciclo/queue?user_id=${uid}`)
             .then((r) => r.json())
             .then((qd) => {
-              setQueue(qd.queue ?? null)
-              if (qd.cycle) setCycle(qd.cycle)
+              if (seq !== loadSeq.current) return
+              // Queue is always the active cycle — only apply when it matches selection.
+              if (qd.cycle?.id && loadedCycleId && qd.cycle.id === loadedCycleId) {
+                setQueue(qd.queue ?? null)
+                setCycle(qd.cycle)
+              } else {
+                setQueue(null)
+              }
             })
+        } else {
+          setQueue(null)
         }
-        setQueue(null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -53,12 +66,12 @@ export default function CicloSemanaPage() {
         return
       }
       setUserId(user.id)
-      load(user.id, cycleId)
     })
-  }, [router, load, cycleId])
+  }, [router])
 
   useEffect(() => {
-    if (userId && cycleId) load(userId, cycleId)
+    if (!userId) return
+    load(userId, cycleId)
   }, [userId, cycleId, load])
 
   async function downloadPdf() {
