@@ -18,7 +18,10 @@ type Props = {
   onClose: () => void
   userId: string
   questionId: string
+  /** When set, shows discreet delete (remove from this caderno / bank). */
+  notebookId?: string
   onSaved: () => void
+  onDeleted?: () => void
 }
 
 const MCQ_LABELS = ["A", "B", "C", "D", "E"]
@@ -35,10 +38,14 @@ export default function EditQuestionModal({
   onClose,
   userId,
   questionId,
+  notebookId,
   onSaved,
+  onDeleted,
 }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [type, setType] = useState<"multiple_choice" | "certo_errado">("multiple_choice")
   const [statement, setStatement] = useState("")
@@ -51,6 +58,7 @@ export default function EditQuestionModal({
     if (!isOpen || !questionId) return
     setLoading(true)
     setError(null)
+    setConfirmDelete(false)
     setShowGabarito(false)
     fetch(`/api/questions/${questionId}?user_id=${encodeURIComponent(userId)}`)
       .then((r) => r.json())
@@ -135,6 +143,28 @@ export default function EditQuestionModal({
     onClose()
   }
 
+  async function handleDelete(mode: "notebook" | "bank") {
+    if (!notebookId || deleting) return
+    setDeleting(true)
+    setError(null)
+    const res = await fetch(
+      `/api/notebooks/${notebookId}/questions/${questionId}`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, mode }),
+      }
+    )
+    const data = await res.json().catch(() => ({}))
+    setDeleting(false)
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao excluir")
+      return
+    }
+    onDeleted?.()
+    onClose()
+  }
+
   if (!isOpen) return null
 
   return (
@@ -146,11 +176,64 @@ export default function EditQuestionModal({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <p className="mb-4 text-xs text-slate-500">
-          Correção só para você — não altera o banco global. Use <strong>+</strong> para
-          blocos de texto ou imagem. Em imagem: clique na área tracejada e{" "}
-          <strong>Ctrl+V</strong> para colar o print.
-        </p>
+        <div className="mb-4 space-y-2">
+          <p className="text-xs text-slate-500">
+            Correção só para você — não altera o banco global. Use <strong>+</strong> para
+            blocos de texto ou imagem. Em imagem: clique na área tracejada e{" "}
+            <strong>Ctrl+V</strong> para colar o print.
+          </p>
+          {notebookId && !confirmDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmDelete(true)
+                setError(null)
+              }}
+              disabled={loading || saving || deleting}
+              className="text-xs text-slate-400 underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-50"
+            >
+              Excluir questão
+            </button>
+          )}
+          {notebookId && confirmDelete && (
+            <div className="rounded-lg border border-red-100 bg-red-50/60 px-3 py-2.5">
+              <p className="text-xs font-medium text-slate-700">
+                Tem certeza que quer excluir esta questão?
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                <strong>Só do caderno</strong> remove daqui e mantém no banco.{" "}
+                <strong>Do caderno e do banco</strong> apaga de vez (some de outros
+                cadernos que usem a mesma questão).
+              </p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDelete("notebook")}
+                  disabled={deleting}
+                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {deleting ? "Excluindo…" : "Só do caderno"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete("bank")}
+                  disabled={deleting}
+                  className="rounded-md border border-red-200 bg-white px-2.5 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  Do caderno e do banco
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  disabled={deleting}
+                  className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {loading ? (
           <p className="py-8 text-center text-slate-500">Carregando…</p>
@@ -288,14 +371,15 @@ export default function EditQuestionModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border px-4 py-2 text-sm"
+            disabled={deleting}
+            className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50"
           >
             Cancelar
           </button>
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || loading}
+            disabled={saving || loading || deleting}
             className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}

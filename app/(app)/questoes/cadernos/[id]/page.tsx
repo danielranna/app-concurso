@@ -381,7 +381,12 @@ export default function ResolverCadernoPage() {
           }}
           userId={userId}
           questionId={editQuestionId}
+          notebookId={notebookId}
           onSaved={() => setRefreshKey((k) => k + 1)}
+          onDeleted={() => {
+            clearDraftScope(draftScopeKey("notebook", notebookId))
+            setRefreshKey((k) => k + 1)
+          }}
         />
       )}
     </div>
