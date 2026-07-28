@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Loader2, X } from "lucide-react"
 import PerformanceModal from "@/components/questions/PerformanceModal"
+import { SequencePatternBadge } from "@/components/questions/SequencePatternBadge"
 import {
   OUTCOME_CATEGORY_LABELS,
   ERROR_TAXONOMY_LABELS,
@@ -59,6 +60,14 @@ export default function AnalysisQuestionPanel({
               <h2 className="mt-0.5 text-base font-semibold text-slate-900">
                 {question.wrong_count}× errada · {question.correct_pct}% acerto
               </h2>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <SequencePatternBadge pattern={question.sequence_pattern} />
+                {question.sequence_preview ? (
+                  <span className="font-mono text-xs text-slate-500">
+                    {question.sequence_preview}
+                  </span>
+                ) : null}
+              </div>
             </div>
             <button
               type="button"

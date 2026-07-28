@@ -5,6 +5,10 @@ import {
   OUTCOME_CATEGORY_LABELS,
 } from "./coach-labels"
 import type { StatsPeriod } from "./question-statistics"
+import {
+  classifySequencePattern,
+  type SequencePattern,
+} from "./question-sequence-pattern"
 
 function normKey(s: string) {
   return (s ?? "").trim()
@@ -61,6 +65,9 @@ export type AnalysisQuestionRow = {
   last_wrong_at: string | null
   dominant_outcome: string | null
   dominant_taxonomy: string | null
+  sequence_pattern: SequencePattern | null
+  sequence_preview: string
+  sequence_switches: number
 }
 
 export type WeakTopicRow = {
@@ -99,6 +106,16 @@ export type QuestionStatisticsAnalysisResult = {
     topic_count: number
     error_share_pct: number
     topics: string[]
+  }
+  sequence_patterns: {
+    confusao: number
+    aprendizado: number
+    esquecimento: number
+    questions_by_pattern: {
+      confusao: AnalysisQuestionRow[]
+      aprendizado: AnalysisQuestionRow[]
+      esquecimento: AnalysisQuestionRow[]
+    }
   }
 }
 
@@ -254,6 +271,7 @@ export async function fetchQuestionStatisticsAnalysis(
     outcomes: Map<string, number>
     taxonomies: Map<string, number>
     critical: boolean
+    seq: boolean[]
   }
 
   const byQuestion = new Map<string, QAgg>()
@@ -271,8 +289,10 @@ export async function fetchQuestionStatisticsAnalysis(
       outcomes: new Map(),
       taxonomies: new Map(),
       critical: false,
+      seq: [] as boolean[],
     }
     g.attempt_count++
+    g.seq.push(a.is_correct)
     if (!a.is_correct) {
       g.wrong_count++
       g.last_wrong_at = a.created_at
@@ -303,6 +323,7 @@ export async function fetchQuestionStatisticsAnalysis(
     .filter(([, g]) => g.wrong_count >= 1)
     .map(([question_id, g]) => {
       const correct = g.attempt_count - g.wrong_count
+      const seqResult = classifySequencePattern(g.seq)
       return {
         question_id,
         statement_preview: stripHtml(g.statement).slice(0, 160),
@@ -319,6 +340,9 @@ export async function fetchQuestionStatisticsAnalysis(
         last_wrong_at: g.last_wrong_at,
         dominant_outcome: dominantKey(g.outcomes),
         dominant_taxonomy: dominantKey(g.taxonomies),
+        sequence_pattern: seqResult.pattern,
+        sequence_preview: seqResult.sequence_preview,
+        sequence_switches: seqResult.switches,
       }
     })
     .sort((a, b) => {
@@ -463,6 +487,23 @@ export async function fetchQuestionStatisticsAnalysis(
     topics: paretoTopics,
   }
 
+  const byPattern = {
+    confusao: questions.filter((q) => q.sequence_pattern === "confusao"),
+    aprendizado: questions.filter((q) => q.sequence_pattern === "aprendizado"),
+    esquecimento: questions.filter((q) => q.sequence_pattern === "esquecimento"),
+  }
+
+  const sequence_patterns = {
+    confusao: byPattern.confusao.length,
+    aprendizado: byPattern.aprendizado.length,
+    esquecimento: byPattern.esquecimento.length,
+    questions_by_pattern: {
+      confusao: byPattern.confusao.slice(0, 15),
+      aprendizado: byPattern.aprendizado.slice(0, 15),
+      esquecimento: byPattern.esquecimento.slice(0, 15),
+    },
+  }
+
   return {
     questions,
     weak_topics,
@@ -472,5 +513,6 @@ export async function fetchQuestionStatisticsAnalysis(
     critical_gap_question_ids,
     critical_gaps,
     pareto,
+    sequence_patterns,
   }
 }

@@ -8,11 +8,17 @@ import WeakTopicsRanking from "@/components/questions/WeakTopicsRanking"
 import StatsTrendChart from "@/components/questions/StatsTrendChart"
 import ErrorMetaCharts from "@/components/questions/ErrorMetaCharts"
 import AnalysisQuestionPanel from "@/components/questions/AnalysisQuestionPanel"
+import { SequencePatternBadge } from "@/components/questions/SequencePatternBadge"
+import { cn } from "@/lib/utils"
 import type { StatsPeriod } from "@/lib/question-statistics"
 import type {
   AnalysisQuestionRow,
   QuestionStatisticsAnalysisResult,
 } from "@/lib/question-statistics-analysis"
+import {
+  SEQUENCE_PATTERN_LABELS,
+  type SequencePattern,
+} from "@/lib/question-sequence-pattern"
 
 type TopicFilter = { subject_id: string | null; topic: string } | null
 
@@ -22,6 +28,36 @@ type Props = {
   selectedSubjects: Set<string>
   allSubjects: { id: string; name: string }[]
 }
+
+const PATTERN_CARDS: {
+  key: SequencePattern
+  hint: string
+  activeClass: string
+  idleClass: string
+  btnClass: string
+}[] = [
+  {
+    key: "confusao",
+    hint: "Oscila entre acerto e erro.",
+    activeClass: "border-amber-300 bg-amber-50 ring-1 ring-amber-200",
+    idleClass: "border-amber-100 bg-amber-50/40 hover:border-amber-200",
+    btnClass: "bg-amber-600 hover:bg-amber-700",
+  },
+  {
+    key: "aprendizado",
+    hint: "Errou e depois consolidou acertos.",
+    activeClass: "border-teal-300 bg-teal-50 ring-1 ring-teal-200",
+    idleClass: "border-teal-100 bg-teal-50/40 hover:border-teal-200",
+    btnClass: "bg-teal-600 hover:bg-teal-700",
+  },
+  {
+    key: "esquecimento",
+    hint: "Consolida e depois erra de novo.",
+    activeClass: "border-rose-300 bg-rose-50 ring-1 ring-rose-200",
+    idleClass: "border-rose-100 bg-rose-50/40 hover:border-rose-200",
+    btnClass: "bg-rose-600 hover:bg-rose-700",
+  },
+]
 
 export default function StatisticsAnalysisTab({
   userId,
@@ -34,6 +70,7 @@ export default function StatisticsAnalysisTab({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [topicFilter, setTopicFilter] = useState<TopicFilter>(null)
+  const [patternFilter, setPatternFilter] = useState<SequencePattern | null>(null)
   const [selected, setSelected] = useState<AnalysisQuestionRow | null>(null)
   const [practicing, setPracticing] = useState(false)
 
@@ -72,18 +109,24 @@ export default function StatisticsAnalysisTab({
 
   useEffect(() => {
     setTopicFilter(null)
+    setPatternFilter(null)
     setSelected(null)
   }, [period, selectedSubjects])
 
   const filteredQuestions = useMemo(() => {
     if (!data) return []
-    if (!topicFilter) return data.questions
-    return data.questions.filter(
-      (q) =>
-        q.tec_topic === topicFilter.topic &&
-        q.subject_id === topicFilter.subject_id
-    )
-  }, [data, topicFilter])
+    return data.questions.filter((q) => {
+      if (
+        topicFilter &&
+        (q.tec_topic !== topicFilter.topic ||
+          q.subject_id !== topicFilter.subject_id)
+      ) {
+        return false
+      }
+      if (patternFilter && q.sequence_pattern !== patternFilter) return false
+      return true
+    })
+  }, [data, topicFilter, patternFilter])
 
   const createPracticeNotebook = useCallback(
     async (questionIds: string[], name: string, subjectId: string) => {
@@ -174,15 +217,31 @@ export default function StatisticsAnalysisTab({
     )
   }
 
-  const criticalCount = data.critical_gaps?.length ?? data.critical_gap_question_ids.length
+  const sp = data.sequence_patterns ?? {
+    confusao: 0,
+    aprendizado: 0,
+    esquecimento: 0,
+    questions_by_pattern: {
+      confusao: [],
+      aprendizado: [],
+      esquecimento: [],
+    },
+  }
+
+  const criticalCount =
+    data.critical_gaps?.length ?? data.critical_gap_question_ids.length
   const top20 = filteredQuestions.slice(0, 20).map((q) => ({
     question_id: q.question_id,
     subject_id: q.subject_id,
   }))
 
+  const filterHints = [
+    topicFilter ? topicFilter.topic : null,
+    patternFilter ? SEQUENCE_PATTERN_LABELS[patternFilter] : null,
+  ].filter(Boolean)
+
   return (
     <div className="space-y-6">
-      {/* Action strip: lacunas + pareto + CTAs */}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-xl border border-red-100 bg-red-50/60 p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-red-700">
@@ -253,19 +312,110 @@ export default function StatisticsAnalysisTab({
           >
             {practicing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Praticar top {Math.min(20, top20.length)} mais erradas
-            {topicFilter ? " (filtro)" : ""}
+            {filterHints.length ? " (filtro)" : ""}
           </button>
         </div>
       </div>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="font-semibold text-slate-900">Padrões de sequência</h2>
+            <p className="text-xs text-slate-500">
+              Heurística sobre o histórico acerto/erro (mín. 4 tentativas). Clique
+              para filtrar.
+            </p>
+          </div>
+          {patternFilter && (
+            <button
+              type="button"
+              onClick={() => setPatternFilter(null)}
+              className="text-xs font-medium text-teal-700 hover:underline"
+            >
+              Limpar padrão
+            </button>
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {PATTERN_CARDS.map((card) => {
+            const count = sp[card.key]
+            const isActive = patternFilter === card.key
+            const list = sp.questions_by_pattern?.[card.key] ?? []
+            return (
+              <div
+                key={card.key}
+                className={cn(
+                  "rounded-xl border p-3 transition",
+                  isActive ? card.activeClass : card.idleClass
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPatternFilter(isActive ? null : card.key)}
+                  className="w-full text-left"
+                >
+                  <p className="text-xs font-medium text-slate-600">
+                    {SEQUENCE_PATTERN_LABELS[card.key]}
+                  </p>
+                  <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">
+                    {count}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{card.hint}</p>
+                </button>
+                {list.length > 0 && (
+                  <ul className="mt-2 space-y-1 border-t border-black/5 pt-2">
+                    {list.slice(0, 3).map((q) => (
+                      <li key={q.question_id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelected(q)}
+                          className="line-clamp-1 w-full text-left text-xs text-slate-600 hover:text-slate-900"
+                        >
+                          <span className="font-mono text-[10px] text-slate-400">
+                            {q.sequence_preview}
+                          </span>{" "}
+                          · {q.statement_preview.slice(0, 48) || "…"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  type="button"
+                  disabled={practicing || count === 0}
+                  onClick={() =>
+                    void practiceBySubjectMap(
+                      (sp.questions_by_pattern?.[card.key] ?? []).map((q) => ({
+                        question_id: q.question_id,
+                        subject_id: q.subject_id,
+                      })),
+                      `Prática — ${SEQUENCE_PATTERN_LABELS[card.key].toLowerCase()}`
+                    )
+                  }
+                  className={cn(
+                    "mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium text-white disabled:opacity-50",
+                    card.btnClass
+                  )}
+                >
+                  {practicing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  Praticar
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-3">
           <h2 className="mb-1 font-semibold text-slate-900">
             Distribuição de erros por questão
           </h2>
-          {topicFilter && (
+          {filterHints.length > 0 && (
             <p className="mb-2 text-xs text-teal-700">
-              Filtrado: {topicFilter.topic}
+              Filtrado: {filterHints.join(" · ")}
             </p>
           )}
           <ErrorDistributionChart
@@ -302,12 +452,11 @@ export default function StatisticsAnalysisTab({
         <ErrorMetaCharts taxonomy={data.taxonomy} outcomes={data.outcomes} />
       </section>
 
-      {/* Compact list of top wrongs for accessibility */}
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-100 px-4 py-3">
           <h2 className="font-semibold text-slate-900">
             Ranking de questões mais erradas
-            {topicFilter ? " (filtrado)" : ""}
+            {filterHints.length ? " (filtrado)" : ""}
           </h2>
         </div>
         <ul className="divide-y divide-slate-100">
@@ -325,9 +474,17 @@ export default function StatisticsAnalysisTab({
                   <p className="line-clamp-2 text-sm text-slate-800">
                     {q.statement_preview || "Sem enunciado"}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {q.subject_name} · {q.tec_topic}
-                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <SequencePatternBadge pattern={q.sequence_pattern} />
+                    {q.sequence_preview ? (
+                      <span className="font-mono text-[10px] text-slate-400">
+                        {q.sequence_preview}
+                      </span>
+                    ) : null}
+                    <span className="text-xs text-slate-500">
+                      {q.subject_name} · {q.tec_topic}
+                    </span>
+                  </div>
                 </div>
                 <span className="shrink-0 text-sm font-semibold tabular-nums text-red-600">
                   {q.wrong_count}×
