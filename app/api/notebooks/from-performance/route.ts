@@ -7,12 +7,22 @@ import {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, name, subject_id, folder_id, rules } = body as {
+  const {
+    user_id,
+    name,
+    subject_id,
+    folder_id,
+    rules,
+    question_ids,
+    library_saved,
+  } = body as {
     user_id: string
     name: string
     subject_id: string
     folder_id?: string
     rules?: PerformanceNotebookRules
+    question_ids?: string[]
+    library_saved?: boolean
   }
 
   if (!user_id || !name || !subject_id) {
@@ -23,10 +33,17 @@ export async function POST(req: Request) {
   }
 
   try {
-    const questionIds = await pickQuestionIdsFromPerformance(user_id, {
-      ...rules,
-      subject_id,
-    })
+    const fromIds = Array.isArray(question_ids)
+      ? question_ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : []
+
+    const questionIds =
+      fromIds.length > 0
+        ? fromIds.slice(0, 200)
+        : await pickQuestionIdsFromPerformance(user_id, {
+            ...rules,
+            subject_id,
+          })
 
     if (!questionIds.length) {
       return NextResponse.json(
@@ -40,7 +57,8 @@ export async function POST(req: Request) {
       name,
       subject_id,
       questionIds,
-      folder_id
+      folder_id,
+      library_saved ?? true
     )
 
     return NextResponse.json({

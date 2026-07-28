@@ -16,6 +16,7 @@ import {
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import PerformanceStackBar from "@/components/questions/PerformanceStackBar"
+import StatisticsAnalysisTab from "@/components/questions/StatisticsAnalysisTab"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type {
@@ -26,6 +27,7 @@ import type {
 } from "@/lib/question-statistics"
 
 type SortMode = "index" | "strong" | "weak"
+type StatsTab = "overview" | "analysis"
 
 const PERIOD_OPTIONS: { value: StatsPeriod; label: string }[] = [
   { value: "all", label: "Acumulado" },
@@ -149,6 +151,7 @@ export default function QuestoesEstatisticasPage() {
   const [showGraph, setShowGraph] = useState(true)
   const [showText, setShowText] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [activeTab, setActiveTab] = useState<StatsTab>("overview")
 
   const loadStats = useCallback(
     async (uid: string, p: StatsPeriod, subjectFilter: Set<string>) => {
@@ -268,6 +271,35 @@ export default function QuestoesEstatisticasPage() {
         </p>
       </header>
 
+      <div
+        role="tablist"
+        aria-label="Abas de estatísticas"
+        className="flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1"
+      >
+        {(
+          [
+            ["overview", "Visão geral"],
+            ["analysis", "Análise"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === id}
+            onClick={() => setActiveTab(id)}
+            className={cn(
+              "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition",
+              activeTab === id
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-slate-500">Período</span>
@@ -322,7 +354,14 @@ export default function QuestoesEstatisticasPage() {
         </Card>
       )}
 
-      {loading ? (
+      {activeTab === "analysis" && userId ? (
+        <StatisticsAnalysisTab
+          userId={userId}
+          period={period}
+          selectedSubjects={selectedSubjects}
+          allSubjects={allSubjects}
+        />
+      ) : loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-slate-500">
           <Loader2 className="h-5 w-5 animate-spin" />
           Carregando estatísticas…
