@@ -335,14 +335,15 @@ export default function HomeAgenda({ userId }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-slate-500">
+          <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
             {["seg", "ter", "qua", "qui", "sex", "sáb", "dom"].map((d) => (
               <span key={d}>{d}</span>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1.5">
             {monthGrid.map((d) => {
               const inMonth = d.getMonth() === anchor.getMonth()
+              const isToday = toDateInputValue(d) === toDateInputValue(new Date())
               const dayEvents = eventsForDay(d)
               return (
                 <button
@@ -352,24 +353,38 @@ export default function HomeAgenda({ userId }: Props) {
                     setAnchor(d)
                     setTab("day")
                   }}
-                  className={`min-h-[72px] rounded-lg border p-1 text-left text-xs ${
-                    inMonth
-                      ? "border-slate-100 bg-white hover:border-blue-200"
-                      : "border-transparent bg-slate-50/50 text-slate-400"
+                  className={`min-h-[72px] rounded-lg border p-1.5 text-left text-xs transition ${
+                    isToday
+                      ? "border-blue-400 bg-blue-50 shadow-sm ring-1 ring-blue-200 hover:border-blue-500"
+                      : inMonth
+                        ? "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"
+                        : "border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200"
                   }`}
                 >
-                  <span className="font-medium">{d.getDate()}</span>
+                  <span
+                    className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[13px] font-semibold tabular-nums ${
+                      isToday
+                        ? "bg-blue-600 text-white"
+                        : inMonth
+                          ? "text-slate-800"
+                          : "text-slate-400"
+                    }`}
+                  >
+                    {d.getDate()}
+                  </span>
                   {dayEvents.slice(0, 2).map((ev) => (
                     <span
                       key={ev.id}
-                      className="mt-0.5 block truncate rounded px-0.5 text-[10px] text-white"
+                      className="mt-0.5 block truncate rounded px-0.5 text-[10px] font-medium text-white"
                       style={{ backgroundColor: ev.color }}
                     >
                       {ev.title}
                     </span>
                   ))}
                   {dayEvents.length > 2 && (
-                    <span className="text-[10px] text-slate-500">+{dayEvents.length - 2}</span>
+                    <span className="text-[10px] font-medium text-slate-600">
+                      +{dayEvents.length - 2}
+                    </span>
                   )}
                 </button>
               )
