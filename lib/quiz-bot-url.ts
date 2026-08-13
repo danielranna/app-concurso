@@ -20,6 +20,11 @@ export function getQuizLinkRequestUrl(): string | null {
   return base ? `${base}/api/flashcards-link-request` : null
 }
 
+export function getQuizUnlinkRequestUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/flashcards-unlink-request` : null
+}
+
 export function getQuizCadernoFromJsonUrl(): string | null {
   const base = getQuizBotBaseUrl()
   return base ? `${base}/api/caderno-from-json` : null
