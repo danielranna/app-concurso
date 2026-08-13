@@ -450,7 +450,7 @@ export async function sendNotebookToWhatsapp(input: {
   const questions = (nq ?? []).map((row, i) => {
     const q = unwrapQ(row.questions)
     return {
-      position: row.position ?? i + 1,
+      position: i + 1,
       tecQuestionId: q?.tec_id,
       tecUrl: q?.tec_url,
       banca: q?.banca,
