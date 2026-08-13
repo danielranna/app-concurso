@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
+import { backfillWhatsappAnswers } from "@/lib/quiz-sync"
 
 /**
  * Marca whatsapp_authorized=true após o usuário confirmar SIM no WhatsApp.
@@ -33,6 +34,8 @@ export async function POST(req: Request) {
     .eq("user_id", user_id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  void backfillWhatsappAnswers(user_id, settings.whatsapp_jid)
 
   return NextResponse.json({ ok: true, whatsapp_authorized: true })
 }

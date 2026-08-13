@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getQuizBotSecret } from "@/lib/quiz-bot-url"
 import { supabaseServer } from "@/lib/supabase-server"
+import { backfillWhatsappAnswers } from "@/lib/quiz-sync"
 
 /**
  * Chamado pelo Papa Vagas / bot quando o usuário responde SIM.
@@ -53,6 +54,21 @@ export async function POST(req: Request) {
     .eq("user_id", user_id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const jid =
+    typeof userJid === "string" && userJid.trim()
+      ? userJid.trim()
+      : (
+          await supabaseServer
+            .from("flashcard_bot_settings")
+            .select("whatsapp_jid")
+            .eq("user_id", user_id)
+            .maybeSingle()
+        ).data?.whatsapp_jid
+
+  if (jid) {
+    void backfillWhatsappAnswers(user_id, jid)
+  }
 
   return NextResponse.json({ ok: true, user_id })
 }

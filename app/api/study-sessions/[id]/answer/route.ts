@@ -9,6 +9,7 @@ import {
   recordAttempt,
   refreshNotebookProgress,
 } from "@/lib/question-study"
+import { maybePushNotebookAnswer } from "@/lib/quiz-sync"
 
 export async function POST(
   req: Request,
@@ -24,6 +25,8 @@ export async function POST(
     duration_ms,
     tec_id,
     confidence_level,
+    tags,
+    comment,
   } = body
 
   if (!user_id || !question_id || !selected_answer || tec_id == null) {
@@ -96,9 +99,20 @@ export async function POST(
     is_correct,
     duration_ms: duration_ms ?? null,
     confidence_level: confidence,
+    attempt_tags: Array.isArray(tags) ? tags : undefined,
   })
 
   if (notebook_id) {
+    void maybePushNotebookAnswer({
+      notebookId: notebook_id,
+      userId: user_id,
+      questionId: question_id,
+      selectedAnswer: selected_answer,
+      confidenceLevel: confidence,
+      durationMs: duration_ms ?? null,
+      comment: comment ?? null,
+      tags: Array.isArray(tags) ? tags : [],
+    })
     await refreshNotebookProgress(notebook_id, user_id)
 
     const { data: snb } = await supabaseServer

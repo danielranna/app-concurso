@@ -20,7 +20,32 @@ export function getQuizLinkRequestUrl(): string | null {
   return base ? `${base}/api/flashcards-link-request` : null
 }
 
-export function getQuizUnlinkRequestUrl(): string | null {
+export function getQuizCadernoFromJsonUrl(): string | null {
   const base = getQuizBotBaseUrl()
-  return base ? `${base}/api/flashcards-unlink-request` : null
+  return base ? `${base}/api/caderno-from-json` : null
+}
+
+export function getQuizSyncIngestUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-ingest` : null
+}
+
+export function getQuizSyncAssistUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-assist` : null
+}
+
+export function getQuizSyncOmissasUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-omissas` : null
+}
+
+export function getQuizSyncInventoryUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-inventory` : null
+}
+
+export function getQuizSyncAnswersUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-answers` : null
 }

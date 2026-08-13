@@ -202,7 +202,7 @@ export default function CicloMateriasPage() {
 
       {allSubjects.length === 0 && (
         <p className="text-sm text-slate-500">
-          Nenhuma matéria cadastrada. Crie matérias no mapa de erros primeiro.
+          Nenhuma matéria cadastrada. Crie matérias em Matérias primeiro.
         </p>
       )}
 

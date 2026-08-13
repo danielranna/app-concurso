@@ -1,9 +1,34 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 
-/* =========================
-   DELETE /api/subjects/:id
-========================= */
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const body = await req.json().catch(() => ({}))
+  const name = String(body.name || "").trim()
+  if (!id || !name) {
+    return NextResponse.json({ error: "ID e nome são obrigatórios" }, { status: 400 })
+  }
+
+  const { data: subject } = await supabaseServer
+    .from("subjects")
+    .select("user_id")
+    .eq("id", id)
+    .single()
+
+  const { error } = await supabaseServer.from("subjects").update({ name }).eq("id", id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (subject?.user_id) {
+    const { revalidateTag } = await import("next/cache")
+    revalidateTag(`subjects-${subject.user_id}`, "max")
+  }
+
+  return NextResponse.json({ success: true })
+}
+
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }

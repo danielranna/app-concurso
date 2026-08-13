@@ -58,14 +58,11 @@ export async function POST(req: Request) {
     )
   }
 
-  const { error } = await supabaseServer
+  const { data, error } = await supabaseServer
     .from("subjects")
-    .insert([
-      {
-        user_id,
-        name
-      }
-    ])
+    .insert([{ user_id, name }])
+    .select("*")
+    .single()
 
   if (error) {
     return NextResponse.json(
@@ -74,8 +71,7 @@ export async function POST(req: Request) {
     )
   }
 
-  // Revalida o cache após inserção
   revalidateTag(`subjects-${user_id}`, "max")
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, data })
 }

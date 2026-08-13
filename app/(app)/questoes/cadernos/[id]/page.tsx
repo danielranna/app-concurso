@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { ArrowLeft, Bookmark, Pencil, RotateCcw, Trash2 } from "lucide-react"
+import { ArrowLeft, Bookmark, MessageCircle, Pencil, RotateCcw, Trash2 } from "lucide-react"
 import { clearDraftScope, draftScopeKey } from "@/lib/question-draft-cache"
 import QuestionSolver from "@/components/questions/QuestionSolver"
 import StudyTimer from "@/components/questions/StudyTimer"
 import SaveNotebookModal from "@/components/questions/SaveNotebookModal"
 import EditQuestionModal from "@/components/questions/EditQuestionModal"
+import SendToWhatsAppModal from "@/components/questions/SendToWhatsAppModal"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import type { NavMode } from "@/lib/study-navigation"
 
@@ -47,6 +48,7 @@ export default function ResolverCadernoPage() {
   })
   const [notebookCompletePaused, setNotebookCompletePaused] = useState(false)
   const [timersPaused, setTimersPaused] = useState(false)
+  const [showWaSend, setShowWaSend] = useState(false)
 
   function reloadNotebook() {
     fetch(`/api/notebooks/${notebookId}`)
@@ -156,6 +158,8 @@ export default function ResolverCadernoPage() {
       duration_ms: number
       tec_id: number
       confidence_level: ConfidenceLevel
+      tags?: string[]
+      comment?: string | null
     }) => {
       const res = await fetch(`/api/notebooks/${notebookId}/answer`, {
         method: "POST",
@@ -331,6 +335,13 @@ export default function ResolverCadernoPage() {
             </button>
             <button
               type="button"
+              onClick={() => setShowWaSend(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-50"
+            >
+              <MessageCircle className="h-4 w-4" /> Enviar ao WhatsApp
+            </button>
+            <button
+              type="button"
               onClick={deleteNotebook}
               className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
             >
@@ -359,6 +370,16 @@ export default function ResolverCadernoPage() {
           onNotebookComplete={handleNotebookComplete}
         />
       </div>
+
+      {userId && notebook && (
+        <SendToWhatsAppModal
+          open={showWaSend}
+          onClose={() => setShowWaSend(false)}
+          userId={userId}
+          notebookId={notebookId}
+          notebookName={notebook.name}
+        />
+      )}
 
       {userId && notebook && (
         <SaveNotebookModal

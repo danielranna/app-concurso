@@ -56,7 +56,7 @@ export default function CoachMateriasPage() {
         ))}
         {!subjects.length && (
           <li className="px-4 py-6 text-center text-sm text-slate-500">
-            Cadastre matérias em Configurações ou no mapa de erros.
+            Cadastre matérias em Matérias.
           </li>
         )}
       </ul>

@@ -128,7 +128,7 @@ export async function pickQuestionIdsFromPerformance(
 export async function createNotebookFromQuestionIds(
   userId: string,
   name: string,
-  subjectId: string,
+  subjectId: string | null,
   questionIds: string[],
   folderId?: string | null,
   librarySaved = true

@@ -176,10 +176,11 @@ export async function recordAttempt(params: {
   is_correct: boolean
   duration_ms: number | null
   confidence_level?: ConfidenceLevel
+  attempt_tags?: string[]
 }) {
   const confidence = params.confidence_level ?? "seguro"
   const outcome_category = computeOutcomeCategory(confidence, params.is_correct)
-  const { error } = await supabaseServer.from("question_attempts").insert({
+  const payload: Record<string, unknown> = {
     user_id: params.user_id,
     question_id: params.question_id,
     notebook_id: params.notebook_id,
@@ -189,7 +190,15 @@ export async function recordAttempt(params: {
     duration_ms: params.duration_ms,
     confidence_level: confidence,
     outcome_category,
-  })
+  }
+  if (params.attempt_tags?.length) payload.attempt_tags = params.attempt_tags
+  const { error } = await supabaseServer.from("question_attempts").insert(payload)
+  if (error && /attempt_tags/i.test(error.message)) {
+    delete payload.attempt_tags
+    const retry = await supabaseServer.from("question_attempts").insert(payload)
+    if (retry.error) throw new Error(retry.error.message)
+    return
+  }
   if (error) throw new Error(error.message)
 }
 

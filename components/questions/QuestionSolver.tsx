@@ -8,6 +8,7 @@ import QuickNote from "@/components/questions/QuickNote"
 import PerformanceModal from "@/components/questions/PerformanceModal"
 import QuestionOptions from "@/components/questions/QuestionOptions"
 import ConfidenceToggles from "@/components/questions/ConfidenceToggles"
+import WhatsAppStudyPanel from "@/components/questions/WhatsAppStudyPanel"
 import StudyNavBar from "@/components/questions/StudyNavBar"
 import { QuestionTimerDisplay } from "@/components/questions/StudyTimer"
 import QuestionContentDisplay from "@/components/questions/QuestionContentDisplay"
@@ -68,7 +69,12 @@ type Props = {
   soloQuestionId?: string
   returnHref?: string
   fetchQueue: (opts?: NavOpts) => Promise<{
-    current: { question_id: string; tec_id: number; notebook_id: string } | null
+    current: {
+      question_id: string
+      tec_id: number
+      notebook_id: string
+      short_id?: string
+    } | null
     question: Question | null
     options: Option[]
     stats: { total: number; resolved: number; correct: number; wrong: number; pending: number }
@@ -81,6 +87,8 @@ type Props = {
     tec_id: number
     notebook_id?: string
     confidence_level: ConfidenceLevel
+    tags?: string[]
+    comment?: string | null
   }) => Promise<SubmitAnswerResult>
   mapping?: { subject_id: string; topic_id: string } | null
   onCreateWrongNotebook?: () => Promise<void>
@@ -93,6 +101,11 @@ type Props = {
   onNotebookComplete?: () => void
   /** Pausa o timer da questão (ex.: quando o cronômetro do caderno está pausado). */
   timerPaused?: boolean
+  whatsappOverlay?: {
+    enabled?: boolean
+    shortId?: string | null
+    notebookId?: string
+  }
 }
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -129,6 +142,7 @@ export default function QuestionSolver({
   timerPaused = false,
   soloQuestionId,
   returnHref,
+  whatsappOverlay,
 }: Props) {
   const scopeId =
     mode === "notebook"
@@ -146,11 +160,14 @@ export default function QuestionSolver({
     question_id: string
     tec_id: number
     notebook_id: string
+    short_id?: string
   } | null>(null)
 
   const [selected, setSelected] = useState<string | null>(null)
   const [eliminated, setEliminated] = useState<Set<string>>(new Set())
   const [confidence, setConfidence] = useState<ConfidenceLevel>("seguro")
+  const [waTags, setWaTags] = useState<string[]>([])
+  const [waComment, setWaComment] = useState("")
   const [questionMs, setQuestionMs] = useState(0)
   const [result, setResult] = useState<{
     is_correct: boolean
@@ -253,6 +270,8 @@ export default function QuestionSolver({
         })
         applyDraft(qid, getDraft(scopeKey, qid))
         questionStartedAt.current = Date.now()
+        setWaTags([])
+        setWaComment("")
       } else {
         currentQuestionId.current = null
         setSelected(null)
@@ -418,6 +437,8 @@ export default function QuestionSolver({
         tec_id: current.tec_id,
         notebook_id: current.notebook_id,
         confidence_level: confidence,
+        tags: waTags,
+        comment: waComment || null,
       })
       if ("error" in res) {
         setResolveError(res.error)
@@ -467,6 +488,8 @@ export default function QuestionSolver({
     submitAnswer,
     mode,
     onNotebookComplete,
+    waTags,
+    waComment,
   ])
 
   resolveRef.current = handleResolve
@@ -688,10 +711,24 @@ export default function QuestionSolver({
           </div>
         </section>
 
-        <aside className="order-2 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+        <aside className="order-2 space-y-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
           <div className="h-full rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
             <QuickNote questionId={question.id} userId={userId} layout="sidebar" />
           </div>
+          <WhatsAppStudyPanel
+            userId={userId}
+            questionId={question.id}
+            notebookId={whatsappOverlay?.notebookId ?? current?.notebook_id ?? notebookId}
+            shortIdHint={whatsappOverlay?.shortId ?? current?.short_id}
+            forceEnabled={whatsappOverlay?.enabled}
+            questionType={question.type}
+            options={options}
+            selected={selected}
+            tags={waTags}
+            comment={waComment}
+            onTagsChange={setWaTags}
+            onCommentChange={setWaComment}
+          />
         </aside>
 
         <div className="order-3 space-y-4 lg:col-start-1 lg:row-start-2">

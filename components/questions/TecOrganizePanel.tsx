@@ -112,7 +112,7 @@ function ParentFolderSelect({
 }) {
   return (
     <select
-      className={className}
+      className={`bg-white text-slate-900 ${className}`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
@@ -1019,7 +1019,7 @@ export default function TecOrganizePanel({ userId }: { userId: string }) {
                   <select
                     value={mapSubjectId}
                     onChange={(e) => setMapSubjectId(e.target.value)}
-                    className="mt-1 w-full rounded border px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
                   >
                     <option value="">Selecione</option>
                     {subjects.map((s) => (

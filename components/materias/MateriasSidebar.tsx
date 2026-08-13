@@ -167,7 +167,7 @@ export default function MateriasSidebar({
           <p className="px-4 py-6 text-center text-sm leading-relaxed text-slate-500">
             {query
               ? "Nenhuma matéria encontrada."
-              : "Cadastre matérias no mapa de erros ou nas configurações."}
+              : "Cadastre matérias no hub Matérias."}
           </p>
         ) : (
           <ul className="space-y-0.5 px-2">

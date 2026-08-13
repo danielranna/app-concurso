@@ -1,20 +1,10 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Trash2, LogOut } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useDataCache } from "@/contexts/DataCacheContext"
-
-type Subject = {
-  id: string
-  name: string
-}
-
-type Topic = {
-  id: string
-  name: string
-}
 
 type ErrorType = {
   id: string
@@ -25,42 +15,25 @@ type Props = {
   open: boolean
   onClose: () => void
   userId: string
-  /** Chamado após qualquer alteração (matérias, temas, tipos, status) para o pai atualizar sem F5 */
+  /** Chamado após qualquer alteração (tipos, status) para o pai atualizar sem F5 */
   onDataChange?: () => void
 }
 
 export default function SettingsModal({ open, onClose, userId, onDataChange }: Props) {
   const router = useRouter()
   const cache = useDataCache()
-  const [tab, setTab] = useState<"subjects" | "topics" | "errorTypes" | "status">("subjects")
+  const [tab, setTab] = useState<"errorTypes" | "status">("errorTypes")
 
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [topics, setTopics] = useState<Topic[]>([])
   const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
   const [errorStatuses, setErrorStatuses] = useState<Array<{ id: string; name: string; color?: string | null }>>([])
 
-  const [newSubject, setNewSubject] = useState("")
-  const [newTopic, setNewTopic] = useState("")
   const [newErrorType, setNewErrorType] = useState("")
   const [newErrorStatus, setNewErrorStatus] = useState("")
 
-  const [selectedSubject, setSelectedSubject] = useState("")
   const [editingColor, setEditingColor] = useState<{ [key: string]: string }>({})
   const [showColorPicker, setShowColorPicker] = useState<{ [key: string]: boolean }>({})
 
   /* ---------- LOADERS ---------- */
-
-  async function loadSubjects() {
-    const data = await cache.getSubjects(userId)
-    setSubjects(data)
-  }
-
-  async function loadTopics(subjectId: string) {
-    const res = await fetch(
-      `/api/topics?user_id=${userId}&subject_id=${subjectId}`
-    )
-    setTopics(await res.json())
-  }
 
   async function loadErrorTypes() {
     const data = await cache.getErrorTypes(userId)
@@ -74,95 +47,10 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
 
   useEffect(() => {
     if (open) {
-      loadSubjects()
       loadErrorTypes()
       loadErrorStatuses()
     }
   }, [open])
-
-  /* ---------- CRUD SUBJECT ---------- */
-
-  async function createSubject() {
-    if (!newSubject) return
-    const name = newSubject.trim()
-    const tempId = `temp-subject-${Date.now()}`
-    setSubjects(prev => [...prev, { id: tempId, name }])
-    setNewSubject("")
-
-    const res = await fetch("/api/subjects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, name })
-    })
-    if (res.ok) {
-      cache.invalidateSubjects(userId)
-      onDataChange?.()
-    } else {
-      setSubjects(prev => prev.filter(s => s.id !== tempId))
-    }
-  }
-
-  async function deleteSubject(id: string) {
-    if (!confirm("Deseja realmente excluir esta matéria?")) return
-    const removed = subjects.find(s => s.id === id)
-    if (!removed) return
-    if (id.startsWith("temp-")) {
-      setSubjects(prev => prev.filter(s => s.id !== id))
-      onDataChange?.()
-      return
-    }
-    setSubjects(prev => prev.filter(s => s.id !== id))
-    const res = await fetch(`/api/subjects/${id}`, { method: "DELETE" })
-    if (res.ok) {
-      cache.invalidateSubjects(userId)
-      onDataChange?.()
-    } else {
-      setSubjects(prev => [...prev, removed])
-    }
-  }
-
-  /* ---------- CRUD TOPIC ---------- */
-
-  async function createTopic() {
-    if (!newTopic || !selectedSubject) return
-    const name = newTopic.trim()
-    const tempId = `temp-topic-${Date.now()}`
-    setTopics(prev => [...prev, { id: tempId, name }])
-    setNewTopic("")
-
-    const res = await fetch("/api/topics", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        subject_id: selectedSubject,
-        name
-      })
-    })
-    if (res.ok) {
-      onDataChange?.()
-    } else {
-      setTopics(prev => prev.filter(t => t.id !== tempId))
-    }
-  }
-
-  async function deleteTopic(id: string) {
-    if (!confirm("Deseja realmente excluir este tema?")) return
-    const removed = topics.find(t => t.id === id)
-    if (!removed) return
-    if (id.startsWith("temp-")) {
-      setTopics(prev => prev.filter(t => t.id !== id))
-      onDataChange?.()
-      return
-    }
-    setTopics(prev => prev.filter(t => t.id !== id))
-    const res = await fetch(`/api/topics/${id}`, { method: "DELETE" })
-    if (res.ok) {
-      onDataChange?.()
-    } else {
-      setTopics(prev => [...prev, removed])
-    }
-  }
 
   /* ---------- CRUD ERROR TYPE ---------- */
 
@@ -335,28 +223,13 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
         <div className="grid grid-cols-4">
           {/* SIDEBAR */}
           <aside className="bg-slate-50 p-4 space-y-2">
-            <button
-              onClick={() => setTab("subjects")}
-              className={`w-full rounded-lg px-3 py-2 text-left transition ${
-                tab === "subjects"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              Matérias
-            </button>
-
-            <button
-              onClick={() => setTab("topics")}
-              className={`w-full rounded-lg px-3 py-2 text-left transition ${
-                tab === "topics"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-700 hover:bg-slate-100"
-              }`}
-            >
-              Temas
-            </button>
-
+            <p className="px-1 pb-2 text-xs text-slate-500">
+              Matérias e temas agora ficam em{" "}
+              <a href="/materias" className="font-medium text-slate-800 underline">
+                Matérias
+              </a>
+              .
+            </p>
             <button
               onClick={() => setTab("errorTypes")}
               className={`w-full rounded-lg px-3 py-2 text-left transition ${
@@ -382,100 +255,6 @@ export default function SettingsModal({ open, onClose, userId, onDataChange }: P
 
           {/* CONTENT */}
           <main className="col-span-3 p-6">
-            {tab === "subjects" && (
-              <>
-                <div className="mb-4 flex gap-2">
-                  <input
-                    className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    placeholder="Nome da matéria"
-                    value={newSubject}
-                    onChange={e => setNewSubject(e.target.value)}
-                  />
-                  <button
-                    onClick={createSubject}
-                    className="rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-800"
-                  >
-                    Adicionar
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {subjects.map(s => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between rounded-lg bg-slate-50 p-3"
-                    >
-                      <span className="text-slate-800">{s.name}</span>
-                      <button
-                        onClick={() => deleteSubject(s.id)}
-                        className="text-slate-600 hover:text-red-600 transition"
-                        title="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {tab === "topics" && (
-              <>
-                <select
-                  className="mb-3 w-full rounded border border-slate-300 p-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                  value={selectedSubject}
-                  onChange={e => {
-                    setSelectedSubject(e.target.value)
-                    loadTopics(e.target.value)
-                  }}
-                >
-                  <option value="">Selecione a matéria</option>
-                  {subjects.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-
-                {selectedSubject && (
-                  <>
-                    <div className="mb-4 flex gap-2">
-                      <input
-                        className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                        placeholder="Nome do tema"
-                        value={newTopic}
-                        onChange={e => setNewTopic(e.target.value)}
-                      />
-                      <button
-                        onClick={createTopic}
-                        className="rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-800"
-                      >
-                        Adicionar
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      {topics.map(t => (
-                        <div
-                          key={t.id}
-                          className="flex items-center justify-between rounded-lg bg-slate-50 p-3"
-                        >
-                          <span className="text-slate-800">{t.name}</span>
-                          <button
-                            onClick={() => deleteTopic(t.id)}
-                            className="text-slate-600 hover:text-red-600 transition"
-                            title="Excluir"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-
             {tab === "errorTypes" && (
               <>
                 <div className="mb-4 flex gap-2">
