@@ -94,12 +94,28 @@ async function quizFetch(url: string, init?: RequestInit, meta?: QuizFetchMeta) 
   return { res, data }
 }
 
+function jidCandidates(userJid: string): string[] {
+  const raw = String(userJid || "").trim()
+  if (!raw) return []
+  const out = new Set<string>([raw])
+  const at = raw.indexOf("@")
+  const local = (at >= 0 ? raw.slice(0, at) : raw).trim()
+  if (local) {
+    out.add(`${local}@s.whatsapp.net`)
+    out.add(`${local}@lid`)
+  }
+  return [...out]
+}
+
 export async function resolveUserIdByJid(userJid: string): Promise<string | null> {
+  const candidates = jidCandidates(userJid)
+  if (!candidates.length) return null
   const { data } = await supabaseServer
     .from("flashcard_bot_settings")
-    .select("user_id")
-    .eq("whatsapp_jid", userJid)
+    .select("user_id, whatsapp_jid")
     .eq("whatsapp_authorized", true)
+    .in("whatsapp_jid", candidates)
+    .limit(1)
     .maybeSingle()
   return data?.user_id ?? null
 }
@@ -257,6 +273,34 @@ export async function ensureReplica(
   return replicaId
 }
 
+async function findQuizQuestionLink(
+  shortId: string,
+  cadernoId?: number | null
+): Promise<{
+  question_id: string
+  notebook_id: string
+  tec_id: number
+  caderno_id: number
+} | null> {
+  const sid = String(shortId || "").trim().toUpperCase()
+  if (!sid) return null
+  let q = supabaseServer
+    .from("quiz_question_links")
+    .select("question_id, notebook_id, tec_id, caderno_id")
+    .eq("short_id", sid)
+  if (cadernoId) q = q.eq("caderno_id", cadernoId)
+  const { data: links } = await q.limit(20)
+  if (!links?.length) return null
+  const nbIds = links.map((l) => l.notebook_id)
+  const { data: syncs } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id")
+    .in("notebook_id", nbIds)
+  const sourceSet = new Set((syncs ?? []).map((s) => s.notebook_id as string))
+  const preferred = links.find((l) => sourceSet.has(l.notebook_id)) ?? links[0]
+  return preferred
+}
+
 export async function upsertSyncedNote(
   userId: string,
   questionId: string,
@@ -306,11 +350,7 @@ export async function ingestWhatsappAnswer(input: {
   let notebookId: string | null = null
 
   if (input.shortId) {
-    const { data: link } = await supabaseServer
-      .from("quiz_question_links")
-      .select("question_id, notebook_id, tec_id, caderno_id")
-      .eq("short_id", input.shortId.toUpperCase())
-      .maybeSingle()
+    const link = await findQuizQuestionLink(input.shortId, input.cadernoId)
     if (link) {
       questionId = link.question_id
       if (input.cadernoId && Number(link.caderno_id) === Number(input.cadernoId)) {
@@ -512,14 +552,14 @@ export async function flushPendingForTec(input: {
     if (input.cadernoId) upd = upd.eq("caderno_id", input.cadernoId)
     await upd
   }
-  if (!input.tecId) return { flushed: 0 }
+  if (!input.tecId) return { flushed: 0, reason: "no_tec_id" }
 
   const { data: q } = await supabaseServer
     .from("questions")
     .select("id")
     .eq("tec_id", input.tecId)
     .maybeSingle()
-  if (!q) return { flushed: 0 }
+  if (!q) return { flushed: 0, reason: "no_question" }
 
   let attemptQuery = supabaseServer
     .from("question_attempts")
@@ -533,10 +573,12 @@ export async function flushPendingForTec(input: {
   }
 
   const { data: attempts } = await attemptQuery
+  if (!attempts?.length) return { flushed: 0, reason: "no_attempts" }
 
   const seen = new Set<string>()
   let flushed = 0
-  for (const a of attempts ?? []) {
+  let lastSkip: string | null = null
+  for (const a of attempts) {
     if (seen.has(a.user_id)) continue
     seen.add(a.user_id)
     const result = await pushAnswerToWhatsapp({
@@ -550,8 +592,13 @@ export async function flushPendingForTec(input: {
       cadernoId: input.cadernoId ?? null,
     })
     if (result.ok && !result.pending) flushed += 1
+    else if ("reason" in result && result.reason) lastSkip = String(result.reason)
+    else if (result.pending) lastSkip = "pending"
   }
-  return { flushed }
+  return {
+    flushed,
+    reason: flushed > 0 ? null : lastSkip ?? "push_failed",
+  }
 }
 
 export async function sendNotebookToWhatsapp(input: {

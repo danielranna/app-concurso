@@ -40,6 +40,7 @@ export async function POST(req: Request) {
       kind: "flush",
       ok: true,
       http_status: 200,
+      reason: result.reason ?? (result.flushed === 0 ? "no_attempts" : null),
       caderno_id: cadernoId ?? null,
       tec_id: Number.isFinite(tecId) ? tecId : null,
       payload: { request: body, result },

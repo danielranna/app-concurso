@@ -17,6 +17,19 @@ type EventRow = {
   created_at: string
 }
 
+const KIND_LABEL: Record<string, string> = {
+  flush: "Publicação (não é resposta)",
+  answer: "Resposta do WhatsApp",
+  send: "Envio do caderno",
+  ingest: "Resposta do app → WhatsApp",
+  unlink: "Desvincular caderno",
+  status: "Status",
+}
+
+function kindLabel(kind: string) {
+  return KIND_LABEL[kind] || kind
+}
+
 export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
   const [events, setEvents] = useState<EventRow[]>([])
   const [direction, setDirection] = useState<"all" | "in" | "out">("all")
@@ -53,7 +66,9 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
     <div className="max-w-3xl">
       <p className="mb-3 text-sm text-slate-600">
         Diagnóstico temporário: o que chega do Papa Vagas/WhatsApp e o que este app envia. Atualiza
-        sozinho a cada 8s.
+        sozinho a cada 8s. <strong>flush</strong> = questão publicada no WhatsApp (empurra
+        respostas já feitas neste app). <strong>answer</strong> = você respondeu no WhatsApp/omissas
+        e o progresso deve aparecer no caderno.
       </p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {(["all", "in", "out"] as const).map((d) => (
@@ -85,7 +100,7 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
           <li key={e.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-medium text-slate-900">
-                {e.direction === "in" ? "← in" : "→ out"} · {e.kind}
+                {e.direction === "in" ? "← in" : "→ out"} · {kindLabel(e.kind)}
                 {e.ok === false ? " · falhou" : e.pending ? " · pending" : e.ok ? " · ok" : ""}
               </p>
               <span className="text-xs text-slate-500">
