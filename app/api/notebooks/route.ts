@@ -61,6 +61,7 @@ export async function GET(req: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   let rows = (data ?? []) as {
+    id?: string
     answered_count?: number
     question_count?: number
   }[]
@@ -68,7 +69,21 @@ export async function GET(req: Request) {
     rows = rows.filter((nb) => (nb.answered_count ?? 0) < (nb.question_count ?? 0))
   }
 
-  return NextResponse.json(rows)
+  const ids = rows.map((r) => r.id).filter(Boolean) as string[]
+  const sharedIds = new Set<string>()
+  if (ids.length) {
+    const { data: syncs } = await supabaseServer
+      .from("quiz_notebook_sync")
+      .select("notebook_id")
+      .in("notebook_id", ids)
+    for (const s of syncs ?? []) {
+      if (s.notebook_id) sharedIds.add(s.notebook_id as string)
+    }
+  }
+
+  return NextResponse.json(
+    rows.map((r) => ({ ...r, shared: Boolean(r.id && sharedIds.has(r.id)) }))
+  )
 }
 
 export async function POST(req: Request) {

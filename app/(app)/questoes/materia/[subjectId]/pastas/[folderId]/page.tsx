@@ -15,6 +15,7 @@ type NotebookRow = {
   answered_count: number
   completed_at: string | null
   folder_id: string | null
+  shared?: boolean
 }
 
 export default function MateriaPastaPage() {
@@ -96,7 +97,14 @@ export default function MateriaPastaPage() {
             className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-4 py-3"
           >
             <div>
-              <p className="font-medium text-blue-700">{nb.name}</p>
+              <p className="font-medium text-blue-700">
+                {nb.name}
+                {nb.shared ? (
+                  <span className="ml-2 rounded-full border border-emerald-300 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+                    Compartilhado
+                  </span>
+                ) : null}
+              </p>
               <p className="text-sm text-slate-500">
                 {nb.answered_count}/{nb.question_count} respondidas
                 {nb.completed_at && " · Concluído"}

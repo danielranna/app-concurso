@@ -7,7 +7,9 @@ import {
   getQuizSyncAnswersUrl,
   getQuizSyncInventoryUrl,
   getQuizSyncOmissasUrl,
+  getQuizSyncStatusUrl,
 } from "./quiz-bot-url"
+import { capQuizSyncPayload, logQuizSyncEvent } from "./quiz-sync-log"
 import {
   computeOutcomeCategory,
   normalizeAnswer,
@@ -35,7 +37,26 @@ export function fromWaLetter(type: string, letter: string): string {
   return L.toUpperCase()
 }
 
-async function quizFetch(url: string, init?: RequestInit) {
+function kindFromQuizUrl(url: string): string {
+  const u = url.toLowerCase()
+  if (u.includes("caderno-from-json") || u.includes("caderno-upload")) return "send"
+  if (u.includes("quiz-sync-ingest")) return "ingest"
+  if (u.includes("quiz-sync-assist")) return "assist"
+  if (u.includes("quiz-sync-omissas")) return "omissas"
+  if (u.includes("quiz-sync-inventory")) return "inventory"
+  if (u.includes("quiz-sync-answers")) return "answers"
+  if (u.includes("quiz-sync-status")) return "status"
+  return "out"
+}
+
+type QuizFetchMeta = {
+  kind?: string
+  cadernoId?: number | null
+  tecId?: number | null
+  userJid?: string | null
+}
+
+async function quizFetch(url: string, init?: RequestInit, meta?: QuizFetchMeta) {
   const secret = getQuizBotSecret()
   if (!secret) throw new Error("Configure QUIZ_BOT_USERS_SECRET")
   const res = await fetch(url, {
@@ -47,6 +68,29 @@ async function quizFetch(url: string, init?: RequestInit) {
     },
   })
   const data = await res.json().catch(() => ({}))
+  const kind = meta?.kind ?? kindFromQuizUrl(url)
+  if (kind === "send" || kind === "ingest" || kind === "status" || kind === "unlink") {
+    let requestBody: unknown = null
+    if (typeof init?.body === "string") {
+      try {
+        requestBody = JSON.parse(init.body)
+      } catch {
+        requestBody = init.body.slice(0, 500)
+      }
+    }
+    await logQuizSyncEvent({
+      direction: "out",
+      kind,
+      ok: res.ok && !data.pending,
+      http_status: res.status,
+      pending: Boolean(data.pending),
+      reason: data.reason || data.error || null,
+      caderno_id: meta?.cadernoId ?? (data.cadernoId != null ? Number(data.cadernoId) : null),
+      tec_id: meta?.tecId ?? null,
+      user_jid: meta?.userJid ?? null,
+      payload: capQuizSyncPayload({ url, request: requestBody, response: data }),
+    })
+  }
   return { res, data }
 }
 
@@ -386,7 +430,18 @@ export async function pushAnswerToWhatsapp(input: {
   cadernoId?: number | null
 }) {
   const jid = await resolveJidByUserId(input.userId)
-  if (!jid) return { skipped: true, reason: "no_jid" }
+  if (!jid) {
+    await logQuizSyncEvent({
+      direction: "out",
+      kind: "ingest",
+      ok: false,
+      reason: "no_jid",
+      caderno_id: input.cadernoId ?? null,
+      user_jid: null,
+      payload: { userId: input.userId, questionId: input.questionId },
+    })
+    return { skipped: true, reason: "no_jid" }
+  }
   const ingestUrl = getQuizSyncIngestUrl()
   if (!ingestUrl) return { skipped: true, reason: "no_quiz_url" }
 
@@ -413,20 +468,29 @@ export async function pushAnswerToWhatsapp(input: {
 
   if (!cadernoId && link?.caderno_id) cadernoId = Number(link.caderno_id)
 
-  const { res, data } = await quizFetch(ingestUrl, {
-    method: "POST",
-    body: JSON.stringify({
-      userJid: jid,
-      tecId: q.tec_id,
+  const { res, data } = await quizFetch(
+    ingestUrl,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userJid: jid,
+        tecId: q.tec_id,
+        cadernoId,
+        shortId: link?.short_id ?? null,
+        answerLetter: toWaLetter(q.type, input.selectedAnswer),
+        comment: input.comment ?? null,
+        confidenceLevel: input.confidenceLevel,
+        durationMs: input.durationMs,
+        tags: input.tags ?? [],
+      }),
+    },
+    {
+      kind: "ingest",
       cadernoId,
-      shortId: link?.short_id ?? null,
-      answerLetter: toWaLetter(q.type, input.selectedAnswer),
-      comment: input.comment ?? null,
-      confidenceLevel: input.confidenceLevel,
-      durationMs: input.durationMs,
-      tags: input.tags ?? [],
-    }),
-  })
+      tecId: q.tec_id != null ? Number(q.tec_id) : null,
+      userJid: jid,
+    }
+  )
   return { ok: res.ok, pending: Boolean(data.pending), data }
 }
 
@@ -552,19 +616,23 @@ export async function sendNotebookToWhatsapp(input: {
     .eq("id", input.notebookId)
     .maybeSingle()
 
-  const { res, data } = await quizFetch(url, {
-    method: "POST",
-    body: JSON.stringify({
-      name: input.name || nb?.name || "Caderno",
-      originNotebookId: input.notebookId,
-      activate: Boolean(input.activate),
-      deliveryMode: input.deliveryMode ?? "group",
-      schedule: input.schedule ?? {},
-      privateRecipients: input.privateRecipients ?? [],
-      createdByJid: input.createdByJid ?? null,
-      questions,
-    }),
-  })
+  const { res, data } = await quizFetch(
+    url,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name || nb?.name || "Caderno",
+        originNotebookId: input.notebookId,
+        activate: Boolean(input.activate),
+        deliveryMode: input.deliveryMode ?? "group",
+        schedule: input.schedule ?? {},
+        privateRecipients: input.privateRecipients ?? [],
+        createdByJid: input.createdByJid ?? null,
+        questions,
+      }),
+    },
+    { kind: "send" }
+  )
   if (!res.ok) {
     throw new Error(data.error || `Papa Vagas ${res.status}`)
   }
@@ -581,7 +649,7 @@ export async function sendNotebookToWhatsapp(input: {
     {
       notebook_id: input.notebookId,
       caderno_id: cadernoId,
-      status: data.status ?? "inactive",
+      status: data.status === "inactive" ? "pending" : (data.status ?? "pending"),
       delivery_mode: input.deliveryMode ?? "group",
       updated_at: new Date().toISOString(),
     },
@@ -719,4 +787,138 @@ export async function callQuizAssist(userJid: string, shortId: string, letter: s
   })
   if (!res.ok) throw new Error(data.error || "Erro na assistência")
   return data
+}
+
+export async function unlinkCadernoFromApp(cadernoId: number) {
+  await supabaseServer.from("quiz_question_links").delete().eq("caderno_id", cadernoId)
+  await supabaseServer.from("quiz_notebook_sync").delete().eq("caderno_id", cadernoId)
+}
+
+export type SyncPerson = {
+  label: string
+  userJid: string | null
+  appSynced: boolean
+  chatbotSynced: boolean
+  line: string
+}
+
+export async function fetchAppSideRoster(cadernoId: number): Promise<{
+  notebookId: string | null
+  people: { label: string; userJid: string | null; appSynced: boolean }[]
+}> {
+  const { data: sync } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id")
+    .eq("caderno_id", cadernoId)
+    .maybeSingle()
+  const notebookId = (sync?.notebook_id as string | undefined) ?? null
+  const people: { label: string; userJid: string | null; appSynced: boolean }[] = []
+  if (!notebookId) return { notebookId: null, people }
+
+  const { data: nb } = await supabaseServer
+    .from("notebooks")
+    .select("user_id")
+    .eq("id", notebookId)
+    .maybeSingle()
+  const { data: replicas } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("user_id")
+    .eq("source_notebook_id", notebookId)
+  const userIds = [
+    ...new Set(
+      [nb?.user_id, ...(replicas ?? []).map((r) => r.user_id)].filter(Boolean) as string[]
+    ),
+  ]
+  if (!userIds.length) return { notebookId, people }
+
+  const { data: settings } = await supabaseServer
+    .from("flashcard_bot_settings")
+    .select("user_id, whatsapp_jid, whatsapp_display_label, whatsapp_authorized")
+    .in("user_id", userIds)
+  for (const uid of userIds) {
+    const s = settings?.find((x) => x.user_id === uid)
+    people.push({
+      label: s?.whatsapp_display_label || s?.whatsapp_jid || uid.slice(0, 8),
+      userJid: s?.whatsapp_jid ?? null,
+      appSynced: Boolean(s?.whatsapp_jid && s.whatsapp_authorized),
+    })
+  }
+  return { notebookId, people }
+}
+
+export async function fetchCadernoSyncRoster(cadernoId: number): Promise<{
+  cadernoId: number
+  notebookId: string | null
+  originNotebookId: string | null
+  people: SyncPerson[]
+}> {
+  const appSide = await fetchAppSideRoster(cadernoId)
+  const notebookId = appSide.notebookId
+
+  const statusUrl = getQuizSyncStatusUrl()
+  let engaged: { userJid: string; displayLabel?: string; engaged?: boolean }[] = []
+  let links: { userJid: string; displayLabel?: string | null; status?: string }[] = []
+  if (statusUrl) {
+    const { res, data } = await quizFetch(`${statusUrl}?cadernoId=${cadernoId}`, undefined, {
+      kind: "status",
+      cadernoId,
+    })
+    if (res.ok) {
+      engaged = Array.isArray(data.engaged) ? data.engaged : []
+      links = Array.isArray(data.flashcardsLinks) ? data.flashcardsLinks : []
+    }
+  }
+
+  const chatbotByJid = new Map<string, { label: string; synced: boolean }>()
+  for (const e of engaged) {
+    if (!e.userJid) continue
+    chatbotByJid.set(e.userJid, {
+      label: e.displayLabel || e.userJid,
+      synced: e.engaged !== false,
+    })
+  }
+  for (const l of links) {
+    if (!l.userJid) continue
+    const prev = chatbotByJid.get(l.userJid)
+    chatbotByJid.set(l.userJid, {
+      label: l.displayLabel || prev?.label || l.userJid,
+      synced: l.status === "active" || Boolean(prev?.synced),
+    })
+  }
+
+  const seenJid = new Set<string>()
+  const people: SyncPerson[] = []
+  for (const p of appSide.people) {
+    if (p.userJid) seenJid.add(p.userJid)
+    const bot = p.userJid ? chatbotByJid.get(p.userJid) : undefined
+    const chatbotSynced = Boolean(bot?.synced)
+    people.push({
+      label: p.label,
+      userJid: p.userJid,
+      appSynced: p.appSynced,
+      chatbotSynced,
+      line: `${p.label} — ${p.appSynced ? "sincronizado" : "não sincronizado"} no app · ${
+        chatbotSynced ? "sincronizado" : "não sincronizado"
+      } no chatbot`,
+    })
+  }
+  for (const [jid, bot] of chatbotByJid) {
+    if (seenJid.has(jid)) continue
+    people.push({
+      label: bot.label,
+      userJid: jid,
+      appSynced: false,
+      chatbotSynced: bot.synced,
+      line: `${bot.label} — não sincronizado no app · ${
+        bot.synced ? "sincronizado" : "não sincronizado"
+      } no chatbot`,
+    })
+  }
+
+  return {
+    cadernoId,
+    notebookId,
+    originNotebookId: notebookId,
+    people,
+  }
 }

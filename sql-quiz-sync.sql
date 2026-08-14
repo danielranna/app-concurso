@@ -77,3 +77,28 @@ CREATE POLICY "quiz_question_links_own" ON quiz_question_links FOR ALL
       WHERE n.id = quiz_question_links.notebook_id AND n.user_id = auth.uid()
     )
   );
+
+-- Diagnóstico temporário dos webhooks (dois sentidos)
+CREATE TABLE IF NOT EXISTS quiz_sync_event_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+  kind TEXT NOT NULL,
+  ok BOOLEAN,
+  http_status INT,
+  pending BOOLEAN,
+  reason TEXT,
+  caderno_id BIGINT,
+  tec_id BIGINT,
+  user_jid TEXT,
+  payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_quiz_sync_event_log_created
+  ON quiz_sync_event_log(created_at DESC);
+
+ALTER TABLE quiz_sync_event_log ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "quiz_sync_event_log_read" ON quiz_sync_event_log;
+CREATE POLICY "quiz_sync_event_log_read" ON quiz_sync_event_log FOR SELECT
+  USING (auth.uid() IS NOT NULL);

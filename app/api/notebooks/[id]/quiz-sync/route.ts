@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getSyncForNotebook, resolveJidByUserId, fetchQuizInventory } from "@/lib/quiz-sync"
+import { getSyncForNotebook, resolveJidByUserId, fetchQuizInventory, fetchCadernoSyncRoster } from "@/lib/quiz-sync"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function GET(
@@ -47,6 +47,15 @@ export async function GET(
   if (jid && enabled) {
     inventory = await fetchQuizInventory(jid)
   }
+  let people: Awaited<ReturnType<typeof fetchCadernoSyncRoster>>["people"] = []
+  if (url.searchParams.get("roster") === "1" && sync?.caderno_id) {
+    try {
+      const roster = await fetchCadernoSyncRoster(Number(sync.caderno_id))
+      people = roster.people
+    } catch {
+      people = []
+    }
+  }
   return NextResponse.json({
     enabled,
     caderno_id: sync?.caderno_id ?? null,
@@ -56,5 +65,6 @@ export async function GET(
     jid,
     assistEliminateQty: inventory.assistEliminateQty ?? 0,
     categories: inventory.categories ?? [],
+    people,
   })
 }

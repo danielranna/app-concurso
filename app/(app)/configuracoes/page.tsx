@@ -8,6 +8,7 @@ import FlashcardsBotSettings from "@/components/settings/FlashcardsBotSettings"
 import CoachAiCredentialsModal from "@/components/coach/CoachAiCredentialsModal"
 import MateriasHubManager from "@/components/materias/MateriasHubManager"
 import ErrorTaxonomyPanel from "@/components/settings/ErrorTaxonomyPanel"
+import QuizSyncWebhooksPanel from "@/components/settings/QuizSyncWebhooksPanel"
 
 const TABS = [
   { id: "flashcards", label: "Flashcards" },
@@ -16,6 +17,7 @@ const TABS = [
   { id: "materias", label: "Matérias" },
   { id: "assuntos", label: "Assuntos" },
   { id: "erros", label: "Erros" },
+  { id: "webhooks", label: "Webhooks" },
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
@@ -89,6 +91,7 @@ function ConfiguracoesHub() {
       {tab === "materias" && <MateriasHubManager focus="subjects" />}
       {tab === "assuntos" && <MateriasHubManager focus="topics" />}
       {tab === "erros" && userId && <ErrorTaxonomyPanel userId={userId} />}
+      {tab === "webhooks" && userId && <QuizSyncWebhooksPanel userId={userId} />}
     </div>
   )
 }

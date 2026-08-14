@@ -65,8 +65,8 @@ export default function SendToWhatsAppModal({
       setError(data.error || "Falha ao enviar")
       return
     }
+    setAlready({ caderno_id: data.cadernoId ?? data.caderno_id ?? null })
     onSent?.()
-    onClose()
   }
 
   return (
@@ -79,11 +79,14 @@ export default function SendToWhatsAppModal({
         {loading ? (
           <p className="text-sm text-slate-600">Carregando…</p>
         ) : already ? (
-          <p className="text-sm text-slate-700">
-            Este caderno já está no Papa Vagas
-            {already.caderno_id ? ` (caderno #${already.caderno_id})` : ""}. As respostas
-            continuam sincronizando por questão.
-          </p>
+          <div className="space-y-2">
+            <p className="text-base font-semibold text-emerald-800">Caderno compartilhado</p>
+            <p className="text-sm text-slate-700">
+              Este caderno está no Papa Vagas
+              {already.caderno_id ? ` (caderno #${already.caderno_id})` : ""}. Ritmo e ativação
+              você configura lá. As respostas sincronizam por questão.
+            </p>
+          </div>
         ) : (
           <div className="space-y-3 text-sm text-slate-800">
             <p>

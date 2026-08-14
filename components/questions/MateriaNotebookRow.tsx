@@ -15,8 +15,7 @@ export type MateriaNotebook = {
   question_count: number
   answered_count: number
   completed_at: string | null
-  folder_id: string | null
-}
+  shared?: boolean
 
 type FolderOption = { id: string; name: string }
 
@@ -73,6 +72,11 @@ export default function MateriaNotebookRow({
               {notebook.completed_at && (
                 <Badge variant="success" className="text-[10px]">
                   Concluído
+                </Badge>
+              )}
+              {notebook.shared && (
+                <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-800">
+                  Compartilhado
                 </Badge>
               )}
             </div>

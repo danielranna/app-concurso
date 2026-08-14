@@ -49,6 +49,24 @@ export default function ResolverCadernoPage() {
   const [notebookCompletePaused, setNotebookCompletePaused] = useState(false)
   const [timersPaused, setTimersPaused] = useState(false)
   const [showWaSend, setShowWaSend] = useState(false)
+  const [shared, setShared] = useState(false)
+  const [cadernoId, setCadernoId] = useState<number | null>(null)
+  const [syncPeople, setSyncPeople] = useState<{ line: string }[]>([])
+
+  function reloadSync(uid: string) {
+    fetch(`/api/notebooks/${notebookId}/quiz-sync?user_id=${uid}&roster=1`)
+      .then((r) => r.json())
+      .then((d) => {
+        setShared(Boolean(d.enabled && d.caderno_id))
+        setCadernoId(d.caderno_id ?? null)
+        setSyncPeople(Array.isArray(d.people) ? d.people : [])
+      })
+      .catch(() => {
+        setShared(false)
+        setCadernoId(null)
+        setSyncPeople([])
+      })
+  }
 
   function reloadNotebook() {
     fetch(`/api/notebooks/${notebookId}`)
@@ -73,6 +91,7 @@ export default function ResolverCadernoPage() {
       }
       setUserId(user.id)
       reloadNotebook()
+      reloadSync(user.id)
       fetch(`/api/notebooks/${notebookId}/queue?user_id=${user.id}`)
         .then((r) => r.json())
         .then((d) => {
@@ -286,6 +305,11 @@ export default function ResolverCadernoPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-bold">{notebook?.name ?? "Caderno"}</h1>
+            {shared && (
+              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                Compartilhado{cadernoId ? ` · #${cadernoId}` : ""}
+              </span>
+            )}
             {timerReady && (
               <StudyTimer
                 key={timerKey}
@@ -338,7 +362,7 @@ export default function ResolverCadernoPage() {
               onClick={() => setShowWaSend(true)}
               className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-50"
             >
-              <MessageCircle className="h-4 w-4" /> Enviar ao WhatsApp
+              <MessageCircle className="h-4 w-4" /> {shared ? "WhatsApp" : "Enviar ao WhatsApp"}
             </button>
             <button
               type="button"
@@ -349,6 +373,18 @@ export default function ResolverCadernoPage() {
             </button>
           </div>
         </div>
+        {shared && syncPeople.length > 0 && (
+          <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <p className="text-xs font-medium text-slate-700">Sincronização</p>
+            <ul className="mt-1 space-y-0.5">
+              {syncPeople.map((p, i) => (
+                <li key={`${p.line}-${i}`} className="text-xs text-slate-600">
+                  {p.line}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="mt-6">
@@ -378,6 +414,7 @@ export default function ResolverCadernoPage() {
           userId={userId}
           notebookId={notebookId}
           notebookName={notebook.name}
+          onSent={() => userId && reloadSync(userId)}
         />
       )}
 
