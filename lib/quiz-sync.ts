@@ -28,6 +28,14 @@ export function toWaLetter(type: string, selected: string): string {
   return selected.trim().toLowerCase().slice(0, 1)
 }
 
+function capDurationMs(ms: unknown): number | null {
+  if (ms == null || !Number.isFinite(Number(ms))) return null
+  const n = Math.round(Number(ms))
+  if (n < 0) return null
+  const CAP = 30 * 60 * 1000
+  return Math.min(n, CAP)
+}
+
 export function fromWaLetter(type: string, letter: string): string {
   const L = letter.trim().toLowerCase()
   const certoErrado =
@@ -488,25 +496,26 @@ export async function ingestWhatsappAnswer(input: {
 
   const { data: existing } = await supabaseServer
     .from("question_attempts")
-    .select("id, selected_answer")
+    .select("id, selected_answer, duration_ms")
     .eq("user_id", userId)
     .eq("notebook_id", notebookId)
     .eq("question_id", questionId)
     .limit(1)
     .maybeSingle()
+  const duration = capDurationMs(input.durationMs)
   if (existing) {
     const stored = String(existing.selected_answer || "")
     const needsFix =
       questionType === "certo_errado" && !/^(certo|errado)$/i.test(stored)
+    const patch: Record<string, unknown> = {}
     if (needsFix || (selected && stored !== selected)) {
-      await supabaseServer
-        .from("question_attempts")
-        .update({
-          selected_answer: selected,
-          is_correct: isCorrect,
-          confidence_level: confidence,
-        })
-        .eq("id", existing.id)
+      patch.selected_answer = selected
+      patch.is_correct = isCorrect
+      patch.confidence_level = confidence
+    }
+    if (duration && !(Number(existing.duration_ms) > 0)) patch.duration_ms = duration
+    if (Object.keys(patch).length) {
+      await supabaseServer.from("question_attempts").update(patch).eq("id", existing.id)
     }
     if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
     if (input.tags?.length) {
@@ -527,7 +536,7 @@ export async function ingestWhatsappAnswer(input: {
       study_session_id: null,
       selected_answer: selected,
       is_correct: isCorrect,
-      duration_ms: null,
+      duration_ms: duration,
       confidence_level: confidence,
       attempt_tags: input.tags?.length ? input.tags : undefined,
     })
