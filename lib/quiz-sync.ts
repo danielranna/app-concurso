@@ -30,11 +30,18 @@ export function toWaLetter(type: string, selected: string): string {
 
 export function fromWaLetter(type: string, letter: string): string {
   const L = letter.trim().toLowerCase()
-  if (type === "certo_errado") {
-    if (L === "c") return "Certo"
-    if (L === "e") return "Errado"
+  const certoErrado =
+    type === "certo_errado" ||
+    type === "true_false" ||
+    L === "certo" ||
+    L === "errado" ||
+    L.startsWith("certo") ||
+    L.startsWith("errado")
+  if (certoErrado) {
+    if (L === "c" || L.startsWith("certo")) return "Certo"
+    if (L === "e" || L.startsWith("errado")) return "Errado"
   }
-  return L.toUpperCase()
+  return L.toUpperCase().slice(0, 1)
 }
 
 function kindFromQuizUrl(url: string): string {
@@ -330,6 +337,38 @@ export async function upsertSyncedNote(
   })
 }
 
+async function findQuestionInNotebook(
+  notebookId: string,
+  opts: { tecId?: number | null; questionId?: string | null }
+): Promise<{ id: string; type: string; correct_answer: string } | null> {
+  const { data: rows } = await supabaseServer
+    .from("notebook_questions")
+    .select("question_id")
+    .eq("notebook_id", notebookId)
+  const ids = (rows ?? []).map((r) => r.question_id as string)
+  if (!ids.length) return null
+
+  if (opts.tecId) {
+    const { data: qs } = await supabaseServer
+      .from("questions")
+      .select("id, type, correct_answer")
+      .eq("tec_id", opts.tecId)
+      .in("id", ids)
+      .limit(1)
+    const q = qs?.[0]
+    if (q) return q
+  }
+  if (opts.questionId && ids.includes(opts.questionId)) {
+    const { data: q } = await supabaseServer
+      .from("questions")
+      .select("id, type, correct_answer")
+      .eq("id", opts.questionId)
+      .maybeSingle()
+    if (q) return q
+  }
+  return null
+}
+
 export async function ingestWhatsappAnswer(input: {
   tecId: number | null
   shortId?: string | null
@@ -344,50 +383,47 @@ export async function ingestWhatsappAnswer(input: {
   const userId = await resolveUserIdByJid(input.userJid)
   if (!userId) return { skipped: true, reason: "jid_not_linked" }
 
-  let questionId: string | null = null
-  let questionType = "multiple_choice"
-  let correct = ""
-  let notebookId: string | null = null
+  let linkQuestionId: string | null = null
+  let tecId = input.tecId
+  let sourceNotebookId: string | null = null
+
+  if (input.cadernoId) {
+    const { data: sync } = await supabaseServer
+      .from("quiz_notebook_sync")
+      .select("notebook_id")
+      .eq("caderno_id", input.cadernoId)
+      .maybeSingle()
+    sourceNotebookId = (sync?.notebook_id as string | undefined) ?? null
+  }
 
   if (input.shortId) {
     const link = await findQuizQuestionLink(input.shortId, input.cadernoId)
     if (link) {
-      questionId = link.question_id
-      if (input.cadernoId && Number(link.caderno_id) === Number(input.cadernoId)) {
-        notebookId = await ensureReplica(link.notebook_id, userId)
-      } else if (input.cadernoId) {
-        notebookId = await resolveSentNotebookForTec(userId, Number(link.tec_id), input.cadernoId)
-      } else {
-        notebookId = await ensureReplica(link.notebook_id, userId)
-      }
+      linkQuestionId = link.question_id
+      if (link.tec_id != null) tecId = Number(link.tec_id)
+      if (!sourceNotebookId) sourceNotebookId = link.notebook_id
     }
   }
 
-  if (!questionId && input.tecId) {
-    const { data: q } = await supabaseServer
-      .from("questions")
-      .select("id, type, correct_answer")
-      .eq("tec_id", input.tecId)
-      .maybeSingle()
-    if (q) {
-      questionId = q.id
-      questionType = q.type
-      correct = q.correct_answer
-    }
-    notebookId = await resolveSentNotebookForTec(userId, input.tecId, input.cadernoId)
+  let notebookId: string | null = null
+  if (sourceNotebookId) {
+    notebookId = await ensureReplica(sourceNotebookId, userId)
+  } else if (tecId) {
+    notebookId = await resolveSentNotebookForTec(userId, tecId, input.cadernoId)
   }
 
-  if (!questionId) return { skipped: true, reason: "question_not_found" }
+  if (!notebookId) return { skipped: true, reason: "no_notebook" }
 
-  if (!correct) {
-    const { data: q } = await supabaseServer
-      .from("questions")
-      .select("type, correct_answer")
-      .eq("id", questionId)
-      .maybeSingle()
-    questionType = q?.type ?? questionType
-    correct = q?.correct_answer ?? ""
-  }
+  const inNotebook = await findQuestionInNotebook(notebookId, {
+    tecId,
+    questionId: linkQuestionId,
+  })
+  if (!inNotebook) return { skipped: true, reason: "question_not_in_notebook" }
+
+  const questionId = inNotebook.id
+  let questionType = inNotebook.type || "multiple_choice"
+  const correct = inNotebook.correct_answer ?? ""
+  if (/^(certo|errado)$/i.test(correct)) questionType = "certo_errado"
 
   const selected = fromWaLetter(questionType, input.answerLetter)
   const isCorrect = normalizeAnswer(questionType, selected, correct)
@@ -396,13 +432,26 @@ export async function ingestWhatsappAnswer(input: {
   if (notebookId) {
     const { data: existing } = await supabaseServer
       .from("question_attempts")
-      .select("id")
+      .select("id, selected_answer")
       .eq("user_id", userId)
       .eq("notebook_id", notebookId)
       .eq("question_id", questionId)
       .limit(1)
       .maybeSingle()
     if (existing) {
+      const stored = String(existing.selected_answer || "")
+      const needsFix =
+        questionType === "certo_errado" && !/^(certo|errado)$/i.test(stored)
+      if (needsFix || (selected && stored !== selected)) {
+        await supabaseServer
+          .from("question_attempts")
+          .update({
+            selected_answer: selected,
+            is_correct: isCorrect,
+            confidence_level: confidence,
+          })
+          .eq("id", existing.id)
+      }
       if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
       if (input.tags?.length) {
         await supabaseServer
@@ -410,7 +459,8 @@ export async function ingestWhatsappAnswer(input: {
           .update({ attempt_tags: input.tags })
           .eq("id", existing.id)
       }
-      return { ok: true, already: true }
+      await refreshNotebookProgress(notebookId, userId)
+      return { ok: true, already: true, notebook_id: notebookId, question_id: questionId }
     }
   }
 
@@ -455,6 +505,8 @@ export async function ingestWhatsappAnswer(input: {
     ok: true,
     is_correct: isCorrect,
     outcome_category: computeOutcomeCategory(confidence, isCorrect),
+    notebook_id: notebookId,
+    question_id: questionId,
   }
 }
 

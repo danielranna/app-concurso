@@ -79,6 +79,12 @@ type Props = {
     options: Option[]
     stats: { total: number; resolved: number; correct: number; wrong: number; pending: number }
     position?: number
+    attempt?: {
+      selected_answer: string
+      is_correct: boolean
+      confidence_level?: string | null
+      outcome_category?: string | null
+    } | null
   }>
   submitAnswer: (payload: {
     question_id: string
@@ -112,6 +118,29 @@ function isTypingTarget(el: EventTarget | null): boolean {
   if (!el || !(el instanceof HTMLElement)) return false
   const tag = el.tagName
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable
+}
+
+function matchSavedAnswer(
+  saved: string,
+  options: Option[],
+  questionType?: string
+): string {
+  const raw = saved.trim()
+  const byLabel = options.find((o) => o.label === raw || o.text === raw)
+  if (byLabel) return byLabel.label
+  const lower = raw.toLowerCase()
+  if (questionType === "certo_errado" || lower === "c" || lower === "e" || lower === "certo" || lower === "errado") {
+    if (lower === "c" || lower.startsWith("certo")) {
+      const hit = options.find((o) => /^certo$/i.test(o.label) || /^certo$/i.test(o.text))
+      if (hit) return hit.label
+    }
+    if (lower === "e" || lower.startsWith("errado")) {
+      const hit = options.find((o) => /^errado$/i.test(o.label) || /^errado$/i.test(o.text))
+      if (hit) return hit.label
+    }
+  }
+  const byLetter = options.find((o) => o.label.toUpperCase() === raw.toUpperCase())
+  return byLetter?.label ?? raw
 }
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -268,7 +297,36 @@ export default function QuestionSolver({
           tec_id: data.current.tec_id,
           notebook_id: data.current.notebook_id,
         })
-        applyDraft(qid, getDraft(scopeKey, qid))
+        let nextDraft = getDraft(scopeKey, qid)
+        const attempt = data.attempt
+        if (!nextDraft.resolved && attempt?.selected_answer && data.question) {
+          const conf = attempt.confidence_level
+          const confidence: ConfidenceLevel =
+            conf === "inseguro" || conf === "chute" ? conf : "seguro"
+          const opts = (data.options ?? []).map((o: { label: string; text: string }) => ({
+            label: o.label,
+            text: o.text,
+          }))
+          const selectedAnswer = matchSavedAnswer(
+            attempt.selected_answer,
+            opts,
+            data.question.type
+          )
+          nextDraft = {
+            ...nextDraft,
+            selectedAnswer,
+            confidence,
+            resolved: true,
+            result: {
+              is_correct: attempt.is_correct,
+              correct_answer: data.question.correct_answer,
+              tec_url: data.question.tec_url ?? "",
+              outcome_category: attempt.outcome_category ?? undefined,
+            },
+          }
+          setDraft(scopeKey, qid, nextDraft)
+        }
+        applyDraft(qid, nextDraft)
         questionStartedAt.current = Date.now()
         setWaTags([])
         setWaComment("")

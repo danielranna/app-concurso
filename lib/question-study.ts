@@ -80,6 +80,30 @@ export async function buildNotebookQueue(
   return full.filter((item) => !answered.has(item.question_id))
 }
 
+export async function getLatestNotebookAttempt(
+  notebookId: string,
+  userId: string,
+  questionId: string
+): Promise<{
+  selected_answer: string
+  is_correct: boolean
+  confidence_level: string | null
+  outcome_category: string | null
+} | null> {
+  const { data, error } = await supabaseServer
+    .from("question_attempts")
+    .select("selected_answer, is_correct, confidence_level, outcome_category")
+    .eq("notebook_id", notebookId)
+    .eq("user_id", userId)
+    .eq("question_id", questionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data?.selected_answer) return null
+  return data
+}
+
 export async function getNotebookAttemptStats(notebookId: string, userId: string) {
   const { data: attempts } = await supabaseServer
     .from("question_attempts")

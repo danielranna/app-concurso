@@ -42,8 +42,8 @@ export function defaultPendingTarget(
   fullQueue: StudyQueueItem[]
 ): StudyQueueItem | null {
   if (activeQuestionId) {
-    const active = fullQueue.find((q) => q.question_id === activeQuestionId)
-    if (active) return active
+    const stillPending = pendingQueue.find((q) => q.question_id === activeQuestionId)
+    if (stillPending) return stillPending
   }
-  return pendingQueue[0] ?? null
+  return pendingQueue[0] ?? fullQueue.find((q) => q.question_id === activeQuestionId) ?? null
 }

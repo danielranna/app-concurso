@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import {
   buildNotebookFullQueue,
   buildNotebookQueue,
+  getLatestNotebookAttempt,
   getNotebookAttemptStats,
   loadQuestionForStudy,
 } from "@/lib/question-study"
@@ -55,17 +56,17 @@ export async function GET(
         navParam as NavMode
       )
       currentId = target?.question_id ?? null
-    } else if (!currentId) {
+    } else if (questionIdParam) {
+      if (!fullQueue.some((q) => q.question_id === currentId)) {
+        currentId = defaultPendingTarget(pendingQueue, null, fullQueue)?.question_id ?? null
+      }
+    } else {
       const target = defaultPendingTarget(
         pendingQueue,
         nb?.active_question_id ?? null,
         fullQueue
       )
       currentId = target?.question_id ?? null
-    } else if (!fullQueue.some((q) => q.question_id === currentId)) {
-      currentId = defaultPendingTarget(pendingQueue, null, fullQueue)?.question_id ?? null
-    } else if (!currentId && fullQueue.length > 0) {
-      currentId = nb?.active_question_id ?? fullQueue[0].question_id
     }
 
     if (currentId) {
@@ -84,6 +85,10 @@ export async function GET(
       ? await loadQuestionForStudy(current.question_id, user_id)
       : { question: null, options: [] }
 
+    const attempt = current
+      ? await getLatestNotebookAttempt(id, user_id, current.question_id)
+      : null
+
     const position =
       current != null
         ? fullQueue.findIndex((q) => q.question_id === current.question_id) + 1
@@ -95,6 +100,7 @@ export async function GET(
       current,
       question,
       options,
+      attempt,
       position,
       study_elapsed_ms: nb?.study_elapsed_ms ?? 0,
       stats: {

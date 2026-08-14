@@ -152,6 +152,7 @@ export default function ResolverCadernoPage() {
         options,
         stats: data.stats,
         position: data.position,
+        attempt: data.attempt ?? null,
       }
     },
     [notebookId, userId]
