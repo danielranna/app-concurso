@@ -79,6 +79,13 @@ export async function GET(req: Request) {
     for (const s of syncs ?? []) {
       if (s.notebook_id) sharedIds.add(s.notebook_id as string)
     }
+    const { data: replicas } = await supabaseServer
+      .from("quiz_notebook_replicas")
+      .select("notebook_id")
+      .in("notebook_id", ids)
+    for (const r of replicas ?? []) {
+      if (r.notebook_id) sharedIds.add(r.notebook_id as string)
+    }
   }
 
   return NextResponse.json(

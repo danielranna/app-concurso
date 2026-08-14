@@ -155,7 +155,7 @@ export default function QuestoesHomePage() {
           variant="amber"
           icon={Inbox}
           title="Importados (sem matéria sua)"
-          description={`${unassigned!.notebook_count} caderno(s) — vincule quando quiser`}
+          description={`${unassigned!.notebook_count} caderno(s) — Papa Vagas e importações. Vincule a uma matéria quando quiser.`}
           href="/questoes/importados"
         />
       )}

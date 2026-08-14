@@ -280,6 +280,34 @@ export async function ensureReplica(
   return replicaId
 }
 
+export async function grantCadernoToJid(
+  cadernoId: number,
+  userJid: string
+): Promise<
+  | { ok: true; notebookId: string; already: boolean }
+  | { skipped: true; reason: string }
+> {
+  const userId = await resolveUserIdByJid(userJid)
+  if (!userId) return { skipped: true, reason: "jid_not_linked" }
+
+  const { data: sync } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id")
+    .eq("caderno_id", cadernoId)
+    .maybeSingle()
+  if (!sync?.notebook_id) return { skipped: true, reason: "caderno_not_linked" }
+
+  const sourceId = sync.notebook_id as string
+  const { data: existing } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("notebook_id")
+    .eq("source_notebook_id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle()
+  const notebookId = await ensureReplica(sourceId, userId)
+  return { ok: true, notebookId, already: Boolean(existing?.notebook_id) }
+}
+
 async function findQuizQuestionLink(
   shortId: string,
   cadernoId?: number | null

@@ -26,6 +26,7 @@ type Notebook = {
   question_count: number
   answered_count: number
   completed_at: string | null
+  shared?: boolean
 }
 
 export default function ImportadosPage() {
@@ -92,7 +93,7 @@ export default function ImportadosPage() {
     <div className="space-y-6">
       <QuestoesPageHeader
         title="Cadernos importados"
-        description="Cadernos ainda sem vínculo com sua matéria. Selecione vários para mover ou excluir de uma vez."
+        description="Cadernos ainda sem vínculo com sua matéria — inclusive os do Papa Vagas, quando você é engajado ou passivo. Selecione vários para mover ou excluir de uma vez."
       />
 
       <NotebookBulkToolbar
@@ -136,6 +137,11 @@ export default function ImportadosPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-medium text-slate-900">{nb.name}</p>
                     {nb.completed_at && <Badge variant="success">Concluído</Badge>}
+                    {nb.shared && (
+                      <Badge variant="outline" className="border-emerald-300 text-emerald-800">
+                        Compartilhado
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-slate-500">
                     {nb.answered_count}/{nb.question_count} respondidas
