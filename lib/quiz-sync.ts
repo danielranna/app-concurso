@@ -369,22 +369,27 @@ async function findQuestionInNotebook(
   return null
 }
 
-export async function ingestWhatsappAnswer(input: {
-  tecId: number | null
+async function resolveStudyTargetFromWa(input: {
+  userJid: string
+  tecId?: number | null
   shortId?: string | null
   cadernoId?: number | null
-  userJid: string
-  answerLetter: string
-  comment?: string | null
-  confidenceLevel?: string
-  durationMs?: number | null
-  tags?: string[]
-}) {
+}): Promise<
+  | {
+      ok: true
+      userId: string
+      notebookId: string
+      questionId: string
+      questionType: string
+      correct: string
+    }
+  | { ok: false; reason: string }
+> {
   const userId = await resolveUserIdByJid(input.userJid)
-  if (!userId) return { skipped: true, reason: "jid_not_linked" }
+  if (!userId) return { ok: false, reason: "jid_not_linked" }
 
   let linkQuestionId: string | null = null
-  let tecId = input.tecId
+  let tecId = input.tecId ?? null
   let sourceNotebookId: string | null = null
 
   if (input.cadernoId) {
@@ -412,56 +417,78 @@ export async function ingestWhatsappAnswer(input: {
     notebookId = await resolveSentNotebookForTec(userId, tecId, input.cadernoId)
   }
 
-  if (!notebookId) return { skipped: true, reason: "no_notebook" }
+  if (!notebookId) return { ok: false, reason: "no_notebook" }
 
   const inNotebook = await findQuestionInNotebook(notebookId, {
     tecId,
     questionId: linkQuestionId,
   })
-  if (!inNotebook) return { skipped: true, reason: "question_not_in_notebook" }
+  if (!inNotebook) return { ok: false, reason: "question_not_in_notebook" }
 
-  const questionId = inNotebook.id
   let questionType = inNotebook.type || "multiple_choice"
   const correct = inNotebook.correct_answer ?? ""
   if (/^(certo|errado)$/i.test(correct)) questionType = "certo_errado"
 
+  return {
+    ok: true,
+    userId,
+    notebookId,
+    questionId: inNotebook.id,
+    questionType,
+    correct,
+  }
+}
+
+export async function ingestWhatsappAnswer(input: {
+  tecId: number | null
+  shortId?: string | null
+  cadernoId?: number | null
+  userJid: string
+  answerLetter: string
+  comment?: string | null
+  confidenceLevel?: string
+  durationMs?: number | null
+  tags?: string[]
+}) {
+  const target = await resolveStudyTargetFromWa(input)
+  if (!target.ok) return { skipped: true, reason: target.reason }
+
+  const { userId, notebookId, questionId, questionType, correct } = target
   const selected = fromWaLetter(questionType, input.answerLetter)
   const isCorrect = normalizeAnswer(questionType, selected, correct)
   const confidence = parseConfidenceLevel(input.confidenceLevel)
 
-  if (notebookId) {
-    const { data: existing } = await supabaseServer
-      .from("question_attempts")
-      .select("id, selected_answer")
-      .eq("user_id", userId)
-      .eq("notebook_id", notebookId)
-      .eq("question_id", questionId)
-      .limit(1)
-      .maybeSingle()
-    if (existing) {
-      const stored = String(existing.selected_answer || "")
-      const needsFix =
-        questionType === "certo_errado" && !/^(certo|errado)$/i.test(stored)
-      if (needsFix || (selected && stored !== selected)) {
-        await supabaseServer
-          .from("question_attempts")
-          .update({
-            selected_answer: selected,
-            is_correct: isCorrect,
-            confidence_level: confidence,
-          })
-          .eq("id", existing.id)
-      }
-      if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
-      if (input.tags?.length) {
-        await supabaseServer
-          .from("question_attempts")
-          .update({ attempt_tags: input.tags })
-          .eq("id", existing.id)
-      }
-      await refreshNotebookProgress(notebookId, userId)
-      return { ok: true, already: true, notebook_id: notebookId, question_id: questionId }
+  const { data: existing } = await supabaseServer
+    .from("question_attempts")
+    .select("id, selected_answer")
+    .eq("user_id", userId)
+    .eq("notebook_id", notebookId)
+    .eq("question_id", questionId)
+    .limit(1)
+    .maybeSingle()
+  if (existing) {
+    const stored = String(existing.selected_answer || "")
+    const needsFix =
+      questionType === "certo_errado" && !/^(certo|errado)$/i.test(stored)
+    if (needsFix || (selected && stored !== selected)) {
+      await supabaseServer
+        .from("question_attempts")
+        .update({
+          selected_answer: selected,
+          is_correct: isCorrect,
+          confidence_level: confidence,
+        })
+        .eq("id", existing.id)
     }
+    if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
+    if (input.tags?.length) {
+      await supabaseServer
+        .from("question_attempts")
+        .update({ attempt_tags: input.tags })
+        .eq("id", existing.id)
+    }
+    await refreshNotebookProgress(notebookId, userId)
+    return { ok: true, already: true, notebook_id: notebookId, question_id: questionId }
   }
 
   try {
@@ -472,7 +499,7 @@ export async function ingestWhatsappAnswer(input: {
       study_session_id: null,
       selected_answer: selected,
       is_correct: isCorrect,
-      duration_ms: input.durationMs ?? null,
+      duration_ms: null,
       confidence_level: confidence,
       attempt_tags: input.tags?.length ? input.tags : undefined,
     })
@@ -507,6 +534,79 @@ export async function ingestWhatsappAnswer(input: {
     outcome_category: computeOutcomeCategory(confidence, isCorrect),
     notebook_id: notebookId,
     question_id: questionId,
+  }
+}
+
+export async function getWhatsappStudyContext(input: {
+  userJid: string
+  tecId?: number | null
+  shortId?: string | null
+  cadernoId?: number | null
+}) {
+  const target = await resolveStudyTargetFromWa(input)
+  if (!target.ok) return { linked: false, reason: target.reason, notes: [], durationMs: null }
+
+  const { data: attempt } = await supabaseServer
+    .from("question_attempts")
+    .select("duration_ms")
+    .eq("user_id", target.userId)
+    .eq("notebook_id", target.notebookId)
+    .eq("question_id", target.questionId)
+    .not("duration_ms", "is", null)
+    .gt("duration_ms", 0)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { data: notes } = await supabaseServer
+    .from("question_note_entries")
+    .select("id, body, created_at, sync_origin")
+    .eq("user_id", target.userId)
+    .eq("question_id", target.questionId)
+    .order("created_at", { ascending: true })
+
+  return {
+    linked: true,
+    durationMs: attempt?.duration_ms != null ? Number(attempt.duration_ms) : null,
+    notes: (notes ?? []).map((n) => ({
+      id: n.id,
+      body: n.body,
+      created_at: n.created_at,
+      origin: n.sync_origin === "whatsapp" ? "whatsapp" : "app",
+    })),
+  }
+}
+
+export async function addWhatsappStudyNote(input: {
+  userJid: string
+  tecId?: number | null
+  shortId?: string | null
+  cadernoId?: number | null
+  body: string
+}) {
+  const target = await resolveStudyTargetFromWa(input)
+  if (!target.ok) return { skipped: true, reason: target.reason }
+  const trimmed = String(input.body || "").trim()
+  if (!trimmed) return { skipped: true, reason: "empty" }
+
+  const { data, error } = await supabaseServer
+    .from("question_note_entries")
+    .insert({
+      user_id: target.userId,
+      question_id: target.questionId,
+      body: trimmed,
+    })
+    .select("id, body, created_at")
+    .single()
+  if (error) throw new Error(error.message)
+  return {
+    ok: true,
+    note: {
+      id: data.id,
+      body: data.body,
+      created_at: data.created_at,
+      origin: "whatsapp" as const,
+    },
   }
 }
 

@@ -382,106 +382,119 @@ export default function FlashcardsBotSettings({
   const showIntegracoes = section === "all" || section === "integracoes"
 
   return (
-    <div className="max-w-xl">
+    <div className="space-y-6">
       {showFlashcards && (
-      <>
-      <section>
-        <h2 className="font-medium text-slate-800">Limite de cards por dia da semana</h2>
-        <p className="text-sm text-slate-500">Deixe vazio para sem limite.</p>
-        <div className="mt-4 space-y-2">
-          {DAYS.map(({ key, label }) => (
-            <div key={key} className="flex items-center justify-between">
-              <span className="text-sm">{label}</span>
-              <input
-                type="number"
-                min={0}
-                placeholder="∞"
-                value={limits[key] ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setLimits((l) => ({
-                    ...l,
-                    [key]: v === "" ? null : parseInt(v, 10),
-                  }))
-                }}
-                className="w-24 rounded border px-2 py-1 text-sm"
-              />
+        <>
+          <section>
+            <h2 className="text-base font-semibold text-slate-900">Limite de cards por dia</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Vazio = sem limite. Fins de semana costumam ser menores.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {DAYS.map(({ key, label }) => (
+                <label
+                  key={key}
+                  className="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
+                >
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    {label.slice(0, 3)}
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="∞"
+                    value={limits[key] ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setLimits((l) => ({
+                        ...l,
+                        [key]: v === "" ? null : parseInt(v, 10),
+                      }))
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm tabular-nums text-slate-900 outline-none focus:border-slate-400"
+                  />
+                </label>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
 
-      <section className="mt-8 border-t pt-8">
-        <h2 className="font-medium text-slate-800">Algoritmo FSRS</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          O app usa FSRS (não o SM-2 antigo do Anki). A retenção desejada controla com que
-          frequência os cards voltam: valores menores = mais repetições.
-        </p>
-
-        <div className="mt-4">
-          <div className="flex items-center justify-between text-sm">
-            <label htmlFor="request-retention">Retenção desejada</label>
-            <span className="font-medium tabular-nums">{Math.round(requestRetention * 100)}%</span>
-          </div>
-          <input
-            id="request-retention"
-            type="range"
-            min={retentionMin}
-            max={retentionMax}
-            step={0.01}
-            value={requestRetention}
-            onChange={(e) => setRequestRetention(parseFloat(e.target.value))}
-            className="mt-2 w-full"
-          />
-          <p className="mt-1 text-xs text-slate-500">
-            {Math.round(retentionMin * 100)}% (mais repetições) — {Math.round(retentionMax * 100)}%
-            (menos repetições). Padrão: {Math.round(DEFAULT_REQUEST_RETENTION * 100)}%.
-          </p>
-        </div>
-
-        {optimizerStatus && (
-          <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-medium text-slate-800">Otimizador FSRS</p>
-            <p className="mt-1 text-xs text-slate-500">
-              Treina os pesos do algoritmo com base no seu histórico de revisões (como no Anki
-              FSRS).
+          <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+            <h2 className="text-base font-semibold text-slate-900">Algoritmo FSRS</h2>
+            <p className="mt-1 text-sm leading-relaxed text-slate-500">
+              O app usa FSRS (não o SM-2 antigo do Anki). Retenção menor = cards voltam mais
+              cedo.
             </p>
-            <p className="mt-2 text-sm text-slate-600">
-              {optimizerStatus.review_count} revisões em {optimizerStatus.card_count} cards
-              {optimizerStatus.has_custom_w && optimizerStatus.optimized_at && (
-                <>
-                  {" "}
-                  · otimizado em{" "}
-                  {new Date(optimizerStatus.optimized_at).toLocaleDateString("pt-BR")}
-                </>
-              )}
-            </p>
-            {!optimizerStatus.can_optimize && (
-              <p className="mt-1 text-xs text-amber-700">
-                Mínimo: {optimizerStatus.min_reviews} revisões em {optimizerStatus.min_cards}{" "}
-                cards.
+
+            <div className="mt-5">
+              <div className="flex items-center justify-between text-sm">
+                <label htmlFor="request-retention" className="font-medium text-slate-700">
+                  Retenção desejada
+                </label>
+                <span className="rounded-full bg-white px-2.5 py-0.5 text-sm font-semibold tabular-nums text-slate-900 ring-1 ring-slate-200">
+                  {Math.round(requestRetention * 100)}%
+                </span>
+              </div>
+              <input
+                id="request-retention"
+                type="range"
+                min={retentionMin}
+                max={retentionMax}
+                step={0.01}
+                value={requestRetention}
+                onChange={(e) => setRequestRetention(parseFloat(e.target.value))}
+                className="mt-3 w-full accent-slate-900"
+              />
+              <p className="mt-1.5 text-xs text-slate-500">
+                {Math.round(retentionMin * 100)}% mais repetições ·{" "}
+                {Math.round(retentionMax * 100)}% menos · padrão{" "}
+                {Math.round(DEFAULT_REQUEST_RETENTION * 100)}%
               </p>
+            </div>
+
+            {optimizerStatus && (
+              <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Otimizador FSRS</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Ajusta os pesos com o seu histórico de revisões.
+                </p>
+                <p className="mt-3 text-sm text-slate-700">
+                  <span className="font-medium tabular-nums">{optimizerStatus.review_count}</span>{" "}
+                  revisões em{" "}
+                  <span className="font-medium tabular-nums">{optimizerStatus.card_count}</span>{" "}
+                  cards
+                  {optimizerStatus.has_custom_w && optimizerStatus.optimized_at && (
+                    <>
+                      {" "}
+                      · {new Date(optimizerStatus.optimized_at).toLocaleDateString("pt-BR")}
+                    </>
+                  )}
+                </p>
+                {!optimizerStatus.can_optimize && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Mínimo: {optimizerStatus.min_reviews} revisões em{" "}
+                    {optimizerStatus.min_cards} cards.
+                  </p>
+                )}
+                {optimizerMessage && (
+                  <p className="mt-2 text-sm text-emerald-700">{optimizerMessage}</p>
+                )}
+                {optimizerError && <p className="mt-2 text-sm text-red-600">{optimizerError}</p>}
+                <button
+                  type="button"
+                  onClick={runOptimizer}
+                  disabled={optimizing || !optimizerStatus.can_optimize}
+                  className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+                >
+                  {optimizing ? "Otimizando…" : "Otimizar parâmetros"}
+                </button>
+              </div>
             )}
-            {optimizerMessage && (
-              <p className="mt-2 text-sm text-emerald-700">{optimizerMessage}</p>
-            )}
-            {optimizerError && <p className="mt-2 text-sm text-red-600">{optimizerError}</p>}
-            <button
-              type="button"
-              onClick={runOptimizer}
-              disabled={optimizing || !optimizerStatus.can_optimize}
-              className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-100 disabled:opacity-50"
-            >
-              {optimizing ? "Otimizando..." : "Otimizar parâmetros FSRS"}
-            </button>
-          </div>
-        )}
-      </section>
-      </>
+          </section>
+        </>
       )}
 
       {showIntegracoes && (
-      <section className={showFlashcards ? "mt-8 border-t pt-8" : ""}>
+      <section className={showFlashcards ? "border-t border-slate-200 pt-6" : ""}>
         <h2 className="flex items-center gap-2 font-medium text-slate-800">
           <MessageCircle className="h-5 w-5" />
           WhatsApp (bot na VPS)
@@ -680,9 +693,9 @@ export default function FlashcardsBotSettings({
 
       <button
         onClick={saveAll}
-        className="mt-8 w-full rounded-lg bg-slate-900 py-3 text-white"
+        className="w-full rounded-xl bg-slate-900 py-3 text-sm font-medium text-white hover:bg-slate-800"
       >
-        {saved ? "Salvo!" : "Salvar configurações"}
+        {saved ? "Salvo" : "Salvar configurações"}
       </button>
     </div>
   )
