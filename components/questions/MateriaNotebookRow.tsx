@@ -15,7 +15,9 @@ export type MateriaNotebook = {
   question_count: number
   answered_count: number
   completed_at: string | null
+  folder_id: string | null
   shared?: boolean
+}
 
 type FolderOption = { id: string; name: string }
 
