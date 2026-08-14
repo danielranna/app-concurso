@@ -15,8 +15,12 @@ export default function MateriasIndexPage() {
             Hub de Matérias
           </h1>
           <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-500">
-            Crie, renomeie e apague matérias e temas aqui. Elas valem para questões, ciclo,
-            flashcards e cadernos. O mapeamento TEC continua em Questões → Mapeamento.
+            Crie, renomeie e apague matérias e temas aqui ou em{" "}
+            <a href="/configuracoes?tab=materias" className="font-medium text-slate-800 underline">
+              Configurações
+            </a>
+            . Elas valem para questões, ciclo, flashcards e cadernos. O mapeamento TEC continua em
+            Questões → Mapeamento.
           </p>
         </div>
       </div>

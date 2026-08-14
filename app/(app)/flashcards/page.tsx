@@ -101,7 +101,7 @@ export default function FlashcardsHomePage() {
             Abrir painel
           </Link>
           <Link
-            href="/flashcards/settings"
+            href="/configuracoes?tab=flashcards"
             className="flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-100"
           >
             <Settings className="h-4 w-4" />

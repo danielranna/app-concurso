@@ -21,6 +21,10 @@ export async function POST(req: Request) {
     const result = await ingestWhatsappAnswer({
       tecId: Number.isFinite(tecId) && tecId! > 0 ? tecId : null,
       shortId: body.shortId ?? null,
+      cadernoId:
+        body.cadernoId != null && Number.isFinite(Number(body.cadernoId))
+          ? Number(body.cadernoId)
+          : null,
       userJid,
       answerLetter,
       comment: body.comment ?? null,

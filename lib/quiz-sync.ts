@@ -79,6 +79,74 @@ export async function getSyncForNotebook(notebookId: string) {
   return data
 }
 
+export async function getSentCadernoForNotebook(notebookId: string): Promise<{
+  cadernoId: number
+  sourceNotebookId: string
+} | null> {
+  const direct = await getSyncForNotebook(notebookId)
+  if (direct?.caderno_id) {
+    return { cadernoId: Number(direct.caderno_id), sourceNotebookId: notebookId }
+  }
+  const { data: replica } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("source_notebook_id")
+    .eq("notebook_id", notebookId)
+    .maybeSingle()
+  if (!replica?.source_notebook_id) return null
+  const sync = await getSyncForNotebook(replica.source_notebook_id)
+  if (!sync?.caderno_id) return null
+  return {
+    cadernoId: Number(sync.caderno_id),
+    sourceNotebookId: replica.source_notebook_id as string,
+  }
+}
+
+async function notebooksForCaderno(cadernoId: number): Promise<string[]> {
+  const { data: syncs } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id")
+    .eq("caderno_id", cadernoId)
+  const sources = (syncs ?? []).map((s) => s.notebook_id as string)
+  if (!sources.length) return []
+  const { data: replicas } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("notebook_id")
+    .in("source_notebook_id", sources)
+  return [...new Set([...sources, ...(replicas ?? []).map((r) => r.notebook_id as string)])]
+}
+
+async function resolveSentNotebookForTec(
+  userId: string,
+  tecId: number,
+  cadernoId?: number | null
+): Promise<string | null> {
+  if (cadernoId) {
+    const { data: sync } = await supabaseServer
+      .from("quiz_notebook_sync")
+      .select("notebook_id")
+      .eq("caderno_id", cadernoId)
+      .maybeSingle()
+    if (sync?.notebook_id) return ensureReplica(sync.notebook_id as string, userId)
+  }
+  const { data: links } = await supabaseServer
+    .from("quiz_question_links")
+    .select("notebook_id, caderno_id")
+    .eq("tec_id", tecId)
+  if (!links?.length) return null
+  const cadernoIds = [
+    ...new Set(links.map((l) => l.caderno_id).filter((id) => id != null)),
+  ]
+  if (cadernoIds.length) {
+    const { data: syncs } = await supabaseServer
+      .from("quiz_notebook_sync")
+      .select("notebook_id, caderno_id")
+      .in("caderno_id", cadernoIds)
+    const sent = syncs?.[0]
+    if (sent?.notebook_id) return ensureReplica(sent.notebook_id as string, userId)
+  }
+  return ensureReplica(links[0].notebook_id as string, userId)
+}
+
 export async function ensureReplica(
   sourceNotebookId: string,
   userId: string
@@ -177,6 +245,7 @@ export async function upsertSyncedNote(
 export async function ingestWhatsappAnswer(input: {
   tecId: number | null
   shortId?: string | null
+  cadernoId?: number | null
   userJid: string
   answerLetter: string
   comment?: string | null
@@ -195,18 +264,18 @@ export async function ingestWhatsappAnswer(input: {
   if (input.shortId) {
     const { data: link } = await supabaseServer
       .from("quiz_question_links")
-      .select("question_id, notebook_id, tec_id")
+      .select("question_id, notebook_id, tec_id, caderno_id")
       .eq("short_id", input.shortId.toUpperCase())
       .maybeSingle()
     if (link) {
       questionId = link.question_id
-      const replica = await supabaseServer
-        .from("quiz_notebook_replicas")
-        .select("notebook_id")
-        .eq("source_notebook_id", link.notebook_id)
-        .eq("user_id", userId)
-        .maybeSingle()
-      notebookId = replica.data?.notebook_id ?? (await ensureReplica(link.notebook_id, userId))
+      if (input.cadernoId && Number(link.caderno_id) === Number(input.cadernoId)) {
+        notebookId = await ensureReplica(link.notebook_id, userId)
+      } else if (input.cadernoId) {
+        notebookId = await resolveSentNotebookForTec(userId, Number(link.tec_id), input.cadernoId)
+      } else {
+        notebookId = await ensureReplica(link.notebook_id, userId)
+      }
     }
   }
 
@@ -221,15 +290,7 @@ export async function ingestWhatsappAnswer(input: {
       questionType = q.type
       correct = q.correct_answer
     }
-    const { data: link } = await supabaseServer
-      .from("quiz_question_links")
-      .select("notebook_id")
-      .eq("tec_id", input.tecId)
-      .limit(1)
-      .maybeSingle()
-    if (link?.notebook_id) {
-      notebookId = await ensureReplica(link.notebook_id, userId)
-    }
+    notebookId = await resolveSentNotebookForTec(userId, input.tecId, input.cadernoId)
   }
 
   if (!questionId) return { skipped: true, reason: "question_not_found" }
@@ -321,6 +382,8 @@ export async function pushAnswerToWhatsapp(input: {
   durationMs: number | null
   comment?: string | null
   tags?: string[]
+  notebookId?: string | null
+  cadernoId?: number | null
 }) {
   const jid = await resolveJidByUserId(input.userId)
   if (!jid) return { skipped: true, reason: "no_jid" }
@@ -334,19 +397,28 @@ export async function pushAnswerToWhatsapp(input: {
     .maybeSingle()
   if (!q) return { skipped: true, reason: "no_question" }
 
-  const { data: link } = await supabaseServer
+  let cadernoId = input.cadernoId ?? null
+  if (!cadernoId && input.notebookId) {
+    const sent = await getSentCadernoForNotebook(input.notebookId)
+    cadernoId = sent?.cadernoId ?? null
+  }
+
+  let linkQuery = supabaseServer
     .from("quiz_question_links")
-    .select("short_id")
+    .select("short_id, caderno_id")
     .eq("question_id", input.questionId)
     .not("short_id", "is", null)
-    .limit(1)
-    .maybeSingle()
+  if (cadernoId) linkQuery = linkQuery.eq("caderno_id", cadernoId)
+  const { data: link } = await linkQuery.limit(1).maybeSingle()
+
+  if (!cadernoId && link?.caderno_id) cadernoId = Number(link.caderno_id)
 
   const { res, data } = await quizFetch(ingestUrl, {
     method: "POST",
     body: JSON.stringify({
       userJid: jid,
       tecId: q.tec_id,
+      cadernoId,
       shortId: link?.short_id ?? null,
       answerLetter: toWaLetter(q.type, input.selectedAnswer),
       comment: input.comment ?? null,
@@ -362,9 +434,10 @@ export async function flushPendingForTec(input: {
   tecId: number | null
   shortId: string
   publishedQuestionId?: number
+  cadernoId?: number
 }) {
   if (input.shortId && input.tecId) {
-    await supabaseServer
+    let upd = supabaseServer
       .from("quiz_question_links")
       .update({
         short_id: input.shortId.toUpperCase(),
@@ -372,6 +445,8 @@ export async function flushPendingForTec(input: {
         updated_at: new Date().toISOString(),
       })
       .eq("tec_id", input.tecId)
+    if (input.cadernoId) upd = upd.eq("caderno_id", input.cadernoId)
+    await upd
   }
   if (!input.tecId) return { flushed: 0 }
 
@@ -382,11 +457,18 @@ export async function flushPendingForTec(input: {
     .maybeSingle()
   if (!q) return { flushed: 0 }
 
-  const { data: attempts } = await supabaseServer
+  let attemptQuery = supabaseServer
     .from("question_attempts")
-    .select("user_id, question_id, selected_answer, confidence_level, duration_ms, attempt_tags")
+    .select("user_id, question_id, selected_answer, confidence_level, duration_ms, attempt_tags, notebook_id")
     .eq("question_id", q.id)
     .order("created_at", { ascending: false })
+
+  if (input.cadernoId) {
+    const nbIds = await notebooksForCaderno(input.cadernoId)
+    if (nbIds.length) attemptQuery = attemptQuery.in("notebook_id", nbIds)
+  }
+
+  const { data: attempts } = await attemptQuery
 
   const seen = new Set<string>()
   let flushed = 0
@@ -400,6 +482,8 @@ export async function flushPendingForTec(input: {
       confidenceLevel: parseConfidenceLevel(a.confidence_level),
       durationMs: a.duration_ms,
       tags: Array.isArray(a.attempt_tags) ? a.attempt_tags : [],
+      notebookId: a.notebook_id,
+      cadernoId: input.cadernoId ?? null,
     })
     if (result.ok && !result.pending) flushed += 1
   }
@@ -486,6 +570,13 @@ export async function sendNotebookToWhatsapp(input: {
   }
 
   const cadernoId = data.cadernoId
+  const totalQuestions = Number(data.totalQuestions) || 0
+  if (!cadernoId || totalQuestions <= 0) {
+    throw new Error(
+      "Caderno criado sem questões no Papa Vagas. Apague o caderno vazio lá e envie de novo."
+    )
+  }
+
   await supabaseServer.from("quiz_notebook_sync").upsert(
     {
       notebook_id: input.notebookId,
@@ -504,21 +595,25 @@ export async function sendNotebookToWhatsapp(input: {
     },
     { onConflict: "source_notebook_id,user_id" }
   )
+  const remoteByPos = new Map<number, { id?: number; tecQuestionId?: string | null }>()
+  for (const rq of Array.isArray(data.questions) ? data.questions : []) {
+    const pos = Number(rq.position)
+    if (Number.isFinite(pos)) remoteByPos.set(pos, rq)
+  }
   const linkRows = (nq ?? []).map((row, i) => {
     const q = unwrapQ(row.questions)
+    const remote = remoteByPos.get(i + 1)
     return {
       notebook_id: input.notebookId,
       question_id: row.question_id,
       tec_id: q?.tec_id ?? 0,
       caderno_id: cadernoId,
-      caderno_question_id: null,
-      position_hint: row.position ?? i + 1,
+      caderno_question_id: remote?.id ?? null,
     }
   })
-  await supabaseServer.from("quiz_question_links").upsert(
-    linkRows.map(({ position_hint: _p, ...rest }) => rest),
-    { onConflict: "notebook_id,question_id" }
-  )
+  await supabaseServer.from("quiz_question_links").upsert(linkRows, {
+    onConflict: "notebook_id,question_id",
+  })
   return data
 }
 
@@ -546,14 +641,14 @@ export async function maybePushNotebookAnswer(input: {
   comment?: string | null
   tags?: string[]
 }) {
-  const sync = await getSyncForNotebook(input.notebookId)
+  const sent = await getSentCadernoForNotebook(input.notebookId)
   const { data: replica } = await supabaseServer
     .from("quiz_notebook_replicas")
     .select("id")
     .eq("notebook_id", input.notebookId)
     .eq("user_id", input.userId)
     .maybeSingle()
-  if (!sync && !replica) return { skipped: true }
+  if (!sent && !replica) return { skipped: true }
   if (input.comment) {
     await upsertSyncedNote(input.userId, input.questionId, input.comment)
   }
@@ -565,6 +660,8 @@ export async function maybePushNotebookAnswer(input: {
     durationMs: input.durationMs,
     comment: input.comment,
     tags: input.tags,
+    notebookId: input.notebookId,
+    cadernoId: sent?.cadernoId ?? null,
   })
 }
 

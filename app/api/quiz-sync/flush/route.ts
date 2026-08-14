@@ -19,6 +19,9 @@ export async function POST(req: Request) {
       tecId: Number.isFinite(tecId) ? tecId : null,
       shortId,
       publishedQuestionId: body.publishedQuestionId != null ? Number(body.publishedQuestionId) : undefined,
+      cadernoId: body.cadernoId != null && Number.isFinite(Number(body.cadernoId))
+        ? Number(body.cadernoId)
+        : undefined,
     })
     return NextResponse.json(result)
   } catch (e) {

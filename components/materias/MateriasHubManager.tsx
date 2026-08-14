@@ -8,7 +8,11 @@ import { useDataCache } from "@/contexts/DataCacheContext"
 type Subject = { id: string; name: string }
 type Topic = { id: string; name: string }
 
-export default function MateriasHubManager() {
+export default function MateriasHubManager({
+  focus = "all",
+}: {
+  focus?: "all" | "subjects" | "topics"
+}) {
   const cache = useDataCache()
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -123,6 +127,7 @@ export default function MateriasHubManager() {
 
   return (
     <div className="space-y-6">
+      {focus !== "topics" && (
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">Matérias</h2>
         <div className="mt-3 flex gap-2">
@@ -196,9 +201,25 @@ export default function MateriasHubManager() {
           ))}
         </ul>
       </section>
+      )}
 
+      {focus !== "subjects" && (
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">Temas</h2>
+        {focus === "topics" && (
+          <select
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+          >
+            <option value="">Selecione a matéria</option>
+            {subjects.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
         {!selected ? (
           <p className="mt-2 text-sm text-slate-500">Selecione uma matéria para gerenciar temas.</p>
         ) : (
@@ -263,6 +284,7 @@ export default function MateriasHubManager() {
           </>
         )}
       </section>
+      )}
     </div>
   )
 }

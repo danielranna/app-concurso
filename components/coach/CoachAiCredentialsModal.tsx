@@ -14,15 +14,17 @@ type Status =
     }
 
 type Props = {
-  open: boolean
-  onClose: () => void
+  open?: boolean
+  onClose?: () => void
   onSaved?: () => void
+  embedded?: boolean
 }
 
 export default function CoachAiCredentialsModal({
-  open,
+  open = false,
   onClose,
   onSaved,
+  embedded = false,
 }: Props) {
   const [userId, setUserId] = useState<string | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
@@ -44,7 +46,7 @@ export default function CoachAiCredentialsModal({
   }
 
   useEffect(() => {
-    if (!open) return
+    if (!embedded && !open) return
     setError(null)
     setSaved(false)
     setApiKey("")
@@ -53,7 +55,7 @@ export default function CoachAiCredentialsModal({
       setUserId(user.id)
       loadStatus(user.id)
     })
-  }, [open])
+  }, [open, embedded])
 
   async function handleSave() {
     if (!userId || !apiKey.trim()) {
@@ -110,15 +112,10 @@ export default function CoachAiCredentialsModal({
     }
   }
 
-  if (!open) return null
+  if (!embedded && !open) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
-        role="dialog"
-        aria-labelledby="coach-ai-creds-title"
-      >
+  const form = (
+        <>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-violet-600" />
@@ -129,6 +126,7 @@ export default function CoachAiCredentialsModal({
               Chave de IA (sua conta)
             </h2>
           </div>
+          {!embedded && onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -137,6 +135,7 @@ export default function CoachAiCredentialsModal({
           >
             <X className="h-5 w-5" />
           </button>
+          )}
         </div>
 
         <p className="mb-4 text-sm text-slate-600">
@@ -205,6 +204,7 @@ export default function CoachAiCredentialsModal({
               Remover
             </button>
           )}
+          {!embedded && onClose && (
           <button
             type="button"
             onClick={onClose}
@@ -212,6 +212,7 @@ export default function CoachAiCredentialsModal({
           >
             Fechar
           </button>
+          )}
         </div>
 
         <p className="mt-4 text-xs text-slate-500">
@@ -226,6 +227,21 @@ export default function CoachAiCredentialsModal({
           </a>
           . Sem chave, os relatórios continuam por regras (grátis).
         </p>
+        </>
+  )
+
+  if (embedded) {
+    return <div className="max-w-xl">{form}</div>
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+        role="dialog"
+        aria-labelledby="coach-ai-creds-title"
+      >
+        {form}
       </div>
     </div>
   )

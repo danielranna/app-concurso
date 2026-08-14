@@ -11,6 +11,7 @@ import {
   Library,
   LogOut,
   RotateCw,
+  Settings,
   Sparkles,
 } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -146,6 +147,15 @@ export default function Sidebar({
               {email}
             </p>
           )}
+          <Link
+            href="/configuracoes"
+            title={!showLabels ? "Configurações" : undefined}
+            onClick={onCloseMobile}
+            className={`mb-1 ${navLinkClass(pathname.startsWith("/configuracoes"), !showLabels)}`}
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            {showLabels && <span>Configurações</span>}
+          </Link>
           <button
             type="button"
             onClick={handleLogout}
