@@ -11,6 +11,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Trash2,
 } from "lucide-react"
 import type { CyclePlanSummary } from "@/lib/study-cycle-plans"
 import { cycleStatusLabel } from "@/lib/study-cycle-types"
@@ -33,7 +34,7 @@ type Props = {
   activeCycleId: string | null
   loading?: boolean
   onRefresh: () => void
-  onSelect: (cycleId: string) => void
+  onSelect: (cycleId: string | null) => void
 }
 
 export default function CyclePlansLibrary({
@@ -92,6 +93,39 @@ export default function CyclePlansLibrary({
         return
       }
       onSelect(data.cycle_id)
+      onRefresh()
+    } finally {
+      setActing(null)
+    }
+  }
+
+  async function deletePlan(plan: CyclePlanSummary) {
+    const extra =
+      plan.status === "active"
+        ? " Este é o plano ativo da fila."
+        : ""
+    if (
+      !confirm(
+        `Excluir "${plan.name}"?${extra} Matérias, blocos e a grade deste plano serão apagados. Esta ação não pode ser desfeita.`
+      )
+    ) {
+      return
+    }
+    setActing(plan.id)
+    try {
+      const res = await fetch(
+        `/api/ciclo/plans?user_id=${encodeURIComponent(userId)}&cycle_id=${encodeURIComponent(plan.id)}`,
+        { method: "DELETE" }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(data.error ?? "Erro ao excluir plano")
+        return
+      }
+      if (plan.id === selectedCycleId) {
+        const next = plans.find((p) => p.id !== plan.id)
+        onSelect(next?.id ?? null)
+      }
       onRefresh()
     } finally {
       setActing(null)
@@ -282,6 +316,17 @@ export default function CyclePlansLibrary({
                       <Archive className="h-4 w-4" />
                     </Button>
                   )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={busy}
+                    title="Excluir"
+                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                    onClick={() => deletePlan(plan)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">

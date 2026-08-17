@@ -8,6 +8,7 @@ import {
   appendNewSessions,
   archiveCyclePlan,
   createEmptyCyclePlan,
+  deleteCyclePlan,
   detectSetupDrift,
   duplicateCyclePlan,
   listUserCyclePlans,
@@ -145,6 +146,27 @@ export async function PATCH(req: Request) {
     }
 
     return NextResponse.json({ error: "action inválida" }, { status: 400 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function DELETE(req: Request) {
+  const url = new URL(req.url)
+  const user_id = url.searchParams.get("user_id")
+  const cycle_id = url.searchParams.get("cycle_id")
+
+  if (!user_id || !cycle_id) {
+    return NextResponse.json(
+      { error: "user_id e cycle_id obrigatórios" },
+      { status: 400 }
+    )
+  }
+
+  try {
+    await deleteCyclePlan(cycle_id, user_id)
+    return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"
     return NextResponse.json({ error: msg }, { status: 500 })

@@ -291,6 +291,38 @@ export async function archiveCyclePlan(
   if (error) throw new Error(error.message)
 }
 
+export async function deleteCyclePlan(
+  cycleId: string,
+  userId: string
+): Promise<void> {
+  const { data: row, error: loadError } = await supabaseServer
+    .from("study_cycles")
+    .select("id, status")
+    .eq("id", cycleId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (loadError) throw new Error(loadError.message)
+  if (!row) throw new Error("Plano não encontrado")
+
+  if (row.status === "active") {
+    await supabaseServer.from("coach_study_preferences").upsert({
+      user_id: userId,
+      cycle_enabled: false,
+      cycle_paused_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+  }
+
+  const { error } = await supabaseServer
+    .from("study_cycles")
+    .delete()
+    .eq("id", cycleId)
+    .eq("user_id", userId)
+
+  if (error) throw new Error(error.message)
+}
+
 export async function pauseCyclePlan(
   cycleId: string,
   userId: string
