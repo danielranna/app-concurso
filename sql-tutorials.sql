@@ -18,12 +18,16 @@ CREATE TABLE IF NOT EXISTS tutorials (
   author_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   author_email TEXT,
   status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_tutorials_status_created
   ON tutorials (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tutorials_status_sort
+  ON tutorials (status, sort_order, created_at);
 
 ALTER TABLE tutorials ENABLE ROW LEVEL SECURITY;
 

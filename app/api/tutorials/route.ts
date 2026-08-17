@@ -14,7 +14,8 @@ export async function GET(req: Request) {
     .from("tutorials")
     .select("*")
     .eq("status", "published")
-    .order("created_at", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true })
 
   if (q) {
     query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
@@ -48,6 +49,15 @@ export async function POST(req: Request) {
     )
   }
 
+  const { data: last } = await supabaseServer
+    .from("tutorials")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const sort_order = (last?.sort_order ?? -1) + 1
+
   const { data, error } = await supabaseServer
     .from("tutorials")
     .insert([
@@ -61,6 +71,7 @@ export async function POST(req: Request) {
         author_id: auth.user.id,
         author_email: auth.user.email ?? null,
         status,
+        sort_order,
       },
     ])
     .select("*")

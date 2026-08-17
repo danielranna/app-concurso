@@ -22,6 +22,9 @@ export default function TutoriaisPage() {
   const [search, setSearch] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropId, setDropId] = useState<string | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(query.trim()), 300)
@@ -84,6 +87,54 @@ export default function TutoriaisPage() {
     setTutorials((prev) => prev.filter((t) => t.id !== tutorial.id))
   }
 
+  const canReorder = canManage && !search && tutorials.length > 1
+
+  async function persistOrder(next: Tutorial[]) {
+    setSavingOrder(true)
+    setError(null)
+    const res = await tutorialsFetch("/api/tutorials/reorder", {
+      method: "POST",
+      body: JSON.stringify({ ids: next.map((t) => t.id) }),
+    })
+    const data = await res.json().catch(() => ({}))
+    setSavingOrder(false)
+    if (!res.ok) {
+      setError(data.error ?? "Não foi possível salvar a ordem")
+      load()
+      return
+    }
+    setSuccess("Ordem da listagem atualizada.")
+  }
+
+  function moveTutorial(id: string, delta: number) {
+    const index = tutorials.findIndex((t) => t.id === id)
+    const target = index + delta
+    if (index < 0 || target < 0 || target >= tutorials.length) return
+    const next = [...tutorials]
+    const [item] = next.splice(index, 1)
+    next.splice(target, 0, item)
+    setTutorials(next)
+    void persistOrder(next)
+  }
+
+  function dropOn(target: Tutorial) {
+    if (!dragId || dragId === target.id) {
+      setDragId(null)
+      setDropId(null)
+      return
+    }
+    const from = tutorials.findIndex((t) => t.id === dragId)
+    const to = tutorials.findIndex((t) => t.id === target.id)
+    setDragId(null)
+    setDropId(null)
+    if (from < 0 || to < 0) return
+    const next = [...tutorials]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    setTutorials(next)
+    void persistOrder(next)
+  }
+
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-4 pb-12 sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -103,15 +154,23 @@ export default function TutoriaisPage() {
         )}
       </header>
 
-      <div className="relative max-w-md">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por título ou descrição"
-          className="pl-9"
-          aria-label="Buscar tutoriais"
-        />
+      <div className="flex max-w-md flex-col gap-2 sm:max-w-none sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por título ou descrição"
+            className="pl-9"
+            aria-label="Buscar tutoriais"
+          />
+        </div>
+        {canReorder && (
+          <p className="text-xs text-slate-500">
+            Arraste pelo ícone ou use as setas para definir a ordem.
+            {savingOrder ? " Salvando…" : ""}
+          </p>
+        )}
       </div>
 
       {error && (
@@ -152,12 +211,26 @@ export default function TutoriaisPage() {
         </Card>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {tutorials.map((tutorial) => (
+          {tutorials.map((tutorial, index) => (
             <TutorialCard
               key={tutorial.id}
               tutorial={tutorial}
               canManage={canManage}
+              canReorder={canReorder && !savingOrder}
+              isFirst={index === 0}
+              isLast={index === tutorials.length - 1}
+              isDragging={dragId === tutorial.id}
+              isDropTarget={dropId === tutorial.id && dragId !== tutorial.id}
               onDelete={handleDelete}
+              onMoveUp={() => moveTutorial(tutorial.id, -1)}
+              onMoveDown={() => moveTutorial(tutorial.id, 1)}
+              onDragStart={(item) => setDragId(item.id)}
+              onDragOver={(item) => setDropId(item.id)}
+              onDrop={dropOn}
+              onDragEnd={() => {
+                setDragId(null)
+                setDropId(null)
+              }}
             />
           ))}
         </div>

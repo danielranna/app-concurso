@@ -24,6 +24,7 @@ export type Tutorial = {
   author_id: string
   author_email: string | null
   status: TutorialStatus
+  sort_order: number
   created_at: string
   updated_at: string
 }
