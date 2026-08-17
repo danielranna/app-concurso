@@ -18,7 +18,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-svh overflow-hidden bg-slate-50">
       {mobileOpen && (
         <button
           type="button"
@@ -35,7 +35,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onCloseMobile={() => setMobileOpen(false)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex shrink-0 items-center border-b border-slate-200 bg-white px-3 py-2.5 lg:hidden">
           <button
             type="button"
@@ -46,7 +46,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <FourBarsIcon size="sm" />
           </button>
         </header>
-        <div className="flex-1 overflow-auto">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>
   )

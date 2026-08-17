@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   BookOpen,
   ChevronLeft,
+  GraduationCap,
   HelpCircle,
   Home,
   Layers,
@@ -25,6 +26,7 @@ const links = [
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
   { href: "/questoes", label: "Questões", icon: HelpCircle },
+  { href: "/tutoriais", label: "Tutoriais", icon: GraduationCap },
   { href: "/ciclo", label: "Ciclo de estudo", icon: RotateCw },
   { href: "/coach", label: "Coach IA", icon: Sparkles },
 ]
@@ -73,9 +75,9 @@ export default function Sidebar({
   }
 
   const asideClass = [
-    "fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width,transform] duration-200 ease-out",
+    "fixed inset-y-0 left-0 z-50 flex h-full min-h-0 shrink-0 flex-col border-r border-slate-200 bg-white transition-[width,transform] duration-200 ease-out",
     mobileOpen ? "translate-x-0" : "-translate-x-full",
-    "lg:relative lg:z-auto lg:translate-x-0",
+    "lg:relative lg:z-auto lg:h-full lg:translate-x-0",
     expanded ? "w-56" : "w-[4.5rem]",
   ].join(" ")
 
@@ -120,7 +122,7 @@ export default function Sidebar({
         </div>
 
         {/* Navegação */}
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-4">
+        <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-4">
           {links.map(({ href, label, icon: Icon, exact }) => {
             const active = exact
               ? pathname === href || pathname === ""
