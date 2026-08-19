@@ -4,7 +4,8 @@ const STORAGE_DEFAULTS = {
   omissasToken: "",
   source: "notebook",
   notebookId: "",
-  overlay: { left: 24, top: 72, pinned: false },
+  overlay: { left: 24, top: 72, pinned: false, width: 380, height: 0 },
+  altLayout: "stack",
 };
 
 chrome.runtime.onInstalled.addListener(() => {

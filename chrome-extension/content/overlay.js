@@ -5,6 +5,8 @@
   const HOST_ID = "rascunho-root-host";
   const HIDE_MS = 280;
   const PANEL_W = 380;
+  const MIN_W = 220;
+  const MIN_H = 140;
   const HOVER_PAD = 52;
   let cachedCss = "";
 
@@ -17,6 +19,10 @@
     dragDy: 0,
     left: 24,
     top: 72,
+    width: 380,
+    height: 0,
+    altLayout: "stack",
+    resizing: false,
     userId: "",
     appUrl: "",
     omissasToken: "",
@@ -40,6 +46,8 @@
     notes: [],
     noteDraft: "",
     startedAt: 0,
+    elapsedMs: 0,
+    timerRunning: false,
     hover: false,
     textMode: "note",
     commentDraft: "",
@@ -51,6 +59,75 @@
   let wrap = null;
   let bar = null;
   let body = null;
+  let resizeHandle = null;
+  let tickTimer = 0;
+
+  function nowElapsed() {
+    if (!state.timerRunning || !state.startedAt) return state.elapsedMs;
+    return state.elapsedMs + (Date.now() - state.startedAt);
+  }
+
+  function formatTime(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function updateTimerLabel() {
+    const node = shadow?.querySelector?.(".timer-val");
+    if (node) node.textContent = formatTime(nowElapsed());
+  }
+
+  function stopTick() {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = 0;
+    }
+  }
+
+  function startTick() {
+    stopTick();
+    tickTimer = setInterval(updateTimerLabel, 250);
+    updateTimerLabel();
+  }
+
+  function pauseTimer() {
+    if (!state.timerRunning) {
+      updateTimerLabel();
+      return;
+    }
+    state.elapsedMs = nowElapsed();
+    state.timerRunning = false;
+    state.startedAt = 0;
+    stopTick();
+    updateTimerLabel();
+  }
+
+  function resumeTimer() {
+    if (state.result || !state.question || state.timerRunning) {
+      updateTimerLabel();
+      return;
+    }
+    state.timerRunning = true;
+    state.startedAt = Date.now();
+    startTick();
+  }
+
+  function resetTimer() {
+    state.elapsedMs = 0;
+    state.startedAt = 0;
+    state.timerRunning = false;
+    if (!state.result && state.question) resumeTimer();
+    else {
+      stopTick();
+      updateTimerLabel();
+    }
+  }
+
+  function durationToSend() {
+    return Math.max(0, Math.round(nowElapsed()));
+  }
 
   function toPlain(html) {
     if (!html) return "";
@@ -119,6 +196,25 @@
     wrap.classList.toggle("theme-light", !dark);
   }
 
+  function saveOverlay() {
+    return setConfig({
+      overlay: {
+        left: state.left,
+        top: state.top,
+        pinned: state.pinned,
+        width: state.width,
+        height: state.height,
+      },
+      altLayout: state.altLayout,
+    });
+  }
+
+  function applySize() {
+    if (!wrap) return;
+    wrap.style.width = `${state.width}px`;
+    wrap.style.height = state.height ? `${state.height}px` : "";
+  }
+
   function placeShell() {
     if (!shell) return;
     shell.style.left = `${state.left - HOVER_PAD}px`;
@@ -126,11 +222,18 @@
   }
 
   function clampPos() {
-    const w = wrap?.offsetWidth || PANEL_W;
+    const w = wrap?.offsetWidth || state.width || PANEL_W;
     const maxL = Math.max(8, window.innerWidth - w - 8);
     const maxT = Math.max(8, window.innerHeight - 48);
     state.left = Math.min(Math.max(8, state.left), maxL);
     state.top = Math.min(Math.max(8, state.top), maxT);
+    if (state.width) {
+      state.width = Math.min(Math.max(MIN_W, state.width), window.innerWidth - 16);
+    }
+    if (state.height) {
+      state.height = Math.min(Math.max(MIN_H, state.height), window.innerHeight - 16);
+    }
+    applySize();
     placeShell();
   }
 
@@ -167,6 +270,10 @@
     body.className = "body";
     wrap.appendChild(bar);
     wrap.appendChild(body);
+    resizeHandle = document.createElement("div");
+    resizeHandle.className = "resize";
+    resizeHandle.title = "Redimensionar";
+    wrap.appendChild(resizeHandle);
     shell.appendChild(wrap);
     shadow.appendChild(style);
     shadow.appendChild(shell);
@@ -183,6 +290,7 @@
       scheduleHide();
     });
     bar.addEventListener("mousedown", onDragStart);
+    resizeHandle.addEventListener("mousedown", onResizeStart);
   }
 
   function scheduleHide() {
@@ -218,7 +326,40 @@
     state.dragging = false;
     clampPos();
     applyTheme();
-    setConfig({ overlay: { left: state.left, top: state.top, pinned: state.pinned } });
+    saveOverlay();
+  }
+
+  function onResizeStart(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    state.resizing = true;
+    state.dragging = true;
+    state.dragDx = e.clientX;
+    state.dragDy = e.clientY;
+    state.resizeW = wrap.offsetWidth;
+    state.resizeH = wrap.offsetHeight;
+    document.addEventListener("mousemove", onResizeMove, true);
+    document.addEventListener("mouseup", onResizeEnd, true);
+  }
+
+  function onResizeMove(e) {
+    if (!state.resizing) return;
+    const maxW = window.innerWidth - state.left - 8;
+    const maxH = window.innerHeight - state.top - 8;
+    state.width = Math.min(maxW, Math.max(MIN_W, state.resizeW + (e.clientX - state.dragDx)));
+    state.height = Math.min(maxH, Math.max(MIN_H, state.resizeH + (e.clientY - state.dragDy)));
+    applySize();
+    placeShell();
+  }
+
+  function onResizeEnd() {
+    document.removeEventListener("mousemove", onResizeMove, true);
+    document.removeEventListener("mouseup", onResizeEnd, true);
+    state.resizing = false;
+    state.dragging = false;
+    clampPos();
+    saveOverlay();
   }
 
   function renderBar() {
@@ -233,7 +374,7 @@
     pin.addEventListener("click", (e) => {
       e.stopPropagation();
       state.pinned = !state.pinned;
-      setConfig({ overlay: { left: state.left, top: state.top, pinned: state.pinned } });
+      setConfig({ overlay: { left: state.left, top: state.top, pinned: state.pinned, width: state.width, height: state.height } });
       renderBar();
     });
     const close = document.createElement("button");
@@ -308,7 +449,9 @@
     const stmt = el("p", { className: "stmt" }, toPlain(state.question.statement));
     body.appendChild(stmt);
 
-    const list = el("div", { className: "row" });
+    const list = el("div", {
+      className: `row ${state.altLayout === "inline" ? "opts-inline" : "opts-stack"}`,
+    });
     state.options.forEach((opt, i) => {
       const btn = el("button", { className: "line", type: "button" });
       const prefix =
@@ -355,6 +498,30 @@
           : "chute";
     meta.textContent = `selecionada: ${state.selected || "—"}   confiança: ${confLabel}`;
     body.appendChild(meta);
+
+    const timer = el("div", { className: "timer" });
+    timer.appendChild(el("span", { className: "muted" }, "tempo "));
+    timer.appendChild(el("span", { className: "timer-val" }, formatTime(nowElapsed())));
+    const pauseBtn = el(
+      "button",
+      { type: "button" },
+      state.timerRunning ? "pausar" : "continuar"
+    );
+    pauseBtn.disabled = Boolean(state.result);
+    pauseBtn.addEventListener("click", () => {
+      if (state.timerRunning) pauseTimer();
+      else resumeTimer();
+      render();
+    });
+    const zeroBtn = el("button", { type: "button" }, "zerar");
+    zeroBtn.disabled = Boolean(state.result);
+    zeroBtn.addEventListener("click", () => {
+      resetTimer();
+      render();
+    });
+    timer.appendChild(pauseBtn);
+    timer.appendChild(zeroBtn);
+    body.appendChild(timer);
 
     const actions = el("div", { className: "actions" });
     const ins = el("button", { type: "button" }, "inseguro");
@@ -480,6 +647,21 @@
       await loadCurrent();
     });
     box.appendChild(sel);
+    const layoutBtn = el(
+      "button",
+      { type: "button" },
+      state.altLayout === "inline" ? "linha" : "lista"
+    );
+    layoutBtn.title =
+      state.altLayout === "inline"
+        ? "Alternativas em texto corrido. Clique para empilhar."
+        : "Uma alternativa por linha. Clique para colocar na mesma linha.";
+    layoutBtn.addEventListener("click", async () => {
+      state.altLayout = state.altLayout === "inline" ? "stack" : "inline";
+      await setConfig({ altLayout: state.altLayout });
+      render();
+    });
+    box.appendChild(layoutBtn);
     if (state.stats) {
       box.appendChild(
         el("span", { className: "muted" }, `${state.stats.pending ?? "?"} pend.`)
@@ -495,11 +677,15 @@
     state.omissasToken = cfg.omissasToken || "";
     state.source = cfg.source === "omissas" ? "omissas" : "notebook";
     state.notebookId = cfg.notebookId || "";
+    state.altLayout = cfg.altLayout === "inline" ? "inline" : "stack";
     if (cfg.overlay) {
       state.left = Number(cfg.overlay.left) || state.left;
       state.top = Number(cfg.overlay.top) || state.top;
       state.pinned = Boolean(cfg.overlay.pinned);
+      if (Number(cfg.overlay.width) > 0) state.width = Number(cfg.overlay.width);
+      if (Number(cfg.overlay.height) > 0) state.height = Number(cfg.overlay.height);
     }
+    applySize();
   }
 
   async function loadNotebooks() {
@@ -525,7 +711,10 @@
     state.noteDraft = "";
     state.commentDraft = "";
     state.textMode = "note";
-    state.startedAt = Date.now();
+    state.elapsedMs = 0;
+    state.startedAt = 0;
+    state.timerRunning = false;
+    if (!state.result) resumeTimer();
   }
 
   async function loadNotes(questionId) {
@@ -571,6 +760,7 @@
         is_correct: d.attempt.is_correct,
         correct_answer: state.question?.correct_answer || d.attempt.selected_answer,
       };
+      pauseTimer();
     }
     if (state.question?.id) await loadNotes(state.question.id);
   }
@@ -645,10 +835,12 @@
     state.resolving = true;
     state.error = "";
     render();
+    pauseTimer();
+    const duration_ms = durationToSend();
     const payload = {
       question_id: state.question.id,
       selected_answer: state.selected,
-      duration_ms: Math.max(0, Date.now() - state.startedAt),
+      duration_ms,
       tec_id: state.current.tec_id,
       notebook_id: state.current.notebook_id || state.notebookId,
       confidence_level: state.confidence,
@@ -661,6 +853,7 @@
     state.resolving = false;
     if (!res.ok) {
       state.error = res.error || "Não enviou.";
+      resumeTimer();
       render();
       return;
     }
@@ -763,15 +956,22 @@
     clampPos();
     applyTheme();
     wrap.focus({ preventScroll: true });
+    const alreadyLoaded = Boolean(state.question);
     if (state.userId) {
       await loadNotebooks();
-      await loadCurrent();
+      if (alreadyLoaded) {
+        render();
+        if (!state.result) resumeTimer();
+      } else {
+        await loadCurrent();
+      }
     } else {
       render();
     }
   }
 
   function hide() {
+    pauseTimer();
     state.visible = false;
     clearTimeout(state.hideTimer);
     document.removeEventListener("keydown", onDocKey, true);
@@ -804,7 +1004,11 @@
     if (changes.userId) state.userId = changes.userId.newValue || "";
     if (changes.appUrl) state.appUrl = String(changes.appUrl.newValue || "").replace(/\/$/, "");
     if (changes.omissasToken) state.omissasToken = changes.omissasToken.newValue || "";
-    if (state.visible && (changes.userId || changes.omissasToken) && state.userId) {
+    if (changes.altLayout) {
+      state.altLayout = changes.altLayout.newValue === "inline" ? "inline" : "stack";
+      if (state.visible) render();
+    }
+    if (state.visible && changes.userId && state.userId && !state.question) {
       loadNotebooks().then(() => loadCurrent());
     }
   });
