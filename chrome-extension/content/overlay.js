@@ -41,6 +41,8 @@
     noteDraft: "",
     startedAt: 0,
     hover: false,
+    textMode: "note",
+    commentDraft: "",
   };
 
   let host = null;
@@ -258,7 +260,12 @@
   function render() {
     if (!body) return;
     const keepNote = shadow.activeElement && shadow.activeElement.classList?.contains("note");
-    const noteVal = keepNote ? shadow.activeElement.value : state.noteDraft;
+    const noteVal =
+      keepNote
+        ? shadow.activeElement.value
+        : state.textMode === "comment"
+          ? state.commentDraft
+          : state.noteDraft;
     const noteSel = keepNote
       ? { start: shadow.activeElement.selectionStart, end: shadow.activeElement.selectionEnd }
       : null;
@@ -377,6 +384,21 @@
     actions.appendChild(ins);
     actions.appendChild(ch);
     actions.appendChild(go);
+    const modeBtn = el(
+      "button",
+      { type: "button" },
+      state.textMode === "comment" ? "comentário" : "nota"
+    );
+    modeBtn.title =
+      state.textMode === "comment"
+        ? "Comentário vai para o Papa Vagas junto com a resposta"
+        : "Nota local. Clique para mudar para comentário (Papa Vagas)";
+    if (state.textMode === "comment") modeBtn.style.fontWeight = "700";
+    modeBtn.addEventListener("click", () => {
+      state.textMode = state.textMode === "comment" ? "note" : "comment";
+      render();
+    });
+    actions.appendChild(modeBtn);
     body.appendChild(actions);
 
     if (state.result) {
@@ -403,15 +425,20 @@
 
     const ta = el("textarea", {
       className: "note",
-      placeholder: "nota…  Ctrl+Enter envia",
+      placeholder:
+        state.textMode === "comment"
+          ? "comentário papa vagas… vai com enviar"
+          : "escreva aqui…  Ctrl+Enter salva nota",
     });
     ta.value = noteVal;
     ta.addEventListener("input", () => {
-      state.noteDraft = ta.value;
+      if (state.textMode === "comment") state.commentDraft = ta.value;
+      else state.noteDraft = ta.value;
     });
     ta.addEventListener("keydown", (ev) => {
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
         ev.preventDefault();
+        if (state.textMode === "comment") return;
         sendNote();
       }
     });
@@ -496,6 +523,8 @@
     state.resolving = false;
     state.notes = [];
     state.noteDraft = "";
+    state.commentDraft = "";
+    state.textMode = "note";
     state.startedAt = Date.now();
   }
 
@@ -623,6 +652,7 @@
       tec_id: state.current.tec_id,
       notebook_id: state.current.notebook_id || state.notebookId,
       confidence_level: state.confidence,
+      comment: (state.commentDraft || "").trim() || null,
     };
     const res =
       state.source === "omissas"

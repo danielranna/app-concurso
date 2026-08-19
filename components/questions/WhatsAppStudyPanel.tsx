@@ -60,29 +60,34 @@ export default function WhatsAppStudyPanel({
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
+      if (!forceEnabled) setLoading(true)
       try {
+        let nextEnabled = Boolean(forceEnabled)
         if (notebookId) {
           const params = new URLSearchParams({ user_id: userId, question_id: questionId })
           const res = await fetch(`/api/notebooks/${notebookId}/quiz-sync?${params}`)
           const data = await res.json().catch(() => ({}))
           if (cancelled) return
-          setEnabled(Boolean(data.enabled) || Boolean(forceEnabled))
-          setQty(Number(data.assistEliminateQty) || 0)
-          setCategories(Array.isArray(data.categories) ? data.categories : [])
+          nextEnabled = Boolean(data.enabled) || Boolean(forceEnabled)
+          setEnabled(nextEnabled)
+          if (Number(data.assistEliminateQty)) setQty(Number(data.assistEliminateQty) || 0)
+          if (Array.isArray(data.categories) && data.categories.length) {
+            setCategories(data.categories)
+          }
           if (data.short_id) setShortId(String(data.short_id))
           else if (shortIdHint) setShortId(shortIdHint)
           if (data.synced_comment && !comment) onCommentChange(String(data.synced_comment))
-        } else if (forceEnabled) {
-          setEnabled(true)
+        } else {
+          setEnabled(nextEnabled)
           if (shortIdHint) setShortId(shortIdHint)
-          const res = await fetch(`/api/quiz-sync/inventory?user_id=${userId}`)
+        }
+
+        if (nextEnabled) {
+          const res = await fetch(`/api/quiz-sync/inventory?user_id=${encodeURIComponent(userId)}`)
           const data = await res.json().catch(() => ({}))
           if (cancelled) return
           setQty(Number(data.assistEliminateQty) || 0)
           setCategories(Array.isArray(data.categories) ? data.categories : [])
-        } else {
-          setEnabled(false)
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -108,7 +113,8 @@ export default function WhatsAppStudyPanel({
     return unique.map((l) => ({ letter: l, label: l.toUpperCase() }))
   }, [options, questionType])
 
-  if (loading || !enabled) return null
+  if (!enabled && !forceEnabled) return null
+  if (loading && !forceEnabled) return null
 
   function addTag(raw: string) {
     const name = raw.trim()
@@ -170,8 +176,9 @@ export default function WhatsAppStudyPanel({
       </div>
 
       <p className="text-xs text-slate-600">
-        Tags e verificação de alternativa valem só neste caderno sincronizado com o Papa
-        Vagas. O double-click que risca alternativa continua grátis e local.
+        {forceEnabled
+          ? "Tags, comentário da resposta e verificação vão para o Papa Vagas. O double-click que risca alternativa continua local."
+          : "Tags e verificação de alternativa valem só neste caderno sincronizado com o Papa Vagas. O double-click que risca alternativa continua grátis e local."}
       </p>
 
       <div className="mt-3">

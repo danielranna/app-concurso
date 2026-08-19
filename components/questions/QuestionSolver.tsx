@@ -778,7 +778,7 @@ export default function QuestionSolver({
             questionId={question.id}
             notebookId={whatsappOverlay?.notebookId ?? current?.notebook_id ?? notebookId}
             shortIdHint={whatsappOverlay?.shortId ?? current?.short_id}
-            forceEnabled={whatsappOverlay?.enabled}
+          forceEnabled={Boolean(whatsappOverlay?.enabled)}
             questionType={question.type}
             options={options}
             selected={selected}

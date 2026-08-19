@@ -98,14 +98,16 @@
 .actions button:disabled { opacity: .5; cursor: default; }
 .note {
   width: 100%;
-  min-height: 48px;
-  resize: vertical;
+  min-height: 40px;
+  resize: none;
   font: inherit;
-  font-size: 12px;
-  border: 1px solid var(--line);
+  font-size: 13px;
+  border: none;
+  outline: none;
+  box-shadow: none;
   background: transparent;
   color: var(--fg);
-  padding: 6px;
+  padding: 4px 0 0;
   box-sizing: border-box;
 }
 .note::placeholder { color: var(--muted); opacity: 0.85; }
