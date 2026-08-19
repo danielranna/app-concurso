@@ -84,6 +84,7 @@ type Props = {
       is_correct: boolean
       confidence_level?: string | null
       outcome_category?: string | null
+      duration_ms?: number | null
     } | null
   }>
   submitAnswer: (payload: {
@@ -299,7 +300,7 @@ export default function QuestionSolver({
         })
         let nextDraft = getDraft(scopeKey, qid)
         const attempt = data.attempt
-        if (!nextDraft.resolved && attempt?.selected_answer && data.question) {
+        if (attempt?.selected_answer && data.question) {
           const conf = attempt.confidence_level
           const confidence: ConfidenceLevel =
             conf === "inseguro" || conf === "chute" ? conf : "seguro"
@@ -312,10 +313,12 @@ export default function QuestionSolver({
             opts,
             data.question.type
           )
+          const storedMs = Math.max(0, Number(attempt.duration_ms) || 0)
           nextDraft = {
             ...nextDraft,
             selectedAnswer,
             confidence,
+            durationMsAccumulated: Math.max(nextDraft.durationMsAccumulated || 0, storedMs),
             resolved: true,
             result: {
               is_correct: attempt.is_correct,

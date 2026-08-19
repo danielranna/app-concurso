@@ -48,6 +48,8 @@
     startedAt: 0,
     elapsedMs: 0,
     timerRunning: false,
+    timerQuestionId: "",
+    timerStore: {},
     hover: false,
     textMode: "note",
     commentDraft: "",
@@ -118,6 +120,7 @@
     state.elapsedMs = 0;
     state.startedAt = 0;
     state.timerRunning = false;
+    if (state.timerQuestionId) state.timerStore[state.timerQuestionId] = 0;
     if (!state.result && state.question) resumeTimer();
     else {
       stopTick();
@@ -125,8 +128,12 @@
     }
   }
 
-  function durationToSend() {
+  function snapshotTimer() {
     return Math.max(0, Math.round(nowElapsed()));
+  }
+
+  function durationToSend() {
+    return snapshotTimer();
   }
 
   function toPlain(html) {
@@ -729,10 +736,27 @@
     state.noteDraft = "";
     state.commentDraft = "";
     state.textMode = "note";
-    state.elapsedMs = 0;
+  }
+
+  function startTimerForQuestion(questionId, alreadyAnswered) {
+    if (!questionId) return;
+    if (state.timerQuestionId === questionId) {
+      if (alreadyAnswered) pauseTimer();
+      else if (!state.timerRunning) resumeTimer();
+      return;
+    }
+    if (state.timerQuestionId) {
+      state.timerStore[state.timerQuestionId] = snapshotTimer();
+    }
+    state.timerQuestionId = questionId;
+    state.elapsedMs = Number(state.timerStore[questionId]) || 0;
     state.startedAt = 0;
     state.timerRunning = false;
-    if (!state.result) resumeTimer();
+    if (alreadyAnswered) {
+      pauseTimer();
+      return;
+    }
+    resumeTimer();
   }
 
   async function loadNotes(questionId) {
@@ -771,15 +795,16 @@
     state.options = Array.isArray(d.options) ? d.options : [];
     state.stats = d.stats || null;
     resetQuestionLocal();
-    if (d.attempt?.selected_answer) {
+    const answered = Boolean(d.attempt?.selected_answer);
+    if (answered) {
       state.selected = d.attempt.selected_answer;
       state.confidence = d.attempt.confidence_level || "seguro";
       state.result = {
         is_correct: d.attempt.is_correct,
         correct_answer: state.question?.correct_answer || d.attempt.selected_answer,
       };
-      pauseTimer();
     }
+    startTimerForQuestion(state.question?.id, answered);
     if (state.question?.id) await loadNotes(state.question.id);
   }
 
@@ -843,6 +868,7 @@
       resolved: Object.keys(state.answered).length,
     };
     resetQuestionLocal();
+    startTimerForQuestion(state.question?.id, Boolean(state.answered[state.question?.id]));
     if (state.question?.id) await loadNotes(state.question.id);
   }
 
@@ -850,11 +876,12 @@
     if (!state.question || !state.current || !state.selected || state.result || state.resolving) {
       return;
     }
+    const duration_ms = snapshotTimer();
+    pauseTimer();
+    if (state.question.id) state.timerStore[state.question.id] = duration_ms;
     state.resolving = true;
     state.error = "";
     render();
-    pauseTimer();
-    const duration_ms = durationToSend();
     const payload = {
       question_id: state.question.id,
       selected_answer: state.selected,
@@ -990,6 +1017,7 @@
 
   function hide() {
     pauseTimer();
+    if (state.timerQuestionId) state.timerStore[state.timerQuestionId] = state.elapsedMs;
     state.visible = false;
     clearTimeout(state.hideTimer);
     document.removeEventListener("keydown", onDocKey, true);

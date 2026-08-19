@@ -89,10 +89,11 @@ export async function getLatestNotebookAttempt(
   is_correct: boolean
   confidence_level: string | null
   outcome_category: string | null
+  duration_ms: number | null
 } | null> {
   const { data, error } = await supabaseServer
     .from("question_attempts")
-    .select("selected_answer, is_correct, confidence_level, outcome_category")
+    .select("selected_answer, is_correct, confidence_level, outcome_category, duration_ms")
     .eq("notebook_id", notebookId)
     .eq("user_id", userId)
     .eq("question_id", questionId)
@@ -211,7 +212,7 @@ export async function recordAttempt(params: {
     study_session_id: params.study_session_id,
     selected_answer: params.selected_answer,
     is_correct: params.is_correct,
-    duration_ms: params.duration_ms,
+    duration_ms: params.duration_ms == null ? null : Math.max(0, Math.round(Number(params.duration_ms) || 0)),
     confidence_level: confidence,
     outcome_category,
   }

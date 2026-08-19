@@ -99,7 +99,7 @@ async function handleApi(msg) {
         user_id: userId,
         question_id: msg.question_id,
         selected_answer: msg.selected_answer,
-        duration_ms: msg.duration_ms ?? 0,
+        duration_ms: asDurationMs(msg.duration_ms),
         tec_id: msg.tec_id,
         confidence_level: msg.confidence_level || "seguro",
         comment: msg.comment ?? null,
@@ -131,7 +131,7 @@ async function handleApi(msg) {
         question_id: msg.question_id,
         notebook_id: msg.notebook_id || null,
         selected_answer: msg.selected_answer,
-        duration_ms: msg.duration_ms ?? 0,
+        duration_ms: asDurationMs(msg.duration_ms),
         confidence_level: msg.confidence_level || "seguro",
         comment: msg.comment ?? null,
       });
@@ -152,6 +152,11 @@ async function handleApi(msg) {
     default:
       return { ok: false, error: "Ação desconhecida." };
   }
+}
+
+function asDurationMs(value) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 async function jsonGet(appUrl, path) {
