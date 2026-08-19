@@ -405,6 +405,10 @@ export default function ResolverCadernoPage() {
           onEditQuestion={openEditForQuestion}
           refreshKey={refreshKey}
           onNotebookComplete={handleNotebookComplete}
+          onQuestionTimeReset={(ms) => {
+            setElapsedMs(ms)
+            setTimerKey((k) => k + 1)
+          }}
         />
       </div>
 

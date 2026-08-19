@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { BarChart2, ExternalLink, Flag } from "lucide-react"
+import { BarChart2, ExternalLink, Flag, RotateCcw } from "lucide-react"
 import AddErrorModal from "@/components/AddErrorModal"
 import QuickNote from "@/components/questions/QuickNote"
 import PerformanceModal from "@/components/questions/PerformanceModal"
@@ -108,6 +108,8 @@ type Props = {
   onNotebookComplete?: () => void
   /** Pausa o timer da questão (ex.: quando o cronômetro do caderno está pausado). */
   timerPaused?: boolean
+  /** Chamado ao zerar o tempo da questão atual (caderno já persistido). */
+  onQuestionTimeReset?: (studyElapsedMs: number) => void
   whatsappOverlay?: {
     enabled?: boolean
     shortId?: string | null
@@ -170,6 +172,7 @@ export default function QuestionSolver({
   refreshKey,
   onNotebookComplete,
   timerPaused = false,
+  onQuestionTimeReset,
   soloQuestionId,
   returnHref,
   whatsappOverlay,
@@ -217,6 +220,7 @@ export default function QuestionSolver({
     StudySessionNotebookBreakdown[] | null
   >(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
+  const [resettingQuestionTime, setResettingQuestionTime] = useState(false)
 
   const questionStartedAt = useRef(Date.now())
   const timerWasPaused = useRef(false)
@@ -227,8 +231,10 @@ export default function QuestionSolver({
   const flushQuestionTime = useCallback(
     (questionId: string) => {
       if (!questionId || questionId !== currentQuestionId.current) return
-      const delta = Date.now() - questionStartedAt.current
       const draft = getDraft(scopeKey, questionId)
+      if (draft.resolved) return
+      const delta = Date.now() - questionStartedAt.current
+      questionStartedAt.current = Date.now()
       setDraft(scopeKey, questionId, {
         ...draft,
         durationMsAccumulated: draft.durationMsAccumulated + delta,
@@ -594,6 +600,48 @@ export default function QuestionSolver({
   const resolvableCount = listResolvableDrafts(scopeKey).length
   const locked = !!result
 
+  async function handleResetQuestionTime() {
+    const cut = Math.max(
+      0,
+      Math.round(questionMs + (locked || timerPaused ? 0 : Date.now() - questionStartedAt.current))
+    )
+    if (cut <= 0) return
+    if (
+      !confirm(
+        "Zerar o tempo desta questão e descontar esse valor do cronômetro do caderno?"
+      )
+    ) {
+      return
+    }
+    const qid = current?.question_id || question?.id
+    questionStartedAt.current = Date.now()
+    setQuestionMs(0)
+    if (qid) {
+      const draft = getDraft(scopeKey, qid)
+      setDraft(scopeKey, qid, { ...draft, durationMsAccumulated: 0 })
+    }
+    if (mode === "notebook" && notebookId && qid) {
+      setResettingQuestionTime(true)
+      try {
+        const res = await fetch(`/api/notebooks/${notebookId}/question-time`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            question_id: qid,
+            subtract_ms: cut,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && typeof data.study_elapsed_ms === "number") {
+          onQuestionTimeReset?.(data.study_elapsed_ms)
+        }
+      } finally {
+        setResettingQuestionTime(false)
+      }
+    }
+  }
+
   if (loading) {
     return <p className="p-8 text-slate-500">Carregando questão...</p>
   }
@@ -692,13 +740,29 @@ export default function QuestionSolver({
               : `Questão ${displayIdx} de ${stats.total}`}
           </p>
           {timerTick >= 0 && (
-            <QuestionTimerDisplay
-              ms={
-                questionMs +
-                (locked || timerPaused ? 0 : Date.now() - questionStartedAt.current)
-              }
-              paused={timerPaused}
-            />
+            <span className="inline-flex items-center gap-2">
+              <QuestionTimerDisplay
+                ms={
+                  questionMs +
+                  (locked || timerPaused ? 0 : Date.now() - questionStartedAt.current)
+                }
+                paused={locked || timerPaused}
+              />
+              {questionMs +
+                (locked || timerPaused ? 0 : Date.now() - questionStartedAt.current) >
+                0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleResetQuestionTime()}
+                  disabled={resettingQuestionTime}
+                  title="Zerar só esta questão e descontar do caderno"
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  {resettingQuestionTime ? "…" : "zerar"}
+                </button>
+              )}
+            </span>
           )}
         </div>
         <p className="mt-1 text-xs text-slate-500">

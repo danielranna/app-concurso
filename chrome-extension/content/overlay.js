@@ -36,6 +36,7 @@
     question: null,
     options: [],
     stats: null,
+    position: 0,
     selected: null,
     eliminated: new Set(),
     confidence: "seguro",
@@ -451,6 +452,7 @@
     }
 
     body.appendChild(renderSource());
+    body.appendChild(renderNav());
 
     if (state.loading) {
       body.appendChild(el("p", { className: "muted" }, "carregando…"));
@@ -695,6 +697,43 @@
     return box;
   }
 
+  function positionLabel() {
+    const total =
+      state.source === "omissas"
+        ? state.omissasQueue.length
+        : Number(state.stats?.total) || 0;
+    const pos =
+      state.source === "omissas"
+        ? state.omissasIndex + 1
+        : Number(state.position) || 0;
+    if (!total) return "";
+    return `${Math.max(1, pos)}/${total}`;
+  }
+
+  function renderNav() {
+    const box = el("div", { className: "nav" });
+    const mk = (label, mode, title) => {
+      const b = el("button", { type: "button" }, label);
+      b.title = title;
+      b.addEventListener("click", () => {
+        void navigate(mode);
+      });
+      return b;
+    };
+    box.appendChild(mk("←", "prev", "Anterior (←)"));
+    const pos = el("span", { className: "muted" }, positionLabel() || "—");
+    box.appendChild(pos);
+    box.appendChild(mk("→", "next", "Próxima (→)"));
+    box.appendChild(mk("pend", "unsolved", "Próxima não resolvida (N)"));
+    box.appendChild(mk("rand", "random", "Aleatória (L)"));
+    return box;
+  }
+
+  async function navigate(mode) {
+    if (state.loading) return;
+    await loadCurrent(mode);
+  }
+
   async function loadSession() {
     const cfg = await getConfig();
     state.userId = cfg.userId || "";
@@ -794,6 +833,7 @@
     state.question = d.question || null;
     state.options = Array.isArray(d.options) ? d.options : [];
     state.stats = d.stats || null;
+    state.position = Number(d.position) || 0;
     resetQuestionLocal();
     const answered = Boolean(d.attempt?.selected_answer);
     if (answered) {
@@ -822,6 +862,17 @@
     }
     if (nav === "next") {
       state.omissasIndex = Math.min(state.omissasQueue.length - 1, state.omissasIndex + 1);
+    } else if (nav === "prev") {
+      state.omissasIndex = Math.max(0, state.omissasIndex - 1);
+    } else if (nav === "random") {
+      const pendingIdx = [];
+      state.omissasQueue.forEach((q, i) => {
+        if (!state.answered[q.question_id]) pendingIdx.push(i);
+      });
+      const pool = pendingIdx.length
+        ? pendingIdx
+        : state.omissasQueue.map((_, i) => i);
+      if (pool.length) state.omissasIndex = pool[Math.floor(Math.random() * pool.length)];
     } else if (nav === "unsolved") {
       const from = state.omissasIndex + 1;
       let next = state.omissasQueue.findIndex(
@@ -867,6 +918,7 @@
       pending: state.omissasQueue.filter((q) => !state.answered[q.question_id]).length,
       resolved: Object.keys(state.answered).length,
     };
+    state.position = state.omissasIndex + 1;
     resetQuestionLocal();
     startTimerForQuestion(state.question?.id, Boolean(state.answered[state.question?.id]));
     if (state.question?.id) await loadNotes(state.question.id);
@@ -957,6 +1009,18 @@
         e.preventDefault();
         render();
       }
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      void navigate("next");
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      void navigate("prev");
+    } else if (e.key === "n" || e.key === "N") {
+      e.preventDefault();
+      void navigate("unsolved");
+    } else if (e.key === "l" || e.key === "L") {
+      e.preventDefault();
+      void navigate("random");
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (state.result) loadNext();
@@ -972,12 +1036,6 @@
         state.confidence = state.confidence === "chute" ? "seguro" : "chute";
         e.preventDefault();
         render();
-      }
-    } else if (e.key === "n" || e.key === "N") {
-      const ta = body.querySelector("textarea.note");
-      if (ta) {
-        e.preventDefault();
-        ta.focus();
       }
     }
   }
