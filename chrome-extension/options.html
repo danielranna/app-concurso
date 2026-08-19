@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rascunho</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Calibri, Arial, sans-serif;
+        font-size: 14px;
+        color: #222;
+        max-width: 520px;
+        margin: 32px auto;
+        line-height: 1.5;
+      }
+      label { display: block; margin: 16px 0 6px; color: #444; }
+      input, select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        font: inherit;
+        border: 1px solid #ccc;
+      }
+      button {
+        margin-top: 16px;
+        font: inherit;
+        padding: 6px 12px;
+        border: 1px solid #bbb;
+        background: #eee;
+        cursor: pointer;
+      }
+      .ok { color: #2a5; margin-top: 12px; }
+      .muted { color: #666; font-size: 13px; }
+      code { font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Rascunho</h1>
+    <p class="muted">
+      Faça login no site. A extensão copia a sessão sozinha. Atalho padrão:
+      <code>Alt+Q</code> (mude em chrome://extensions/shortcuts).
+    </p>
+    <label for="appUrl">URL do site</label>
+    <input id="appUrl" type="url" placeholder="https://seu-app.vercel.app" />
+    <p class="muted">Deixe em branco para detectar na primeira visita logada.</p>
+    <label for="source">Fonte inicial</label>
+    <select id="source">
+      <option value="notebook">caderno</option>
+      <option value="omissas">omissas</option>
+    </select>
+    <p class="muted" id="status"></p>
+    <button type="button" id="save">Salvar</button>
+    <p class="ok" id="saved" hidden>Salvo.</p>
+    <script src="options.js"></script>
+  </body>
+</html>
