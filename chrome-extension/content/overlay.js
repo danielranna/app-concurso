@@ -3,8 +3,9 @@
   window.__rascunhoOverlay = true;
 
   const HOST_ID = "rascunho-root-host";
-  const HIDE_MS = 320;
+  const HIDE_MS = 280;
   const PANEL_W = 380;
+  const HOVER_PAD = 52;
   let cachedCss = "";
 
   const state = {
@@ -44,6 +45,7 @@
 
   let host = null;
   let shadow = null;
+  let shell = null;
   let wrap = null;
   let bar = null;
   let body = null;
@@ -76,17 +78,58 @@
     return chrome.runtime.sendMessage({ type: "SET_CONFIG", payload }).catch(() => {});
   }
 
+  function parseRgb(str) {
+    if (!str || str === "transparent") return null;
+    const m = String(str).match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/);
+    if (!m) return null;
+    const a = m[4] == null ? 1 : Number(m[4]);
+    if (a <= 0.08) return null;
+    return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a };
+  }
+
+  function samplePageColor() {
+    const w = wrap?.offsetWidth || PANEL_W;
+    const x = state.left + w / 2;
+    const y = state.top + 36;
+    const prev = host.style.pointerEvents;
+    host.style.pointerEvents = "none";
+    const el = document.elementFromPoint(x, y) || document.body;
+    host.style.pointerEvents = prev;
+    let node = el;
+    while (node && node !== document.documentElement) {
+      const rgb = parseRgb(getComputedStyle(node).backgroundColor);
+      if (rgb && rgb.a >= 0.45) return rgb;
+      node = node.parentElement;
+    }
+    return (
+      parseRgb(getComputedStyle(document.body).backgroundColor) ||
+      parseRgb(getComputedStyle(document.documentElement).backgroundColor) ||
+      { r: 255, g: 255, b: 255, a: 1 }
+    );
+  }
+
+  function applyTheme() {
+    if (!wrap || !host) return;
+    const rgb = samplePageColor();
+    const lum = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+    const dark = lum < 0.52;
+    wrap.classList.toggle("theme-dark", dark);
+    wrap.classList.toggle("theme-light", !dark);
+  }
+
+  function placeShell() {
+    if (!shell) return;
+    shell.style.left = `${state.left - HOVER_PAD}px`;
+    shell.style.top = `${state.top - HOVER_PAD}px`;
+  }
+
   function clampPos() {
     const w = wrap?.offsetWidth || PANEL_W;
-    const h = wrap?.offsetHeight || 200;
     const maxL = Math.max(8, window.innerWidth - w - 8);
     const maxT = Math.max(8, window.innerHeight - 48);
     state.left = Math.min(Math.max(8, state.left), maxL);
     state.top = Math.min(Math.max(8, state.top), maxT);
-    if (wrap) {
-      wrap.style.left = `${state.left}px`;
-      wrap.style.top = `${state.top}px`;
-    }
+    placeShell();
   }
 
   async function loadCss() {
@@ -112,25 +155,28 @@
     shadow.innerHTML = "";
     const style = document.createElement("style");
     style.textContent = await loadCss();
+    shell = document.createElement("div");
+    shell.className = "shell hidden";
     wrap = document.createElement("div");
-    wrap.className = "wrap hidden";
+    wrap.className = "wrap theme-light";
     bar = document.createElement("div");
     bar.className = "bar";
     body = document.createElement("div");
     body.className = "body";
     wrap.appendChild(bar);
     wrap.appendChild(body);
+    shell.appendChild(wrap);
     shadow.appendChild(style);
-    shadow.appendChild(wrap);
+    shadow.appendChild(shell);
     bindShell();
   }
 
   function bindShell() {
-    wrap.addEventListener("mouseenter", () => {
+    shell.addEventListener("mouseenter", () => {
       state.hover = true;
       clearTimeout(state.hideTimer);
     });
-    wrap.addEventListener("mouseleave", () => {
+    shell.addEventListener("mouseleave", () => {
       state.hover = false;
       scheduleHide();
     });
@@ -169,6 +215,7 @@
     if (!state.dragging) return;
     state.dragging = false;
     clampPos();
+    applyTheme();
     setConfig({ overlay: { left: state.left, top: state.top, pinned: state.pinned } });
   }
 
@@ -224,7 +271,6 @@
       if (state.appUrl) {
         const a = el("a", { href: `${state.appUrl}/login`, target: "_blank", rel: "noreferrer" });
         a.textContent = state.appUrl;
-        a.style.color = "#555";
         body.appendChild(a);
       }
       if (state.error) body.appendChild(el("p", { className: "err" }, state.error));
@@ -472,6 +518,7 @@
       state.loading = false;
       render();
       clampPos();
+      applyTheme();
     }
   }
 
@@ -677,15 +724,14 @@
     await ensureDom();
     await loadSession();
     state.visible = true;
-    wrap.classList.remove("hidden");
-    wrap.style.left = `${state.left}px`;
-    wrap.style.top = `${state.top}px`;
+    shell.classList.remove("hidden");
     wrap.tabIndex = -1;
     document.removeEventListener("keydown", onDocKey, true);
     document.addEventListener("keydown", onDocKey, true);
     renderBar();
     render();
     clampPos();
+    applyTheme();
     wrap.focus({ preventScroll: true });
     if (state.userId) {
       await loadNotebooks();
@@ -699,7 +745,7 @@
     state.visible = false;
     clearTimeout(state.hideTimer);
     document.removeEventListener("keydown", onDocKey, true);
-    if (wrap) wrap.classList.add("hidden");
+    if (shell) shell.classList.add("hidden");
   }
 
   async function toggle() {
