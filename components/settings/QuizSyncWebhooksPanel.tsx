@@ -36,6 +36,8 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
+  const [backfillLoading, setBackfillLoading] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -68,8 +70,41 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
         Diagnóstico temporário: o que chega do Papa Vagas/WhatsApp e o que este app envia. Atualiza
         sozinho a cada 8s. <strong>flush</strong> = questão publicada no WhatsApp (empurra
         respostas já feitas neste app). <strong>answer</strong> = você respondeu no WhatsApp/omissas
-        e o progresso deve aparecer no caderno.
+        e o progresso deve aparecer no caderno. Se você já respondeu atrasadas no Papa
+        Vagas e não veio para cá, use o botão abaixo.
       </p>
+      <div className="mb-3">
+        <button
+          type="button"
+          disabled={backfillLoading}
+          onClick={async () => {
+            setBackfillLoading(true)
+            setBackfillMsg(null)
+            const res = await fetch("/api/quiz-sync/backfill", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ user_id: userId }),
+            })
+            const data = await res.json().catch(() => ({}))
+            setBackfillLoading(false)
+            if (!res.ok) {
+              setBackfillMsg(data.error || "Falha ao importar")
+              return
+            }
+            const n = Number(data.imported) || 0
+            setBackfillMsg(
+              n > 0
+                ? `${n} resposta(s) importada(s) do Papa Vagas.`
+                : "Nada novo para importar (já estava aqui ou a questão não está no banco)."
+            )
+            void load()
+          }}
+          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        >
+          {backfillLoading ? "Importando…" : "Trazer respostas do Papa Vagas"}
+        </button>
+        {backfillMsg && <p className="mt-2 text-sm text-slate-700">{backfillMsg}</p>}
+      </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {(["all", "in", "out"] as const).map((d) => (
           <button

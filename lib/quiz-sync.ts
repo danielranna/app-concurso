@@ -327,13 +327,18 @@ async function findQuizQuestionLink(
 } | null> {
   const sid = String(shortId || "").trim().toUpperCase()
   if (!sid) return null
-  let q = supabaseServer
-    .from("quiz_question_links")
-    .select("question_id, notebook_id, tec_id, caderno_id")
-    .eq("short_id", sid)
-  if (cadernoId) q = q.eq("caderno_id", cadernoId)
-  const { data: links } = await q.limit(20)
-  if (!links?.length) return null
+  async function query(filterCaderno: boolean) {
+    let q = supabaseServer
+      .from("quiz_question_links")
+      .select("question_id, notebook_id, tec_id, caderno_id")
+      .eq("short_id", sid)
+    if (filterCaderno && cadernoId) q = q.eq("caderno_id", cadernoId)
+    const { data: links } = await q.limit(20)
+    return links ?? []
+  }
+  let links = await query(true)
+  if (!links.length && cadernoId) links = await query(false)
+  if (!links.length) return null
   const nbIds = links.map((l) => l.notebook_id)
   const { data: syncs } = await supabaseServer
     .from("quiz_notebook_sync")
@@ -342,6 +347,65 @@ async function findQuizQuestionLink(
   const sourceSet = new Set((syncs ?? []).map((s) => s.notebook_id as string))
   const preferred = links.find((l) => sourceSet.has(l.notebook_id)) ?? links[0]
   return preferred
+}
+
+async function findQuestionByTec(tecId: number) {
+  if (!Number.isFinite(tecId) || tecId <= 0) return null
+  const { data } = await supabaseServer
+    .from("questions")
+    .select("id, type, correct_answer")
+    .eq("tec_id", tecId)
+    .limit(1)
+    .maybeSingle()
+  return data
+}
+
+async function findUserNotebookContaining(
+  userId: string,
+  questionId: string
+): Promise<string | null> {
+  const { data: nbs } = await supabaseServer
+    .from("notebooks")
+    .select("id")
+    .eq("user_id", userId)
+  const ids = (nbs ?? []).map((n) => n.id as string)
+  if (!ids.length) return null
+  const { data: rows } = await supabaseServer
+    .from("notebook_questions")
+    .select("notebook_id")
+    .eq("question_id", questionId)
+    .in("notebook_id", ids)
+    .limit(20)
+  if (!rows?.length) return null
+  const { data: syncs } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id")
+    .in("notebook_id", rows.map((r) => r.notebook_id))
+  const sourceSet = new Set((syncs ?? []).map((s) => s.notebook_id as string))
+  const preferred = rows.find((r) => sourceSet.has(r.notebook_id)) ?? rows[0]
+  return preferred.notebook_id as string
+}
+
+async function ensureQuestionInNotebook(notebookId: string, questionId: string) {
+  const { data: existing } = await supabaseServer
+    .from("notebook_questions")
+    .select("question_id")
+    .eq("notebook_id", notebookId)
+    .eq("question_id", questionId)
+    .maybeSingle()
+  if (existing) return
+  const { data: last } = await supabaseServer
+    .from("notebook_questions")
+    .select("position")
+    .eq("notebook_id", notebookId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  await supabaseServer.from("notebook_questions").insert({
+    notebook_id: notebookId,
+    question_id: questionId,
+    position: (Number(last?.position) || 0) + 1,
+  })
 }
 
 export async function upsertSyncedNote(
@@ -405,6 +469,13 @@ async function findQuestionInNotebook(
   return null
 }
 
+function studyQuestionMeta(q: { id: string; type: string; correct_answer: string }) {
+  let questionType = q.type || "multiple_choice"
+  const correct = q.correct_answer ?? ""
+  if (/^(certo|errado)$/i.test(correct)) questionType = "certo_errado"
+  return { questionId: q.id, questionType, correct }
+}
+
 async function resolveStudyTargetFromWa(input: {
   userJid: string
   tecId?: number | null
@@ -414,7 +485,7 @@ async function resolveStudyTargetFromWa(input: {
   | {
       ok: true
       userId: string
-      notebookId: string
+      notebookId: string | null
       questionId: string
       questionType: string
       correct: string
@@ -425,7 +496,8 @@ async function resolveStudyTargetFromWa(input: {
   if (!userId) return { ok: false, reason: "jid_not_linked" }
 
   let linkQuestionId: string | null = null
-  let tecId = input.tecId ?? null
+  let tecId = input.tecId != null ? Number(input.tecId) : null
+  if (tecId != null && (!Number.isFinite(tecId) || tecId <= 0)) tecId = null
   let sourceNotebookId: string | null = null
 
   if (input.cadernoId) {
@@ -446,32 +518,71 @@ async function resolveStudyTargetFromWa(input: {
     }
   }
 
-  let notebookId: string | null = null
+  const candidates: string[] = []
   if (sourceNotebookId) {
-    notebookId = await ensureReplica(sourceNotebookId, userId)
-  } else if (tecId) {
-    notebookId = await resolveSentNotebookForTec(userId, tecId, input.cadernoId)
+    candidates.push(await ensureReplica(sourceNotebookId, userId))
+  }
+  if (tecId) {
+    const byTec = await resolveSentNotebookForTec(userId, tecId, input.cadernoId)
+    if (byTec && !candidates.includes(byTec)) candidates.push(byTec)
+    if (input.cadernoId) {
+      const anyTec = await resolveSentNotebookForTec(userId, tecId, null)
+      if (anyTec && !candidates.includes(anyTec)) candidates.push(anyTec)
+    }
   }
 
-  if (!notebookId) return { ok: false, reason: "no_notebook" }
+  let notebookId: string | null = null
+  let found: { id: string; type: string; correct_answer: string } | null = null
+  for (const nb of candidates) {
+    const inNb = await findQuestionInNotebook(nb, {
+      tecId,
+      questionId: linkQuestionId,
+    })
+    if (inNb) {
+      notebookId = nb
+      found = inNb
+      break
+    }
+  }
 
-  const inNotebook = await findQuestionInNotebook(notebookId, {
-    tecId,
-    questionId: linkQuestionId,
-  })
-  if (!inNotebook) return { ok: false, reason: "question_not_in_notebook" }
+  if (!found && sourceNotebookId) {
+    const inSource = await findQuestionInNotebook(sourceNotebookId, {
+      tecId,
+      questionId: linkQuestionId,
+    })
+    if (inSource) {
+      notebookId = await ensureReplica(sourceNotebookId, userId)
+      await ensureQuestionInNotebook(notebookId, inSource.id)
+      found = inSource
+    }
+  }
 
-  let questionType = inNotebook.type || "multiple_choice"
-  const correct = inNotebook.correct_answer ?? ""
-  if (/^(certo|errado)$/i.test(correct)) questionType = "certo_errado"
+  if (!found && tecId) {
+    const byTec = await findQuestionByTec(tecId)
+    if (byTec) found = byTec
+  }
+
+  if (!found && linkQuestionId) {
+    const { data: q } = await supabaseServer
+      .from("questions")
+      .select("id, type, correct_answer")
+      .eq("id", linkQuestionId)
+      .maybeSingle()
+    if (q) found = q
+  }
+
+  if (!found) return { ok: false, reason: "question_not_found" }
+
+  if (!notebookId) {
+    notebookId = await findUserNotebookContaining(userId, found.id)
+  }
+  if (notebookId) await ensureQuestionInNotebook(notebookId, found.id)
 
   return {
     ok: true,
     userId,
     notebookId,
-    questionId: inNotebook.id,
-    questionType,
-    correct,
+    ...studyQuestionMeta(found),
   }
 }
 
@@ -494,14 +605,19 @@ export async function ingestWhatsappAnswer(input: {
   const isCorrect = normalizeAnswer(questionType, selected, correct)
   const confidence = parseConfidenceLevel(input.confidenceLevel)
 
-  const { data: existing } = await supabaseServer
+  const { data: existingRows } = await supabaseServer
     .from("question_attempts")
-    .select("id, selected_answer, duration_ms")
+    .select("id, selected_answer, duration_ms, notebook_id")
     .eq("user_id", userId)
-    .eq("notebook_id", notebookId)
     .eq("question_id", questionId)
-    .limit(1)
-    .maybeSingle()
+    .order("created_at", { ascending: false })
+    .limit(10)
+  const existing =
+    (notebookId
+      ? existingRows?.find((r) => r.notebook_id === notebookId)
+      : existingRows?.find((r) => r.notebook_id == null)) ??
+    existingRows?.[0] ??
+    null
   const duration = capDurationMs(input.durationMs)
   if (existing) {
     const stored = String(existing.selected_answer || "")
@@ -514,6 +630,7 @@ export async function ingestWhatsappAnswer(input: {
       patch.confidence_level = confidence
     }
     if (duration && !(Number(existing.duration_ms) > 0)) patch.duration_ms = duration
+    if (notebookId && !existing.notebook_id) patch.notebook_id = notebookId
     if (Object.keys(patch).length) {
       await supabaseServer.from("question_attempts").update(patch).eq("id", existing.id)
     }
@@ -524,7 +641,7 @@ export async function ingestWhatsappAnswer(input: {
         .update({ attempt_tags: input.tags })
         .eq("id", existing.id)
     }
-    await refreshNotebookProgress(notebookId, userId)
+    if (notebookId) await refreshNotebookProgress(notebookId, userId)
     return { ok: true, already: true, notebook_id: notebookId, question_id: questionId }
   }
 
@@ -587,7 +704,6 @@ export async function getWhatsappStudyContext(input: {
     .from("question_attempts")
     .select("duration_ms")
     .eq("user_id", target.userId)
-    .eq("notebook_id", target.notebookId)
     .eq("question_id", target.questionId)
     .not("duration_ms", "is", null)
     .gt("duration_ms", 0)
@@ -972,7 +1088,9 @@ export async function maybePushNotebookAnswer(input: {
 export async function backfillWhatsappAnswers(userId: string, userJid: string) {
   const url = getQuizSyncAnswersUrl()
   if (!url) return { skipped: true as const, imported: 0 }
-  const { res, data } = await quizFetch(`${url}?userJid=${encodeURIComponent(userJid)}`)
+  const { res, data } = await quizFetch(
+    `${url}?userJid=${encodeURIComponent(userJid)}&limit=300`
+  )
   if (!res.ok) return { skipped: true as const, imported: 0, error: data.error }
   const answers = Array.isArray(data.answers) ? data.answers : []
   let imported = 0
@@ -983,6 +1101,7 @@ export async function backfillWhatsappAnswers(userId: string, userJid: string) {
       const result = await ingestWhatsappAnswer({
         tecId: a.tecId != null ? Number(a.tecId) : null,
         shortId: a.shortId ?? null,
+        cadernoId: a.cadernoId != null ? Number(a.cadernoId) : null,
         userJid,
         answerLetter: letter,
         comment: a.comment ?? null,
