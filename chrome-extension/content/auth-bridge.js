@@ -2,6 +2,26 @@
   if (window.__rascunhoAuthBridge) return;
   window.__rascunhoAuthBridge = true;
 
+  let stopped = false;
+  let timer = 0;
+
+  function extensionAlive() {
+    try {
+      return Boolean(chrome?.runtime?.id);
+    } catch {
+      return false;
+    }
+  }
+
+  function stop() {
+    stopped = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = 0;
+    }
+    window.removeEventListener("storage", onStorage);
+  }
+
   function readSupabaseUserId() {
     try {
       for (let i = 0; i < localStorage.length; i += 1) {
@@ -35,31 +55,50 @@
   }
 
   async function sync() {
-    const userId = readSupabaseUserId();
-    const token = omissasTokenFromUrl();
-    const cfg = await chrome.storage.local.get(["appUrl", "userId", "omissasToken"]);
-    const patch = {};
-
-    const origin = location.origin;
-    const known = String(cfg.appUrl || "").replace(/\/$/, "");
-
-    if (userId && (looksLikeApp() || known === origin)) {
-      if (cfg.userId !== userId) patch.userId = userId;
-      if (!known || known === origin) patch.appUrl = origin;
+    if (stopped) return;
+    if (!extensionAlive()) {
+      stop();
+      return;
     }
+    try {
+      const userId = readSupabaseUserId();
+      const token = omissasTokenFromUrl();
+      const cfg = await chrome.storage.local.get(["appUrl", "userId", "omissasToken"]);
+      const patch = {};
 
-    if (!userId && known === origin && cfg.userId) {
-      patch.userId = "";
-    }
+      const origin = location.origin;
+      const known = String(cfg.appUrl || "").replace(/\/$/, "");
 
-    if (token && token !== cfg.omissasToken) patch.omissasToken = token;
+      if (userId && (looksLikeApp() || known === origin)) {
+        if (cfg.userId !== userId) patch.userId = userId;
+        if (!known || known === origin) patch.appUrl = origin;
+      }
 
-    if (Object.keys(patch).length) {
-      await chrome.storage.local.set(patch);
+      if (!userId && known === origin && cfg.userId) {
+        patch.userId = "";
+      }
+
+      if (token && token !== cfg.omissasToken) patch.omissasToken = token;
+
+      if (Object.keys(patch).length) {
+        if (!extensionAlive()) {
+          stop();
+          return;
+        }
+        await chrome.storage.local.set(patch);
+      }
+    } catch {
+      if (!extensionAlive()) stop();
     }
   }
 
-  sync();
-  window.addEventListener("storage", sync);
-  setInterval(sync, 4000);
+  function onStorage() {
+    void sync();
+  }
+
+  void sync();
+  window.addEventListener("storage", onStorage);
+  timer = setInterval(() => {
+    void sync();
+  }, 4000);
 })();

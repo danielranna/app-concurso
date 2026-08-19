@@ -136,17 +136,34 @@
     return (d.textContent || "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").trim();
   }
 
+  function extensionAlive() {
+    try {
+      return Boolean(chrome?.runtime?.id);
+    } catch {
+      return false;
+    }
+  }
+
   function api(action, extra) {
+    if (!extensionAlive()) {
+      return Promise.resolve({
+        ok: false,
+        error: "Extensão atualizada — recarregue esta aba.",
+      });
+    }
     return chrome.runtime
       .sendMessage({ type: "API", action, ...(extra || {}) })
       .then((res) => res || { ok: false, error: "Sem resposta da extensão." })
       .catch((err) => ({
         ok: false,
-        error: err?.message || "Recarregue a página após atualizar a extensão.",
+        error: /context invalidated/i.test(String(err?.message || err))
+          ? "Extensão atualizada — recarregue esta aba."
+          : err?.message || "Recarregue a página após atualizar a extensão.",
       }));
   }
 
   function getConfig() {
+    if (!extensionAlive()) return Promise.resolve({});
     return chrome.runtime
       .sendMessage({ type: "GET_CONFIG" })
       .then((res) => res || {})
@@ -154,6 +171,7 @@
   }
 
   function setConfig(payload) {
+    if (!extensionAlive()) return Promise.resolve();
     return chrome.runtime.sendMessage({ type: "SET_CONFIG", payload }).catch(() => {});
   }
 
@@ -984,32 +1002,36 @@
     else await show();
   }
 
-  chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
-    if (msg?.type === "TOGGLE") {
-      toggle().then(() => sendResponse({ ok: true }));
-      return true;
-    }
-    if (msg?.type === "SHOW") {
-      show().then(() => sendResponse({ ok: true }));
-      return true;
-    }
-    if (msg?.type === "HIDE") {
-      hide();
-      sendResponse({ ok: true });
-    }
-  });
+  try {
+    chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+      if (msg?.type === "TOGGLE") {
+        toggle().then(() => sendResponse({ ok: true }));
+        return true;
+      }
+      if (msg?.type === "SHOW") {
+        show().then(() => sendResponse({ ok: true }));
+        return true;
+      }
+      if (msg?.type === "HIDE") {
+        hide();
+        sendResponse({ ok: true });
+      }
+    });
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    if (changes.userId) state.userId = changes.userId.newValue || "";
-    if (changes.appUrl) state.appUrl = String(changes.appUrl.newValue || "").replace(/\/$/, "");
-    if (changes.omissasToken) state.omissasToken = changes.omissasToken.newValue || "";
-    if (changes.altLayout) {
-      state.altLayout = changes.altLayout.newValue === "inline" ? "inline" : "stack";
-      if (state.visible) render();
-    }
-    if (state.visible && changes.userId && state.userId && !state.question) {
-      loadNotebooks().then(() => loadCurrent());
-    }
-  });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.userId) state.userId = changes.userId.newValue || "";
+      if (changes.appUrl) state.appUrl = String(changes.appUrl.newValue || "").replace(/\/$/, "");
+      if (changes.omissasToken) state.omissasToken = changes.omissasToken.newValue || "";
+      if (changes.altLayout) {
+        state.altLayout = changes.altLayout.newValue === "inline" ? "inline" : "stack";
+        if (state.visible) render();
+      }
+      if (state.visible && changes.userId && state.userId && !state.question) {
+        loadNotebooks().then(() => loadCurrent());
+      }
+    });
+  } catch {
+    /* extensão recarregada nesta aba */
+  }
 })();
