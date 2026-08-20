@@ -4,6 +4,7 @@ import {
   ensureReplica,
   fetchOmissasFromQuiz,
   resolveUserIdByJid,
+  retryFailedIngests,
 } from "@/lib/quiz-sync"
 
 export async function GET(req: Request) {
@@ -87,11 +88,77 @@ export async function GET(req: Request) {
       })
     }
 
+    const qids = queue.map((q) => q.question_id)
+    const { data: qrows } = qids.length
+      ? await supabaseServer
+          .from("questions")
+          .select("id, statement, correct_answer, type, tec_url")
+          .in("id", qids)
+      : { data: [] as { id: string; statement: string; correct_answer: string; type: string; tec_url: string }[] }
+    const qById = new Map((qrows ?? []).map((r) => [r.id, r]))
+
+    const { data: attemptRows } = qids.length
+      ? await supabaseServer
+          .from("question_attempts")
+          .select(
+            "question_id, is_correct, selected_answer, duration_ms, confidence_level, created_at"
+          )
+          .eq("user_id", user_id)
+          .in("question_id", qids)
+          .order("created_at", { ascending: false })
+      : { data: [] as { question_id: string; is_correct: boolean; selected_answer: string; duration_ms: number | null; confidence_level: string | null; created_at: string }[] }
+
+    const attempts: Record<
+      string,
+      {
+        is_correct: boolean
+        selected_answer: string
+        duration_ms: number | null
+        confidence_level: string | null
+      }
+    > = {}
+    for (const a of attemptRows ?? []) {
+      if (attempts[a.question_id]) continue
+      attempts[a.question_id] = {
+        is_correct: Boolean(a.is_correct),
+        selected_answer: a.selected_answer,
+        duration_ms: a.duration_ms,
+        confidence_level: a.confidence_level,
+      }
+    }
+
+    const items = queue.map((q) => {
+      const meta = qById.get(q.question_id)
+      const att = attempts[q.question_id]
+      return {
+        ...q,
+        statement: meta?.statement ?? "",
+        correct_answer: meta?.correct_answer ?? "",
+        type: meta?.type ?? "",
+        tec_url: meta?.tec_url ?? "",
+        attempt: att ?? null,
+      }
+    })
+
+    if (Object.keys(attempts).length) {
+      await retryFailedIngests(user_id).catch(() => {})
+    }
+
+    const resolved = Object.keys(attempts).length
+    const correct = Object.values(attempts).filter((a) => a.is_correct).length
     return NextResponse.json({
       mode: payload.mode,
       userJid: payload.userJid,
       total: queue.length,
-      queue,
+      queue: items,
+      attempts,
+      stats: {
+        total: queue.length,
+        resolved,
+        correct,
+        wrong: resolved - correct,
+        pending: Math.max(0, queue.length - resolved),
+      },
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

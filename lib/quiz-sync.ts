@@ -135,14 +135,34 @@ export async function resolveUserIdByJid(userJid: string): Promise<string | null
   return data?.user_id ?? null
 }
 
+function isUsableDisplayName(value: unknown): value is string {
+  const t = String(value || "").trim()
+  if (!t) return false
+  if (/@/.test(t)) return false
+  if (/^\+?\d{8,}$/.test(t)) return false
+  return true
+}
+
 export async function resolveJidByUserId(userId: string): Promise<string | null> {
+  const ident = await resolveWhatsappIdentity(userId)
+  return ident?.jid ?? null
+}
+
+export async function resolveWhatsappIdentity(
+  userId: string
+): Promise<{ jid: string; userName: string } | null> {
   const { data } = await supabaseServer
     .from("flashcard_bot_settings")
-    .select("whatsapp_jid, whatsapp_authorized")
+    .select("whatsapp_jid, whatsapp_display_label, whatsapp_authorized")
     .eq("user_id", userId)
     .maybeSingle()
   if (!data?.whatsapp_jid || data.whatsapp_authorized === false) return null
-  return data.whatsapp_jid
+  return {
+    jid: data.whatsapp_jid,
+    userName: isUsableDisplayName(data.whatsapp_display_label)
+      ? String(data.whatsapp_display_label).trim()
+      : "Participante",
+  }
 }
 
 export async function getSyncForNotebook(notebookId: string) {
@@ -774,8 +794,8 @@ export async function pushAnswerToWhatsapp(input: {
   notebookId?: string | null
   cadernoId?: number | null
 }) {
-  const jid = await resolveJidByUserId(input.userId)
-  if (!jid) {
+  const ident = await resolveWhatsappIdentity(input.userId)
+  if (!ident) {
     await logQuizSyncEvent({
       direction: "out",
       kind: "ingest",
@@ -787,6 +807,7 @@ export async function pushAnswerToWhatsapp(input: {
     })
     return { skipped: true, reason: "no_jid" }
   }
+  const { jid, userName } = ident
   const ingestUrl = getQuizSyncIngestUrl()
   if (!ingestUrl) return { skipped: true, reason: "no_quiz_url" }
 
@@ -819,6 +840,7 @@ export async function pushAnswerToWhatsapp(input: {
       method: "POST",
       body: JSON.stringify({
         userJid: jid,
+        userName,
         tecId: q.tec_id,
         cadernoId,
         shortId: link?.short_id ?? null,
@@ -837,6 +859,58 @@ export async function pushAnswerToWhatsapp(input: {
     }
   )
   return { ok: res.ok, pending: Boolean(data.pending), data }
+}
+
+/** Reenvia ingest que falhou por user_name nulo (e outros erros) com o nome preenchido. */
+export async function retryFailedIngests(userId: string, limit = 80) {
+  const ident = await resolveWhatsappIdentity(userId)
+  const ingestUrl = getQuizSyncIngestUrl()
+  if (!ident || !ingestUrl) return { retried: 0 }
+  const { data: rows } = await supabaseServer
+    .from("quiz_sync_event_log")
+    .select("id, payload, tec_id, caderno_id, user_jid")
+    .eq("kind", "ingest")
+    .eq("direction", "out")
+    .eq("ok", false)
+    .in("user_jid", jidCandidates(ident.jid))
+    .order("created_at", { ascending: false })
+    .limit(limit)
+
+  const seen = new Set<string>()
+  const unique: { req: Record<string, unknown>; cadernoId: number | null; tecId: number | null }[] =
+    []
+  for (const row of rows ?? []) {
+    const payload = row.payload as { request?: Record<string, unknown> } | null
+    const req = payload && typeof payload === "object" ? payload.request : null
+    if (!req || typeof req !== "object") continue
+    const key = `${req.tecId ?? ""}:${req.shortId ?? ""}:${req.cadernoId ?? ""}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push({
+      req,
+      cadernoId: req.cadernoId != null ? Number(req.cadernoId) : row.caderno_id ?? null,
+      tecId: req.tecId != null ? Number(req.tecId) : row.tec_id ?? null,
+    })
+  }
+  const results = await Promise.all(
+    unique.map(async ({ req, cadernoId, tecId }) => {
+      const { res } = await quizFetch(
+        ingestUrl,
+        {
+          method: "POST",
+          body: JSON.stringify({ ...req, userJid: ident.jid, userName: ident.userName }),
+        },
+        {
+          kind: "ingest",
+          cadernoId,
+          tecId,
+          userJid: ident.jid,
+        }
+      )
+      return res.ok
+    })
+  )
+  return { retried: results.filter(Boolean).length }
 }
 
 export async function flushPendingForTec(input: {

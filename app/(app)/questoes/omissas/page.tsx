@@ -9,12 +9,111 @@ import QuestionSolver from "@/components/questions/QuestionSolver"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import type { NavMode } from "@/lib/study-navigation"
 
+type AttemptInfo = {
+  is_correct: boolean
+  selected_answer: string
+  duration_ms: number | null
+  confidence_level: string | null
+}
+
 type QueueItem = {
   question_id: string
   tec_id: number
   notebook_id: string
   position: number
   short_id: string
+  statement?: string
+  correct_answer?: string
+  type?: string
+  tec_url?: string
+  attempt?: AttemptInfo | null
+}
+
+function formatLetter(value: string | null | undefined, type?: string) {
+  const raw = String(value || "").trim()
+  if (!raw) return "—"
+  if (type === "certo_errado") {
+    const l = raw.toLowerCase()
+    if (l === "c" || l.startsWith("certo")) return "Certo"
+    if (l === "e" || l.startsWith("errado")) return "Errado"
+  }
+  return raw.toUpperCase().slice(0, 8)
+}
+
+function OmissasResults({ queue, attempts }: { queue: QueueItem[]; attempts: Record<string, AttemptInfo> }) {
+  const total = queue.length
+  const resolved = Object.keys(attempts).length
+  const correct = Object.values(attempts).filter((a) => a.is_correct).length
+  const wrong = resolved - correct
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
+        <p className="text-lg font-medium text-green-800">Sessão de omissas concluída</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
+          <div className="min-w-[88px] rounded-lg bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <span className="block text-2xl font-semibold tabular-nums text-emerald-700">{correct}</span>
+            acertos
+          </div>
+          <div className="min-w-[88px] rounded-lg bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <span className="block text-2xl font-semibold tabular-nums text-red-700">{wrong}</span>
+            erros
+          </div>
+          <div className="min-w-[88px] rounded-lg bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <span className="block text-2xl font-semibold tabular-nums text-slate-800">{total}</span>
+            no total
+          </div>
+        </div>
+      </div>
+
+      <ul className="space-y-3">
+        {queue.map((q) => {
+          const att = attempts[q.question_id]
+          const ok = att?.is_correct
+          return (
+            <li
+              key={q.question_id}
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-800">
+                  {q.short_id ? `#${q.short_id}` : `TEC ${q.tec_id}`}
+                </p>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    ok === true
+                      ? "bg-emerald-50 text-emerald-800"
+                      : ok === false
+                        ? "bg-red-50 text-red-800"
+                        : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {ok === true ? "Acerto" : ok === false ? "Erro" : "—"}
+                </span>
+              </div>
+              {q.statement ? (
+                <p className="mt-2 line-clamp-4 text-sm text-slate-700">{q.statement}</p>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-500">
+                Sua resposta: {formatLetter(att?.selected_answer, q.type)}
+                {ok === false ? ` · Gabarito: ${formatLetter(q.correct_answer, q.type)}` : ""}
+              </p>
+              {q.tec_url ? (
+                <a
+                  href={q.tec_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-block text-xs text-blue-600 hover:underline"
+                >
+                  Ver no TEC
+                </a>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
 }
 
 function OmissasAppPage() {
@@ -25,6 +124,7 @@ function OmissasAppPage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [index, setIndex] = useState(0)
   const [answered, setAnswered] = useState<Set<string>>(new Set())
+  const [attempts, setAttempts] = useState<Record<string, AttemptInfo>>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -49,23 +149,38 @@ function OmissasAppPage() {
         setLoading(false)
         return
       }
-      setQueue(Array.isArray(data.queue) ? data.queue : [])
+      const nextQueue: QueueItem[] = Array.isArray(data.queue) ? data.queue : []
+      const nextAttempts: Record<string, AttemptInfo> =
+        data.attempts && typeof data.attempts === "object" ? data.attempts : {}
+      for (const item of nextQueue) {
+        if (item.attempt && !nextAttempts[item.question_id]) {
+          nextAttempts[item.question_id] = item.attempt
+        }
+      }
+      const done = new Set(Object.keys(nextAttempts))
+      setQueue(nextQueue)
+      setAttempts(nextAttempts)
+      setAnswered(done)
+      const firstPending = nextQueue.findIndex((q) => !done.has(q.question_id))
+      setIndex(firstPending >= 0 ? firstPending : 0)
       setLoading(false)
     })
   }, [router, token])
 
   const currentItem = queue[index] ?? null
+  const allDone = queue.length > 0 && queue.every((q) => answered.has(q.question_id))
   const stats = useMemo(() => {
     const total = queue.length
     const resolved = answered.size
+    const correct = Object.values(attempts).filter((a) => a.is_correct).length
     return {
       total,
       resolved,
-      correct: 0,
-      wrong: 0,
+      correct,
+      wrong: Math.max(0, resolved - correct),
       pending: Math.max(0, total - resolved),
     }
-  }, [queue, answered])
+  }, [queue, answered, attempts])
 
   const fetchQueue = useCallback(
     async (opts?: { nav?: NavMode }) => {
@@ -77,13 +192,21 @@ function OmissasAppPage() {
           stats,
         }
       }
+      const pendingLeft = queue.some((q) => !answered.has(q.question_id))
       let next = index
       if (opts?.nav === "next") next = Math.min(queue.length - 1, index + 1)
       if (opts?.nav === "prev") next = Math.max(0, index - 1)
+      if (opts?.nav === "random") {
+        next = Math.floor(Math.random() * queue.length)
+      }
       if (opts?.nav === "unsolved") {
         const u = queue.findIndex((q, i) => i >= index && !answered.has(q.question_id))
         next = u >= 0 ? u : queue.findIndex((q) => !answered.has(q.question_id))
-        if (next < 0) next = index
+        if (next < 0) {
+          return { current: null, question: null, options: [], stats }
+        }
+      } else if (!pendingLeft && !opts?.nav) {
+        return { current: null, question: null, options: [], stats }
       }
       if (next !== index) setIndex(next)
       const item = queue[next] ?? queue[index]
@@ -103,9 +226,10 @@ function OmissasAppPage() {
         options: data.options ?? [],
         stats,
         position: next + 1,
+        attempt: attempts[item.question_id] ?? null,
       }
     },
-    [userId, queue, index, answered, stats]
+    [userId, queue, index, answered, stats, attempts]
   )
 
   const submitAnswer = useCallback(
@@ -136,6 +260,15 @@ function OmissasAppPage() {
       const data = await res.json()
       if (!("error" in data)) {
         setAnswered((prev) => new Set(prev).add(payload.question_id))
+        setAttempts((prev) => ({
+          ...prev,
+          [payload.question_id]: {
+            is_correct: Boolean(data.is_correct),
+            selected_answer: payload.selected_answer,
+            duration_ms: payload.duration_ms,
+            confidence_level: payload.confidence_level,
+          },
+        }))
       }
       return data
     },
@@ -161,14 +294,17 @@ function OmissasAppPage() {
       </Link>
       <h1 className="mb-1 text-xl font-bold text-slate-900">Omissas / atrasadas</h1>
       <p className="mb-6 text-sm text-slate-500">
-        Fila do dia — não entra na biblioteca. Cada resposta grava no caderno de origem e no
-        WhatsApp.
+        {allDone
+          ? "Sessão encerrada — resumo das respostas desta fila."
+          : "Fila do dia — não entra na biblioteca. Cada resposta grava no caderno de origem e no WhatsApp."}
       </p>
       {queue.length === 0 ? (
         <p className="text-sm text-slate-600">
           Nenhuma questão desta sessão está no banco deste app (importe o caderno ou mapeie o
           TEC).
         </p>
+      ) : allDone ? (
+        <OmissasResults queue={queue} attempts={attempts} />
       ) : (
         <QuestionSolver
           userId={userId}
