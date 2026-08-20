@@ -57,27 +57,48 @@ export async function GET(req: Request) {
       short_id: string
     }[] = []
 
+    const replicaBySource = new Map<string, string>()
     for (const q of questions) {
       const tecId = Number(q.tecId)
       const shortId = String(q.shortId || "").trim().toUpperCase()
+      const cadernoId =
+        q.cadernoId != null && Number.isFinite(Number(q.cadernoId))
+          ? Number(q.cadernoId)
+          : null
       const shortLink = shortId ? byShort.get(shortId) : undefined
       const questionId =
         (Number.isFinite(tecId) && tecId > 0 ? byTec.get(tecId) : undefined) ||
         shortLink?.question_id
       if (!questionId) continue
       let notebookId = ""
-      const { data: link } =
-        Number.isFinite(tecId) && tecId > 0
-          ? await supabaseServer
-              .from("quiz_question_links")
-              .select("notebook_id")
-              .eq("tec_id", tecId)
-              .limit(1)
-              .maybeSingle()
-          : { data: shortLink ? { notebook_id: shortLink.notebook_id } : null }
-      const sourceNb = link?.notebook_id || shortLink?.notebook_id
+      let sourceNb: string | null = null
+      if (cadernoId) {
+        const { data: sync } = await supabaseServer
+          .from("quiz_notebook_sync")
+          .select("notebook_id")
+          .eq("caderno_id", cadernoId)
+          .maybeSingle()
+        sourceNb = (sync?.notebook_id as string | undefined) ?? null
+      }
+      if (!sourceNb) {
+        const { data: link } =
+          Number.isFinite(tecId) && tecId > 0
+            ? await supabaseServer
+                .from("quiz_question_links")
+                .select("notebook_id")
+                .eq("tec_id", tecId)
+                .limit(1)
+                .maybeSingle()
+            : { data: shortLink ? { notebook_id: shortLink.notebook_id } : null }
+        sourceNb = link?.notebook_id || shortLink?.notebook_id || null
+      }
       if (sourceNb) {
-        notebookId = await ensureReplica(sourceNb, user_id)
+        const cached = replicaBySource.get(sourceNb)
+        if (cached) notebookId = cached
+        else {
+          notebookId = await ensureReplica(sourceNb, user_id)
+          replicaBySource.set(sourceNb, notebookId)
+        }
       }
       queue.push({
         question_id: questionId,

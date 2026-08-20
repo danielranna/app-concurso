@@ -242,17 +242,231 @@ async function resolveSentNotebookForTec(
   return ensureReplica(links[0].notebook_id as string, userId)
 }
 
+type NotebookPick = {
+  id: string
+  subject_id: string | null
+  answered_count: number | null
+  created_at: string | null
+}
+
+function preferUserNotebook(rows: NotebookPick[]): string | null {
+  if (!rows.length) return null
+  const ranked = [...rows].sort((a, b) => {
+    const aSaved = a.subject_id ? 1 : 0
+    const bSaved = b.subject_id ? 1 : 0
+    if (aSaved !== bSaved) return bSaved - aSaved
+    const aAns = a.answered_count ?? 0
+    const bAns = b.answered_count ?? 0
+    if (aAns !== bAns) return bAns - aAns
+    return String(a.created_at || "").localeCompare(String(b.created_at || ""))
+  })
+  return ranked[0]?.id ?? null
+}
+
+async function cadernoIdForNotebook(notebookId: string): Promise<number | null> {
+  const sync = await getSyncForNotebook(notebookId)
+  if (sync?.caderno_id != null) return Number(sync.caderno_id)
+  const { data: replica } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("source_notebook_id")
+    .eq("notebook_id", notebookId)
+    .limit(1)
+    .maybeSingle()
+  if (replica?.source_notebook_id) {
+    const srcSync = await getSyncForNotebook(replica.source_notebook_id as string)
+    if (srcSync?.caderno_id != null) return Number(srcSync.caderno_id)
+  }
+  const { data: link } = await supabaseServer
+    .from("quiz_question_links")
+    .select("caderno_id")
+    .eq("notebook_id", notebookId)
+    .limit(1)
+    .maybeSingle()
+  return link?.caderno_id != null ? Number(link.caderno_id) : null
+}
+
+async function cadernoIdsForNotebooks(notebookIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const ids = [...new Set(notebookIds.filter(Boolean))]
+  if (!ids.length) return out
+
+  const { data: syncs } = await supabaseServer
+    .from("quiz_notebook_sync")
+    .select("notebook_id, caderno_id")
+    .in("notebook_id", ids)
+  for (const s of syncs ?? []) {
+    if (s.notebook_id && s.caderno_id != null) out.set(s.notebook_id as string, Number(s.caderno_id))
+  }
+
+  const missing = ids.filter((id) => !out.has(id))
+  if (missing.length) {
+    const { data: replicas } = await supabaseServer
+      .from("quiz_notebook_replicas")
+      .select("notebook_id, source_notebook_id")
+      .in("notebook_id", missing)
+    const sourceIds = [
+      ...new Set((replicas ?? []).map((r) => r.source_notebook_id as string).filter(Boolean)),
+    ]
+    const sourceCaderno = new Map<string, number>()
+    if (sourceIds.length) {
+      const { data: srcSyncs } = await supabaseServer
+        .from("quiz_notebook_sync")
+        .select("notebook_id, caderno_id")
+        .in("notebook_id", sourceIds)
+      for (const s of srcSyncs ?? []) {
+        if (s.notebook_id && s.caderno_id != null) {
+          sourceCaderno.set(s.notebook_id as string, Number(s.caderno_id))
+        }
+      }
+    }
+    for (const r of replicas ?? []) {
+      const caderno = sourceCaderno.get(r.source_notebook_id as string)
+      if (caderno != null && r.notebook_id) out.set(r.notebook_id as string, caderno)
+    }
+  }
+
+  const stillMissing = ids.filter((id) => !out.has(id))
+  if (stillMissing.length) {
+    const { data: links } = await supabaseServer
+      .from("quiz_question_links")
+      .select("notebook_id, caderno_id")
+      .in("notebook_id", stillMissing)
+    for (const l of links ?? []) {
+      if (l.notebook_id && l.caderno_id != null && !out.has(l.notebook_id as string)) {
+        out.set(l.notebook_id as string, Number(l.caderno_id))
+      }
+    }
+  }
+  return out
+}
+
+async function findExistingUserCopy(
+  sourceNotebookId: string,
+  userId: string
+): Promise<string | null> {
+  const cadernoId = await cadernoIdForNotebook(sourceNotebookId)
+  const candidateIds = new Set<string>()
+
+  const { data: source } = await supabaseServer
+    .from("notebooks")
+    .select("id, user_id")
+    .eq("id", sourceNotebookId)
+    .maybeSingle()
+  if (source?.user_id === userId) candidateIds.add(sourceNotebookId)
+
+  const sourceIds = new Set<string>([sourceNotebookId])
+  if (cadernoId != null) {
+    const { data: syncs } = await supabaseServer
+      .from("quiz_notebook_sync")
+      .select("notebook_id")
+      .eq("caderno_id", cadernoId)
+    for (const s of syncs ?? []) {
+      if (s.notebook_id) sourceIds.add(s.notebook_id as string)
+    }
+  }
+
+  const { data: replicas } = await supabaseServer
+    .from("quiz_notebook_replicas")
+    .select("notebook_id")
+    .eq("user_id", userId)
+    .in("source_notebook_id", [...sourceIds])
+  for (const r of replicas ?? []) {
+    if (r.notebook_id) candidateIds.add(r.notebook_id as string)
+  }
+
+  const { data: ownedSources } = await supabaseServer
+    .from("notebooks")
+    .select("id")
+    .eq("user_id", userId)
+    .in("id", [...sourceIds])
+  for (const n of ownedSources ?? []) candidateIds.add(n.id)
+
+  if (cadernoId != null) {
+    const { data: linked } = await supabaseServer
+      .from("quiz_question_links")
+      .select("notebook_id")
+      .eq("caderno_id", cadernoId)
+    const linkedIds = [...new Set((linked ?? []).map((l) => l.notebook_id as string).filter(Boolean))]
+    if (linkedIds.length) {
+      const { data: ownedLinked } = await supabaseServer
+        .from("notebooks")
+        .select("id")
+        .eq("user_id", userId)
+        .in("id", linkedIds)
+      for (const n of ownedLinked ?? []) candidateIds.add(n.id)
+    }
+  }
+
+  const ids = [...candidateIds]
+  if (!ids.length) return null
+  const { data: rows } = await supabaseServer
+    .from("notebooks")
+    .select("id, subject_id, answered_count, created_at")
+    .eq("user_id", userId)
+    .in("id", ids)
+  return preferUserNotebook((rows ?? []) as NotebookPick[])
+}
+
+async function linkReplica(sourceNotebookId: string, userId: string, notebookId: string) {
+  await supabaseServer.from("quiz_notebook_replicas").upsert(
+    {
+      source_notebook_id: sourceNotebookId,
+      user_id: userId,
+      notebook_id: notebookId,
+    },
+    { onConflict: "source_notebook_id,user_id" }
+  )
+}
+
+/** Esconde cópias do Papa Vagas em Importados quando o caderno já está numa matéria. */
+export async function excludeDuplicateUnassignedNotebooks<
+  T extends { id: string },
+>(userId: string, notebooks: T[]): Promise<T[]> {
+  if (!notebooks.length) return notebooks
+  const unassignedIds = notebooks.map((n) => n.id)
+  const { data: assigned } = await supabaseServer
+    .from("notebooks")
+    .select("id")
+    .eq("user_id", userId)
+    .not("subject_id", "is", null)
+  const assignedIds = (assigned ?? []).map((n) => n.id as string)
+  const cadernoByNb = await cadernoIdsForNotebooks([...unassignedIds, ...assignedIds])
+  const assignedCadernos = new Set(
+    assignedIds.map((id) => cadernoByNb.get(id)).filter((n): n is number => n != null)
+  )
+
+  const bestByCaderno = new Map<number, T>()
+  const kept: T[] = []
+  for (const nb of notebooks) {
+    const caderno = cadernoByNb.get(nb.id)
+    if (caderno == null) {
+      kept.push(nb)
+      continue
+    }
+    if (assignedCadernos.has(caderno)) continue
+    const prev = bestByCaderno.get(caderno)
+    if (!prev) {
+      bestByCaderno.set(caderno, nb)
+      continue
+    }
+    const prevAns = Number((prev as { answered_count?: number }).answered_count) || 0
+    const nextAns = Number((nb as { answered_count?: number }).answered_count) || 0
+    if (nextAns > prevAns) bestByCaderno.set(caderno, nb)
+  }
+  for (const nb of bestByCaderno.values()) kept.push(nb)
+  const seen = new Set(kept.map((n) => n.id))
+  return notebooks.filter((n) => seen.has(n.id))
+}
+
 export async function ensureReplica(
   sourceNotebookId: string,
   userId: string
 ): Promise<string> {
-  const { data: existing } = await supabaseServer
-    .from("quiz_notebook_replicas")
-    .select("notebook_id")
-    .eq("source_notebook_id", sourceNotebookId)
-    .eq("user_id", userId)
-    .maybeSingle()
-  if (existing?.notebook_id) return existing.notebook_id as string
+  const already = await findExistingUserCopy(sourceNotebookId, userId)
+  if (already) {
+    await linkReplica(sourceNotebookId, userId, already)
+    return already
+  }
 
   const { data: source } = await supabaseServer
     .from("notebooks")
@@ -262,14 +476,7 @@ export async function ensureReplica(
   if (!source) throw new Error("Caderno de origem não encontrado")
 
   if (source.user_id === userId) {
-    await supabaseServer.from("quiz_notebook_replicas").upsert(
-      {
-        source_notebook_id: sourceNotebookId,
-        user_id: userId,
-        notebook_id: sourceNotebookId,
-      },
-      { onConflict: "source_notebook_id,user_id" }
-    )
+    await linkReplica(sourceNotebookId, userId, sourceNotebookId)
     return sourceNotebookId
   }
 
@@ -288,11 +495,7 @@ export async function ensureReplica(
     null,
     true
   )
-  await supabaseServer.from("quiz_notebook_replicas").insert({
-    source_notebook_id: sourceNotebookId,
-    user_id: userId,
-    notebook_id: replicaId,
-  })
+  await linkReplica(sourceNotebookId, userId, replicaId)
   const { data: links } = await supabaseServer
     .from("quiz_question_links")
     .select("question_id, tec_id, caderno_id, caderno_question_id, published_question_id, short_id")

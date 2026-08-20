@@ -6,6 +6,7 @@ import {
   librarySavedFilterFromParams,
   type LibrarySavedFilter,
 } from "@/lib/notebook-library-saved"
+import { excludeDuplicateUnassignedNotebooks } from "@/lib/quiz-sync"
 
 function applyLibraryFilterToQuery(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,9 +89,12 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json(
-    rows.map((r) => ({ ...r, shared: Boolean(r.id && sharedIds.has(r.id)) }))
-  )
+  let listed = rows.map((r) => ({ ...r, shared: Boolean(r.id && sharedIds.has(r.id)) }))
+  if (searchParams.get("unassigned") === "1") {
+    listed = await excludeDuplicateUnassignedNotebooks(user_id, listed)
+  }
+
+  return NextResponse.json(listed)
 }
 
 export async function POST(req: Request) {

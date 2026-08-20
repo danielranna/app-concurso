@@ -4,6 +4,7 @@ import {
   filterNotebooksByLibrarySaved,
   isMissingLibrarySavedColumn,
 } from "@/lib/notebook-library-saved"
+import { excludeDuplicateUnassignedNotebooks } from "@/lib/quiz-sync"
 
 async function countNotebooksForSubject(
   user_id: string,
@@ -170,10 +171,13 @@ export async function GET(req: Request) {
       .from("questions")
       .select("id", { count: "exact", head: true })
 
-    const unassignedNotebooks = await fetchNotebooksList(
+    const unassignedNotebooks = await excludeDuplicateUnassignedNotebooks(
       user_id,
-      (q) => q.is("subject_id", null),
-      "saved_only"
+      await fetchNotebooksList(
+        user_id,
+        (q) => q.is("subject_id", null),
+        "saved_only"
+      )
     )
 
     let ephemeralNotebooks: typeof unassignedNotebooks = []
