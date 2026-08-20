@@ -61,11 +61,14 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  let rows = (data ?? []) as {
+  type NotebookRow = {
     id?: string
     answered_count?: number
     question_count?: number
-  }[]
+  }
+  type ListedNotebook = NotebookRow & { id: string; shared: boolean }
+
+  let rows = (data ?? []) as NotebookRow[]
   if (searchParams.get("incomplete") === "1") {
     rows = rows.filter((nb) => (nb.answered_count ?? 0) < (nb.question_count ?? 0))
   }
@@ -89,7 +92,9 @@ export async function GET(req: Request) {
     }
   }
 
-  let listed = rows.map((r) => ({ ...r, shared: Boolean(r.id && sharedIds.has(r.id)) }))
+  let listed: ListedNotebook[] = rows
+    .filter((r): r is NotebookRow & { id: string } => Boolean(r.id))
+    .map((r) => ({ ...r, shared: sharedIds.has(r.id) }))
   if (searchParams.get("unassigned") === "1") {
     listed = await excludeDuplicateUnassignedNotebooks(user_id, listed)
   }
