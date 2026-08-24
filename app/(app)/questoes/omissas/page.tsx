@@ -3,9 +3,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Pencil } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { clearDraftScope, draftScopeKey } from "@/lib/question-draft-cache"
 import QuestionSolver from "@/components/questions/QuestionSolver"
+import EditQuestionModal from "@/components/questions/EditQuestionModal"
 import type { ConfidenceLevel } from "@/lib/question-types"
 import type { NavMode } from "@/lib/study-navigation"
 
@@ -127,6 +129,9 @@ function OmissasAppPage() {
   const [attempts, setAttempts] = useState<Record<string, AttemptInfo>>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editQuestionId, setEditQuestionId] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -150,19 +155,11 @@ function OmissasAppPage() {
         return
       }
       const nextQueue: QueueItem[] = Array.isArray(data.queue) ? data.queue : []
-      const nextAttempts: Record<string, AttemptInfo> =
-        data.attempts && typeof data.attempts === "object" ? data.attempts : {}
-      for (const item of nextQueue) {
-        if (item.attempt && !nextAttempts[item.question_id]) {
-          nextAttempts[item.question_id] = item.attempt
-        }
-      }
-      const done = new Set(Object.keys(nextAttempts))
+      clearDraftScope(draftScopeKey("solo", token || "omissas"))
       setQueue(nextQueue)
-      setAttempts(nextAttempts)
-      setAnswered(done)
-      const firstPending = nextQueue.findIndex((q) => !done.has(q.question_id))
-      setIndex(firstPending >= 0 ? firstPending : 0)
+      setAttempts({})
+      setAnswered(new Set())
+      setIndex(0)
       setLoading(false)
     })
   }, [router, token])
@@ -275,6 +272,16 @@ function OmissasAppPage() {
     [queue, userId]
   )
 
+  function openEditForQuestion(questionId: string) {
+    setEditQuestionId(questionId)
+    setShowEditModal(true)
+  }
+
+  function openEditForCurrent() {
+    const qid = currentItem?.question_id
+    if (qid) openEditForQuestion(qid)
+  }
+
   if (!userId || loading) return <p className="p-6 text-slate-700">Carregando omissas…</p>
   if (error) {
     return (
@@ -292,7 +299,18 @@ function OmissasAppPage() {
       <Link href="/questoes" className="mb-4 inline-flex items-center gap-1 text-sm text-slate-600">
         <ArrowLeft className="h-4 w-4" /> Voltar
       </Link>
-      <h1 className="mb-1 text-xl font-bold text-slate-900">Omissas / atrasadas</h1>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-slate-900">Omissas / atrasadas</h1>
+        {!allDone && currentItem ? (
+          <button
+            type="button"
+            onClick={openEditForCurrent}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
+          >
+            <Pencil className="h-4 w-4" /> Editar questão
+          </button>
+        ) : null}
+      </div>
       <p className="mb-6 text-sm text-slate-500">
         {allDone
           ? "Sessão encerrada — resumo das respostas desta fila."
@@ -312,10 +330,49 @@ function OmissasAppPage() {
           soloQuestionId={token || "omissas"}
           fetchQueue={fetchQueue}
           submitAnswer={submitAnswer}
+          onEditQuestion={openEditForQuestion}
+          refreshKey={refreshKey}
           whatsappOverlay={{
             enabled: true,
             shortId: currentItem?.short_id ?? null,
             notebookId: currentItem?.notebook_id || undefined,
+          }}
+        />
+      )}
+
+      {userId && editQuestionId && (
+        <EditQuestionModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false)
+            setEditQuestionId(null)
+          }}
+          userId={userId}
+          questionId={editQuestionId}
+          notebookId={
+            queue.find((q) => q.question_id === editQuestionId)?.notebook_id || undefined
+          }
+          onSaved={() => setRefreshKey((k) => k + 1)}
+          onDeleted={() => {
+            const removedId = editQuestionId
+            clearDraftScope(draftScopeKey("solo", token || "omissas"))
+            setQueue((prev) => {
+              const next = prev.filter((q) => q.question_id !== removedId)
+              setIndex((i) => Math.min(i, Math.max(0, next.length - 1)))
+              return next
+            })
+            setAnswered((prev) => {
+              const next = new Set(prev)
+              if (removedId) next.delete(removedId)
+              return next
+            })
+            setAttempts((prev) => {
+              if (!removedId) return prev
+              const next = { ...prev }
+              delete next[removedId]
+              return next
+            })
+            setRefreshKey((k) => k + 1)
           }}
         />
       )}
