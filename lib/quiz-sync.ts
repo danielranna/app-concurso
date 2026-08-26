@@ -8,6 +8,7 @@ import {
   getQuizSyncInventoryUrl,
   getQuizSyncOmissasUrl,
   getQuizSyncStatusUrl,
+  getQuizSyncReplayGabaritoUrl,
 } from "./quiz-bot-url"
 import { capQuizSyncPayload, logQuizSyncEvent } from "./quiz-sync-log"
 import {
@@ -61,6 +62,7 @@ function kindFromQuizUrl(url: string): string {
   if (u.includes("quiz-sync-inventory")) return "inventory"
   if (u.includes("quiz-sync-answers")) return "answers"
   if (u.includes("quiz-sync-status")) return "status"
+  if (u.includes("quiz-sync-replay-gabarito")) return "replay"
   return "out"
 }
 
@@ -84,7 +86,7 @@ async function quizFetch(url: string, init?: RequestInit, meta?: QuizFetchMeta) 
   })
   const data = await res.json().catch(() => ({}))
   const kind = meta?.kind ?? kindFromQuizUrl(url)
-  if (kind === "send" || kind === "ingest" || kind === "status" || kind === "unlink") {
+  if (kind === "send" || kind === "ingest" || kind === "status" || kind === "unlink" || kind === "replay") {
     let requestBody: unknown = null
     if (typeof init?.body === "string") {
       try {
@@ -1424,6 +1426,28 @@ export async function callQuizAssist(userJid: string, shortId: string, letter: s
 export async function unlinkCadernoFromApp(cadernoId: number) {
   await supabaseServer.from("quiz_question_links").delete().eq("caderno_id", cadernoId)
   await supabaseServer.from("quiz_notebook_sync").delete().eq("caderno_id", cadernoId)
+}
+
+export async function replayPendingGabaritos(days = 3) {
+  const url = getQuizSyncReplayGabaritoUrl()
+  if (!url) throw new Error("Configure QUIZ_BOT_USERS_URL")
+  const { res, data } = await quizFetch(
+    url,
+    {
+      method: "POST",
+      body: JSON.stringify({ days }),
+    },
+    { kind: "replay" }
+  )
+  if (!res.ok) throw new Error(data.error || "Falha ao reenfileirar gabaritos")
+  return data as {
+    ok: boolean
+    days: number
+    considered: number
+    queued: number
+    skippedPosted: number
+    hint?: string
+  }
 }
 
 export type SyncPerson = {

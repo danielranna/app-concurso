@@ -47,16 +47,20 @@ export async function POST(
   })
 
   await refreshNotebookProgress(notebook_id, user_id)
-  void maybePushNotebookAnswer({
-    notebookId: notebook_id,
-    userId: user_id,
-    questionId: question_id,
-    selectedAnswer: selected_answer,
-    confidenceLevel: confidence,
-    durationMs: duration_ms ?? null,
-    comment: comment ?? null,
-    tags: Array.isArray(tags) ? tags : [],
-  })
+  try {
+    await maybePushNotebookAnswer({
+      notebookId: notebook_id,
+      userId: user_id,
+      questionId: question_id,
+      selectedAnswer: selected_answer,
+      confidenceLevel: confidence,
+      durationMs: duration_ms ?? null,
+      comment: comment ?? null,
+      tags: Array.isArray(tags) ? tags : [],
+    })
+  } catch (e) {
+    console.warn("[quiz-sync] push answer:", e instanceof Error ? e.message : e)
+  }
 
   return NextResponse.json({
     is_correct,

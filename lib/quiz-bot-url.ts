@@ -59,3 +59,8 @@ export function getQuizSyncStatusUrl(): string | null {
   const base = getQuizBotBaseUrl()
   return base ? `${base}/api/quiz-sync-status` : null
 }
+
+export function getQuizSyncReplayGabaritoUrl(): string | null {
+  const base = getQuizBotBaseUrl()
+  return base ? `${base}/api/quiz-sync-replay-gabarito` : null
+}

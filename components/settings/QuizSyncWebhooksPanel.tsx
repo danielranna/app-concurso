@@ -24,6 +24,7 @@ const KIND_LABEL: Record<string, string> = {
   ingest: "Resposta do app → WhatsApp",
   unlink: "Desvincular caderno",
   status: "Status",
+  replay: "Replay de gabarito",
 }
 
 function kindLabel(kind: string) {
@@ -38,6 +39,8 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [backfillLoading, setBackfillLoading] = useState(false)
+  const [replayMsg, setReplayMsg] = useState<string | null>(null)
+  const [replayLoading, setReplayLoading] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -71,7 +74,8 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
         sozinho a cada 8s. <strong>flush</strong> = questão publicada no WhatsApp (empurra
         respostas já feitas neste app). <strong>answer</strong> = você respondeu no WhatsApp/omissas
         e o progresso deve aparecer no caderno. Se você já respondeu atrasadas no Papa
-        Vagas e não veio para cá, use o botão abaixo.
+        Vagas e não veio para cá, use o botão abaixo. Se resolveu omissas/atrasadas neste app e o
+        gabarito não foi ao grupo, use <strong>Mandar gabaritos que ficaram para trás</strong>.
       </p>
       <div className="mb-3">
         <button
@@ -104,6 +108,41 @@ export default function QuizSyncWebhooksPanel({ userId }: { userId: string }) {
           {backfillLoading ? "Importando…" : "Trazer respostas do Papa Vagas"}
         </button>
         {backfillMsg && <p className="mt-2 text-sm text-slate-700">{backfillMsg}</p>}
+      </div>
+      <div className="mb-3">
+        <button
+          type="button"
+          disabled={replayLoading}
+          onClick={async () => {
+            setReplayLoading(true)
+            setReplayMsg(null)
+            const res = await fetch("/api/quiz-sync/replay-gabarito", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ days: 3, user_id: userId }),
+            })
+            const data = await res.json().catch(() => ({}))
+            setReplayLoading(false)
+            if (!res.ok) {
+              setReplayMsg(data.error || "Falha ao reenfileirar gabaritos")
+              return
+            }
+            const queued = Number(data.queued) || 0
+            const skipped = Number(data.skippedPosted) || 0
+            setReplayMsg(
+              queued > 0
+                ? `${queued} questão(ões) na fila do bot. O gabarito vai ao grupo em ~1 min por lote de 40, só se os engajados já tiverem respondido.`
+                : skipped > 0
+                  ? `Nada novo: ${skipped} já tinham gabarito no grupo.`
+                  : data.hint || "Nada pendente para mandar."
+            )
+            void load()
+          }}
+          className="rounded-lg bg-emerald-800 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        >
+          {replayLoading ? "Enfileirando…" : "Mandar gabaritos que ficaram para trás"}
+        </button>
+        {replayMsg && <p className="mt-2 text-sm text-slate-700">{replayMsg}</p>}
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {(["all", "in", "out"] as const).map((d) => (
