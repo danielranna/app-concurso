@@ -108,7 +108,7 @@ export default function QuestoesHomePage() {
           href="/questoes/revisao"
           icon={ClipboardList}
           title="Correções do dia"
-          description="Erros do dia com gabarito"
+          description="Erros do dia com enunciado e gabarito"
           variant="danger"
         />
         <QuestoesActionCard

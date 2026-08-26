@@ -1,3 +1,8 @@
+export type DailyWrongOption = {
+  label: string
+  text: string
+}
+
 export type DailyWrongItem = {
   attempt_id: string
   question_id: string
@@ -9,4 +14,10 @@ export type DailyWrongItem = {
   tec_topic: string | null
   created_at: string
   notebook_id: string | null
+  type: string | null
+  statement: string
+  content_before: string | null
+  content_after: string | null
+  content_blocks: unknown | null
+  options: DailyWrongOption[]
 }

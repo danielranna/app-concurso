@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import {
   dedupeDailyWrongAttempts,
   dayBounds,
+  splitDailyWrongOptions,
 } from "./daily-wrong-attempts-utils"
 import type { DailyWrongItem } from "./daily-wrong-attempts-types"
 
@@ -21,6 +22,16 @@ function item(
     tec_topic: null,
     created_at,
     notebook_id: null,
+    type: "multiple_choice",
+    statement: "Enunciado",
+    content_before: null,
+    content_after: null,
+    content_blocks: null,
+    options: [
+      { label: "A", text: "Marcada" },
+      { label: "B", text: "Gabarito" },
+      { label: "C", text: "Distrator" },
+    ],
   }
 }
 
@@ -38,5 +49,26 @@ assert.equal(deduped[1]!.question_id, "q2")
 const { start, end } = dayBounds("2026-06-16")
 assert.ok(start < end)
 assert.ok(start.includes("2026-06-16") || new Date(start).getDate() === 16)
+
+const split = splitDailyWrongOptions(
+  [
+    { label: "A", text: "Marcada" },
+    { label: "b", text: "Gabarito" },
+    { label: "C", text: "Outra" },
+    { label: "D", text: "Mais uma" },
+  ],
+  "a",
+  "B"
+)
+assert.equal(split.marked?.text, "Marcada")
+assert.equal(split.gabarito?.text, "Gabarito")
+assert.equal(split.others.length, 2)
+assert.equal(split.others[0]!.label, "C")
+assert.equal(split.others[1]!.label, "D")
+
+const emptySplit = splitDailyWrongOptions([], "A", "C")
+assert.equal(emptySplit.marked, null)
+assert.equal(emptySplit.gabarito, null)
+assert.equal(emptySplit.others.length, 0)
 
 console.log("daily-wrong-attempts.test.ts: ok")

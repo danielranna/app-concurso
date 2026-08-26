@@ -32,10 +32,10 @@ export default function QuestoesRevisaoPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <QuestoesPageHeader
         title="Correções do dia"
-        description="Questões que você errou — gabarito e link direto para o TEC."
+        description="Questões que você errou — enunciado, o que você marcou, gabarito e as outras alternativas."
         actions={
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-slate-500">Data</span>

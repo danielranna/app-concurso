@@ -1,5 +1,8 @@
 import { startOfDay } from "./flashcard-due"
-import type { DailyWrongItem } from "./daily-wrong-attempts-types"
+import type {
+  DailyWrongItem,
+  DailyWrongOption,
+} from "./daily-wrong-attempts-types"
 
 /** Limites do dia civil para `YYYY-MM-DD` (hora local do servidor). */
 export function dayBounds(dateStr: string): { start: string; end: string } {
@@ -29,4 +32,41 @@ export function dedupeDailyWrongAttempts(
     out.push(row)
   }
   return out
+}
+
+export function normalizeAnswerLabel(label: string): string {
+  return label.trim().toUpperCase()
+}
+
+export function findDailyWrongOption(
+  options: DailyWrongOption[],
+  label: string
+): DailyWrongOption | null {
+  const normalized = normalizeAnswerLabel(label)
+  if (!normalized) return null
+  return (
+    options.find((o) => normalizeAnswerLabel(o.label) === normalized) ?? null
+  )
+}
+
+/** Separa a marcada, o gabarito e o restante das alternativas. */
+export function splitDailyWrongOptions(
+  options: DailyWrongOption[],
+  selectedAnswer: string,
+  correctAnswer: string
+): {
+  marked: DailyWrongOption | null
+  gabarito: DailyWrongOption | null
+  others: DailyWrongOption[]
+} {
+  const selected = normalizeAnswerLabel(selectedAnswer)
+  const correct = normalizeAnswerLabel(correctAnswer)
+  return {
+    marked: findDailyWrongOption(options, selectedAnswer),
+    gabarito: findDailyWrongOption(options, correctAnswer),
+    others: options.filter((o) => {
+      const label = normalizeAnswerLabel(o.label)
+      return label !== selected && label !== correct
+    }),
+  }
 }

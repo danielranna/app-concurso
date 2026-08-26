@@ -12,7 +12,9 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = await listDailyWrongAttempts(user_id, date)
+    const result = await listDailyWrongAttempts(user_id, date, {
+      includeContent: !countOnly,
+    })
     if (countOnly) {
       return NextResponse.json({ date: result.date, count: result.count })
     }
