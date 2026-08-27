@@ -1,13 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react"
 import { Eye, EyeOff, Loader2, Send, Trash2 } from "lucide-react"
 
-type NoteEntry = {
+export type NoteEntry = {
   id: string
   body: string
   created_at: string
   has_ai_response: boolean
+  ai_feedback: string | null
+  ai_pending: boolean
+}
+
+export type QuickNoteHandle = {
+  consumeDraft: () => string
 }
 
 type Props = {
@@ -16,7 +22,10 @@ type Props = {
   layout?: "default" | "sidebar"
 }
 
-export default function QuickNote({ questionId, userId, layout = "default" }: Props) {
+const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
+  { questionId, userId, layout = "default" },
+  ref
+) {
   const sidebar = layout === "sidebar"
   const [entries, setEntries] = useState<NoteEntry[]>([])
   const [draft, setDraft] = useState("")
@@ -27,23 +36,49 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [justSentIds, setJustSentIds] = useState<Set<string>>(new Set())
 
-  const load = useCallback(() => {
-    setLoading(true)
-    fetch(`/api/questions/${questionId}/notes?user_id=${userId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setEntries(d.entries ?? [])
-        setJustSentIds(new Set())
-        setExpandedIds(new Set())
-      })
-      .finally(() => setLoading(false))
-  }, [questionId, userId])
+  useImperativeHandle(ref, () => ({
+    consumeDraft() {
+      const trimmed = draft.trim()
+      if (trimmed) setDraft("")
+      return trimmed
+    },
+  }))
+
+  const load = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setLoading(true)
+      return fetch(`/api/questions/${questionId}/notes?user_id=${userId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          const next = (d.entries ?? []) as NoteEntry[]
+          setEntries(next)
+          if (!opts?.silent) {
+            setJustSentIds(new Set())
+            setExpandedIds(new Set())
+          }
+          return next
+        })
+        .finally(() => {
+          if (!opts?.silent) setLoading(false)
+        })
+    },
+    [questionId, userId]
+  )
 
   useEffect(() => {
     setDraft("")
     setError(null)
-    load()
+    void load()
   }, [load])
+
+  const pendingAi = entries.some((e) => e.ai_pending)
+  useEffect(() => {
+    if (!pendingAi) return
+    const id = window.setInterval(() => {
+      void load({ silent: true })
+    }, 3000)
+    return () => window.clearInterval(id)
+  }, [pendingAi, load])
 
   const send = useCallback(async () => {
     const trimmed = draft.trim()
@@ -119,7 +154,7 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
   }
 
   function isExpanded(entry: NoteEntry) {
-    return justSentIds.has(entry.id) || expandedIds.has(entry.id)
+    return justSentIds.has(entry.id) || expandedIds.has(entry.id) || entry.ai_pending
   }
 
   return (
@@ -127,7 +162,7 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
       className={`rounded-lg border border-slate-200 bg-slate-50 p-3 ${sidebar ? "flex h-full min-h-[280px] flex-col lg:min-h-[420px]" : ""}`}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-slate-500">Notas rápidas</p>
+        <p className="text-xs font-semibold text-slate-500">Anotações</p>
       </div>
 
       {loading ? (
@@ -190,9 +225,27 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
                   </div>
                 </div>
                 {expanded && (
-                  <p className="mt-1 whitespace-pre-wrap text-slate-800">
-                    {entry.body}
-                  </p>
+                  <>
+                    <p className="mt-1 whitespace-pre-wrap text-slate-800">
+                      {entry.body}
+                    </p>
+                    {entry.ai_pending && (
+                      <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-violet-700">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Aguardando IA…
+                      </p>
+                    )}
+                    {entry.ai_feedback && (
+                      <div className="mt-1.5 rounded border border-violet-100 bg-violet-50/70 px-2 py-1.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                          Comentário da IA
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-wrap text-xs text-slate-800">
+                          {entry.ai_feedback}
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </li>
             )
@@ -208,7 +261,7 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
         }}
         onKeyDown={handleKeyDown}
         rows={sidebar ? 6 : 3}
-        placeholder="Dúvida, conceito a revisar..."
+        placeholder="Dúvida ou comentário. Ao resolver, a IA responde e o texto vai ao Papa Vagas."
         className={`mt-2 w-full resize-y rounded border border-slate-200 bg-white px-2 py-1 text-sm ${sidebar ? "min-h-[100px] flex-1 lg:min-h-[140px]" : ""}`}
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -230,4 +283,6 @@ export default function QuickNote({ questionId, userId, layout = "default" }: Pr
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   )
-}
+})
+
+export default QuickNote

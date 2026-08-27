@@ -2,6 +2,7 @@ import "server-only"
 
 import { supabaseServer } from "./supabase-server"
 import type { DailyWrongItem, DailyWrongOption } from "./daily-wrong-attempts-types"
+import { loadNoteEntriesByQuestion } from "./question-notes"
 import {
   dayBounds,
   dedupeDailyWrongAttempts,
@@ -44,6 +45,7 @@ type AttemptRow = {
   selected_answer: string
   created_at: string
   notebook_id: string | null
+  error_detail: Record<string, unknown> | null
   questions: QuestionJoin | QuestionJoin[] | null
 }
 
@@ -74,6 +76,17 @@ function mapAttemptRow(a: AttemptRow): DailyWrongItem | null {
     content_after: null,
     content_blocks: null,
     options: [],
+    feedback_detailed:
+      typeof a.error_detail?.feedback_detailed === "string"
+        ? a.error_detail.feedback_detailed
+        : null,
+    misconception:
+      typeof a.error_detail?.misconception === "string"
+        ? a.error_detail.misconception
+        : typeof a.error_detail?.specific_mistake === "string"
+          ? a.error_detail.specific_mistake
+          : null,
+    notes: [],
   }
 }
 
@@ -160,7 +173,7 @@ export async function listDailyWrongAttempts(
     .from("question_attempts")
     .select(
       `
-      id, question_id, selected_answer, created_at, notebook_id,
+      id, question_id, selected_answer, created_at, notebook_id, error_detail,
       questions ( ${questionFields} )
     `
     )
@@ -180,9 +193,10 @@ export async function listDailyWrongAttempts(
 
   if (includeContent && items.length) {
     const questionIds = items.map((item) => item.question_id)
-    const [optionsByQuestion, editsByQuestion] = await Promise.all([
+    const [optionsByQuestion, editsByQuestion, notesByQuestion] = await Promise.all([
       loadOptionsByQuestionIds(questionIds),
       loadUserEditsByQuestionIds(userId, questionIds),
+      loadNoteEntriesByQuestion(userId, questionIds),
     ])
     for (const item of items) {
       const edit = editsByQuestion.get(item.question_id)
@@ -195,6 +209,12 @@ export async function listDailyWrongAttempts(
               { label: "Errado", text: "Errado" },
             ]
           : raw
+      item.notes = (notesByQuestion.get(item.question_id) ?? [])
+        .filter((e) => e.body.trim())
+        .map((e) => ({
+          body: e.body,
+          ai_feedback: e.ai_feedback,
+        }))
     }
   }
 

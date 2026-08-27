@@ -52,8 +52,6 @@
     timerQuestionId: "",
     timerStore: {},
     hover: false,
-    textMode: "note",
-    commentDraft: "",
   };
 
   let host = null;
@@ -427,12 +425,7 @@
   function render() {
     if (!body) return;
     const keepNote = shadow.activeElement && shadow.activeElement.classList?.contains("note");
-    const noteVal =
-      keepNote
-        ? shadow.activeElement.value
-        : state.textMode === "comment"
-          ? state.commentDraft
-          : state.noteDraft;
+    const noteVal = keepNote ? shadow.activeElement.value : state.noteDraft;
     const noteSel = keepNote
       ? { start: shadow.activeElement.selectionStart, end: shadow.activeElement.selectionEnd }
       : null;
@@ -578,21 +571,6 @@
     actions.appendChild(ins);
     actions.appendChild(ch);
     actions.appendChild(go);
-    const modeBtn = el(
-      "button",
-      { type: "button" },
-      state.textMode === "comment" ? "comentário" : "nota"
-    );
-    modeBtn.title =
-      state.textMode === "comment"
-        ? "Comentário vai para o Papa Vagas junto com a resposta"
-        : "Nota local. Clique para mudar para comentário (Papa Vagas)";
-    if (state.textMode === "comment") modeBtn.style.fontWeight = "700";
-    modeBtn.addEventListener("click", () => {
-      state.textMode = state.textMode === "comment" ? "note" : "comment";
-      render();
-    });
-    actions.appendChild(modeBtn);
     body.appendChild(actions);
 
     if (state.result) {
@@ -611,7 +589,17 @@
       const ul = el("ul", { className: "notes" });
       state.notes.forEach((n) => {
         const li = el("li");
-        li.textContent = n.body;
+        const bodyText = el("div");
+        bodyText.textContent = n.body;
+        li.appendChild(bodyText);
+        if (n.ai_pending) {
+          const wait = el("p", { className: "muted" }, "aguardando IA…");
+          li.appendChild(wait);
+        } else if (n.ai_feedback) {
+          const ai = el("p", { className: "muted" });
+          ai.textContent = `IA: ${n.ai_feedback}`;
+          li.appendChild(ai);
+        }
         ul.appendChild(li);
       });
       body.appendChild(ul);
@@ -619,20 +607,15 @@
 
     const ta = el("textarea", {
       className: "note",
-      placeholder:
-        state.textMode === "comment"
-          ? "comentário papa vagas… vai com enviar"
-          : "escreva aqui…  Ctrl+Enter salva nota",
+      placeholder: "anotação… Ctrl+Enter salva. Enviar a resposta manda rascunho + IA ao Papa",
     });
     ta.value = noteVal;
     ta.addEventListener("input", () => {
-      if (state.textMode === "comment") state.commentDraft = ta.value;
-      else state.noteDraft = ta.value;
+      state.noteDraft = ta.value;
     });
     ta.addEventListener("keydown", (ev) => {
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
         ev.preventDefault();
-        if (state.textMode === "comment") return;
         sendNote();
       }
     });
@@ -773,8 +756,6 @@
     state.resolving = false;
     state.notes = [];
     state.noteDraft = "";
-    state.commentDraft = "";
-    state.textMode = "note";
   }
 
   function startTimerForQuestion(questionId, alreadyAnswered) {
@@ -941,7 +922,7 @@
       tec_id: state.current.tec_id,
       notebook_id: state.current.notebook_id || state.notebookId,
       confidence_level: state.confidence,
-      comment: (state.commentDraft || "").trim() || null,
+      note_draft: (state.noteDraft || "").trim() || null,
     };
     const res =
       state.source === "omissas"
@@ -961,6 +942,8 @@
     if (state.source === "omissas") {
       state.answered[state.question.id] = true;
     }
+    state.noteDraft = "";
+    if (state.question?.id) await loadNotes(state.question.id);
     render();
   }
 

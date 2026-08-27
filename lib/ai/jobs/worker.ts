@@ -8,6 +8,7 @@ import { generateDailyStudyPlan } from "../execution-plan"
 import { filterReportStructuredForSubject } from "../notebook-subject-split"
 import { generateSubjectDossier } from "../subject-dossier"
 import { ingestErrorNotebookFromReport } from "../error-notebook-ingest"
+import { processQuestionResolveAi } from "../question-resolve-ai"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -40,6 +41,12 @@ export async function processJob(job: {
             subjects_in_notebook: result.subjects_in_notebook,
           })
         }
+        break
+      }
+
+      case "question_resolve_ai": {
+        const result = await processQuestionResolveAi(userId, payload)
+        await completeJob(job.id, result)
         break
       }
 

@@ -27,6 +27,8 @@ export type NotebookAuditQuestion = {
   user_note: string
   note_entries: QuestionNoteEntryRow[]
   zone: AuditZone
+  attempt_feedback?: string | null
+  attempt_misconception?: string | null
 }
 
 export type NotebookAuditPayload = {
@@ -66,6 +68,25 @@ export function buildQuestionHeaderLabel(q: {
     return topic ? `${topic} — Q${q.question_index}` : `Q${q.question_index}`
   }
   return parts.join(" — ")
+}
+
+function feedbackFromErrorDetail(detail: unknown): {
+  attempt_feedback: string | null
+  attempt_misconception: string | null
+} {
+  const rec = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null
+  const feedback =
+    typeof rec?.feedback_detailed === "string" ? rec.feedback_detailed.trim() : ""
+  const misconception =
+    typeof rec?.misconception === "string"
+      ? rec.misconception.trim()
+      : typeof rec?.specific_mistake === "string"
+        ? rec.specific_mistake.trim()
+        : ""
+  return {
+    attempt_feedback: feedback || null,
+    attempt_misconception: misconception || null,
+  }
 }
 
 function noteSuggestsUncertainty(note: string): boolean {
@@ -149,7 +170,7 @@ export async function buildNotebookAuditPayload(
   const { data: attempts } = await supabaseServer
     .from("question_attempts")
     .select(
-      "id, question_id, selected_answer, is_correct, outcome_category, confidence_level, duration_ms, created_at"
+      "id, question_id, selected_answer, is_correct, outcome_category, confidence_level, duration_ms, created_at, error_detail"
     )
     .eq("user_id", userId)
     .eq("notebook_id", notebookId)
@@ -214,6 +235,7 @@ export async function buildNotebookAuditPayload(
       user_note: userNote,
       note_entries: noteEntries,
       zone,
+      ...feedbackFromErrorDetail(att?.error_detail),
     })
   }
 
@@ -242,6 +264,120 @@ export async function buildNotebookAuditPayload(
       total,
       pct: total ? Math.round((correct / total) * 100) : 0,
       avg_duration_ms,
+      groups,
+    },
+  }
+}
+
+export async function buildAttemptAuditPayload(
+  userId: string,
+  attemptId: string
+): Promise<NotebookAuditPayload> {
+  const { data: attempt, error: attErr } = await supabaseServer
+    .from("question_attempts")
+    .select(
+      "id, question_id, notebook_id, selected_answer, is_correct, outcome_category, confidence_level, duration_ms, error_detail"
+    )
+    .eq("id", attemptId)
+    .eq("user_id", userId)
+    .maybeSingle()
+
+  if (attErr) throw new Error(attErr.message)
+  if (!attempt) throw new Error("Tentativa não encontrada")
+
+  const { data: qu, error: qErr } = await supabaseServer
+    .from("questions")
+    .select("id, tec_id, tec_topic, statement, correct_answer, banca, ano, orgao")
+    .eq("id", attempt.question_id)
+    .maybeSingle()
+
+  if (qErr) throw new Error(qErr.message)
+  if (!qu) throw new Error("Questão não encontrada")
+
+  let notebookName = "Questão"
+  let subjectName = ""
+  const notebookId = (attempt.notebook_id as string | null) ?? attempt.question_id
+
+  if (attempt.notebook_id) {
+    const { data: nb } = await supabaseServer
+      .from("notebooks")
+      .select("id, name, subject_id")
+      .eq("id", attempt.notebook_id)
+      .maybeSingle()
+    if (nb?.name) notebookName = nb.name
+    if (nb?.subject_id) {
+      const { data: sub } = await supabaseServer
+        .from("subjects")
+        .select("name")
+        .eq("id", nb.subject_id)
+        .maybeSingle()
+      subjectName = sub?.name ?? ""
+    }
+  }
+
+  const entriesByQuestion = await loadNoteEntriesByQuestion(userId, [
+    attempt.question_id as string,
+  ])
+  const noteEntries = entriesByQuestion.get(attempt.question_id as string) ?? []
+  const userNote = combineNoteBodies(noteEntries)
+  const topic = (qu.tec_topic as string | null)?.trim() || "Sem tópico"
+  const isCorrect = Boolean(attempt.is_correct)
+  const outcome = (attempt.outcome_category as string) ?? "conhecimento_solido"
+  const confidence = (attempt.confidence_level as string) ?? "seguro"
+  const statement = (qu.statement as string) ?? ""
+  const zone = classifyAuditZone({
+    is_correct: isCorrect,
+    outcome_category: outcome,
+    confidence_level: confidence,
+    user_note: userNote,
+  })
+
+  const question: NotebookAuditQuestion = {
+    question_index: 1,
+    question_id: attempt.question_id as string,
+    attempt_id: attempt.id as string,
+    tec_id: Number(qu.tec_id) || 0,
+    tec_topic: topic,
+    banca: (qu.banca as string | null) ?? null,
+    ano: (qu.ano as number | null) ?? null,
+    orgao: (qu.orgao as string | null) ?? null,
+    header_label: buildQuestionHeaderLabel({
+      banca: (qu.banca as string | null) ?? null,
+      ano: (qu.ano as number | null) ?? null,
+      orgao: (qu.orgao as string | null) ?? null,
+      tec_topic: topic,
+      question_index: 1,
+    }),
+    statement,
+    statement_excerpt: statement.slice(0, 800),
+    selected_answer: (attempt.selected_answer as string) ?? "—",
+    correct_answer: (qu.correct_answer as string) ?? "—",
+    is_correct: isCorrect,
+    outcome_category: outcome,
+    confidence_level: confidence,
+    duration_ms: attempt.duration_ms == null ? null : Number(attempt.duration_ms),
+    user_note: userNote,
+    note_entries: noteEntries,
+    zone,
+    ...feedbackFromErrorDetail(attempt.error_detail),
+  }
+
+  const groups = {
+    red: zone === "red" ? 1 : 0,
+    yellow: zone === "yellow" ? 1 : 0,
+    green: zone === "green" ? 1 : 0,
+  }
+
+  return {
+    notebook_id: notebookId,
+    notebook_name: notebookName,
+    subject_name: subjectName,
+    questions: [question],
+    performance_summary: {
+      correct: isCorrect ? 1 : 0,
+      total: 1,
+      pct: isCorrect ? 100 : 0,
+      avg_duration_ms: question.duration_ms && question.duration_ms > 0 ? question.duration_ms : 0,
       groups,
     },
   }

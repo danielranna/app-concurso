@@ -110,13 +110,24 @@ function processZoneEntries(
     const entries = (q.note_entries ?? []).filter((e) => e.body.trim())
     if (entries.length === 0) {
       if (zone !== "green_note") {
-        pending.push({
-          key: `q:${q.question_id}`,
-          question: q,
-          entry: null,
-          zone,
-          mode,
-        })
+        if (q.attempt_feedback?.trim()) {
+          const opts = optionsByQ.get(q.question_id) ?? []
+          const fallback = buildFallbackAuditItem(q, opts, mode)
+          cached.push({
+            ...fallback,
+            feedback: q.attempt_feedback.trim(),
+            misconception: q.attempt_misconception || undefined,
+            source: "ai_generated",
+          })
+        } else {
+          pending.push({
+            key: `q:${q.question_id}`,
+            question: q,
+            entry: null,
+            zone,
+            mode,
+          })
+        }
       }
       continue
     }
@@ -225,6 +236,7 @@ export function questionHasPendingNotes(q: NotebookAuditQuestion): boolean {
   if (pending.length > 0) return true
   const zone = q.zone
   if (zone === "red" || zone === "yellow") {
+    if (q.attempt_feedback?.trim()) return false
     return !(q.note_entries ?? []).some((e) => e.ai_classify)
   }
   if (zone === "green" && q.user_note.trim()) {

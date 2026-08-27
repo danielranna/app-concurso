@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { BarChart2, ExternalLink, Flag, RotateCcw } from "lucide-react"
 import AddErrorModal from "@/components/AddErrorModal"
-import QuickNote from "@/components/questions/QuickNote"
+import QuickNote, { type QuickNoteHandle } from "@/components/questions/QuickNote"
 import PerformanceModal from "@/components/questions/PerformanceModal"
 import QuestionOptions from "@/components/questions/QuestionOptions"
 import ConfidenceToggles from "@/components/questions/ConfidenceToggles"
@@ -95,7 +95,7 @@ type Props = {
     notebook_id?: string
     confidence_level: ConfidenceLevel
     tags?: string[]
-    comment?: string | null
+    note_draft?: string | null
   }) => Promise<SubmitAnswerResult>
   mapping?: { subject_id: string; topic_id: string } | null
   onCreateWrongNotebook?: () => Promise<void>
@@ -200,7 +200,7 @@ export default function QuestionSolver({
   const [eliminated, setEliminated] = useState<Set<string>>(new Set())
   const [confidence, setConfidence] = useState<ConfidenceLevel>("seguro")
   const [waTags, setWaTags] = useState<string[]>([])
-  const [waComment, setWaComment] = useState("")
+  const [notesEpoch, setNotesEpoch] = useState(0)
   const [questionMs, setQuestionMs] = useState(0)
   const [result, setResult] = useState<{
     is_correct: boolean
@@ -227,6 +227,7 @@ export default function QuestionSolver({
   const currentQuestionId = useRef<string | null>(null)
   const navigateRef = useRef<(nav: NavMode) => void>(() => {})
   const resolveRef = useRef<() => void>(() => {})
+  const quickNoteRef = useRef<QuickNoteHandle>(null)
 
   const flushQuestionTime = useCallback(
     (questionId: string) => {
@@ -338,7 +339,6 @@ export default function QuestionSolver({
         applyDraft(qid, nextDraft)
         questionStartedAt.current = Date.now()
         setWaTags([])
-        setWaComment("")
       } else {
         currentQuestionId.current = null
         setSelected(null)
@@ -505,13 +505,14 @@ export default function QuestionSolver({
         notebook_id: current.notebook_id,
         confidence_level: confidence,
         tags: waTags,
-        comment: waComment || null,
+        note_draft: quickNoteRef.current?.consumeDraft() || null,
       })
       if ("error" in res) {
         setResolveError(res.error)
         return
       }
       setResult(res)
+      setNotesEpoch((n) => n + 1)
       setDraft(scopeKey, current.question_id, {
         ...draft,
         selectedAnswer: selected,
@@ -556,7 +557,6 @@ export default function QuestionSolver({
     mode,
     onNotebookComplete,
     waTags,
-    waComment,
   ])
 
   resolveRef.current = handleResolve
@@ -838,7 +838,13 @@ export default function QuestionSolver({
 
         <aside className="order-2 space-y-4 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
           <div className="h-full rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <QuickNote questionId={question.id} userId={userId} layout="sidebar" />
+            <QuickNote
+              ref={quickNoteRef}
+              key={`${question.id}-${notesEpoch}`}
+              questionId={question.id}
+              userId={userId}
+              layout="sidebar"
+            />
           </div>
           <WhatsAppStudyPanel
             userId={userId}
@@ -850,9 +856,7 @@ export default function QuestionSolver({
             options={options}
             selected={selected}
             tags={waTags}
-            comment={waComment}
             onTagsChange={setWaTags}
-            onCommentChange={setWaComment}
           />
         </aside>
 

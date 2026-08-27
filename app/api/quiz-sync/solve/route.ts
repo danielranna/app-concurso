@@ -7,7 +7,10 @@ import {
   recordAttempt,
   refreshNotebookProgress,
 } from "@/lib/question-study"
-import { pushAnswerToWhatsapp, upsertSyncedNote } from "@/lib/quiz-sync"
+import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
+import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+
+export const maxDuration = 60
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
@@ -20,6 +23,7 @@ export async function POST(req: Request) {
     confidence_level,
     tags,
     comment,
+    note_draft,
   } = body as {
     user_id?: string
     question_id?: string
@@ -29,6 +33,7 @@ export async function POST(req: Request) {
     confidence_level?: string
     tags?: string[]
     comment?: string | null
+    note_draft?: string | null
   }
 
   if (!user_id || !question_id || !selected_answer) {
@@ -44,7 +49,7 @@ export async function POST(req: Request) {
   const confidence = parseConfidenceLevel(confidence_level)
   const nb = notebook_id || null
 
-  await recordAttempt({
+  const { id: attemptId } = await recordAttempt({
     user_id,
     question_id,
     notebook_id: nb,
@@ -57,21 +62,20 @@ export async function POST(req: Request) {
   })
 
   if (nb) await refreshNotebookProgress(nb, user_id)
-  if (comment) await upsertSyncedNote(user_id, question_id, String(comment))
 
-  try {
-    await pushAnswerToWhatsapp({
-      userId: user_id,
-      questionId: question_id,
-      selectedAnswer: selected_answer,
-      confidenceLevel: confidence,
-      durationMs: duration_ms ?? null,
-      comment: comment ?? null,
-      tags: Array.isArray(tags) ? tags : [],
-    })
-  } catch (e) {
-    console.warn("[quiz-sync] push answer:", e instanceof Error ? e.message : e)
-  }
+  await enqueueQuestionResolveAi({
+    userId: user_id,
+    questionId: question_id,
+    attemptId,
+    notebookId: nb,
+    noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    selectedAnswer: selected_answer,
+    confidenceLevel: confidence,
+    durationMs: duration_ms ?? null,
+    tags: Array.isArray(tags) ? tags : [],
+    pushWhatsapp: true,
+  })
+  scheduleQuestionAiKick(user_id)
 
   return NextResponse.json({
     is_correct,

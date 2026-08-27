@@ -261,7 +261,7 @@ export async function classifyNotebookQuestions(
   notebookId: string,
   subjectId: string | null,
   payload: NotebookAuditPayload,
-  options?: { skipLlm?: boolean }
+  options?: { skipLlm?: boolean; agentType?: "report" | "question_explain" }
 ): Promise<ClassifyNotebookResult> {
   const rows = await buildRowsForAuditPayload(userId, notebookId, subjectId, payload)
   const qById = new Map(payload.questions.map((q) => [q.question_id, q]))
@@ -287,7 +287,7 @@ export async function classifyNotebookQuestions(
   if (!options?.skipLlm && rowsNeedingLlm.length > 0) {
     const input = buildClassificationInput(payload, rowsNeedingLlm)
     const result = await runAgent({
-      agentType: "report",
+      agentType: options?.agentType ?? "report",
       userId,
       subjectId,
       systemPrompt: ERROR_TAXONOMY_CLASSIFY_PROMPT,
@@ -369,11 +369,17 @@ export async function classifyNotebookQuestions(
     }
 
     if (row.attempt_id) {
+      const { data: existing } = await supabaseServer
+        .from("question_attempts")
+        .select("error_detail")
+        .eq("id", row.attempt_id)
+        .maybeSingle()
+      const prev = (existing?.error_detail as Record<string, unknown>) ?? {}
       await supabaseServer
         .from("question_attempts")
         .update({
           error_taxonomy: classified.taxonomy,
-          error_detail: errorDetail,
+          error_detail: { ...prev, ...errorDetail },
         })
         .eq("id", row.attempt_id)
     }

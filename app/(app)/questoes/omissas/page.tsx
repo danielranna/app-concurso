@@ -238,7 +238,7 @@ function OmissasAppPage() {
       notebook_id?: string
       confidence_level: ConfidenceLevel
       tags?: string[]
-      comment?: string | null
+      note_draft?: string | null
     }) => {
       const item = queue.find((q) => q.question_id === payload.question_id)
       const notebookId = payload.notebook_id || item?.notebook_id

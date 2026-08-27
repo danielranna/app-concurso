@@ -3,6 +3,11 @@ export type DailyWrongOption = {
   text: string
 }
 
+export type DailyWrongNote = {
+  body: string
+  ai_feedback: string | null
+}
+
 export type DailyWrongItem = {
   attempt_id: string
   question_id: string
@@ -20,4 +25,7 @@ export type DailyWrongItem = {
   content_after: string | null
   content_blocks: unknown | null
   options: DailyWrongOption[]
+  feedback_detailed?: string | null
+  misconception?: string | null
+  notes?: DailyWrongNote[]
 }

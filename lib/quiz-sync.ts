@@ -662,6 +662,50 @@ export async function upsertSyncedNote(
   })
 }
 
+async function insertInboundNoteAndEnqueueAi(input: {
+  userId: string
+  questionId: string
+  attemptId: string | null
+  notebookId: string | null
+  comment: string | null
+  selectedAnswer: string
+  confidenceLevel: ConfidenceLevel
+  durationMs: number | null
+  tags?: string[]
+}) {
+  let attemptId = input.attemptId
+  if (!attemptId) {
+    const { data: last } = await supabaseServer
+      .from("question_attempts")
+      .select("id")
+      .eq("user_id", input.userId)
+      .eq("question_id", input.questionId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    attemptId = (last?.id as string | undefined) ?? null
+  }
+  if (!attemptId) return
+
+  const { enqueueQuestionResolveAi } = await import("./ai/question-resolve-ai")
+  await enqueueQuestionResolveAi({
+    userId: input.userId,
+    questionId: input.questionId,
+    attemptId,
+    notebookId: input.notebookId,
+    noteDraft: input.comment,
+    selectedAnswer: input.selectedAnswer,
+    confidenceLevel: input.confidenceLevel,
+    durationMs: input.durationMs,
+    tags: input.tags,
+    pushWhatsapp: false,
+    idempotencyKey: input.comment
+      ? `question_ai:${attemptId}:inbound`
+      : `question_ai:${attemptId}`,
+  })
+  void import("./ai/jobs/kick").then((m) => m.kickQuestionAiWorker(input.userId))
+}
+
 async function findQuestionInNotebook(
   notebookId: string,
   opts: { tecId?: number | null; questionId?: string | null }
@@ -844,6 +888,7 @@ export async function ingestWhatsappAnswer(input: {
     existingRows?.[0] ??
     null
   const duration = capDurationMs(input.durationMs)
+  let inboundAttemptId: string | null = null
   if (existing) {
     const stored = String(existing.selected_answer || "")
     const needsFix =
@@ -859,7 +904,19 @@ export async function ingestWhatsappAnswer(input: {
     if (Object.keys(patch).length) {
       await supabaseServer.from("question_attempts").update(patch).eq("id", existing.id)
     }
-    if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
+    if (input.comment) {
+      await insertInboundNoteAndEnqueueAi({
+        userId,
+        questionId,
+        attemptId: existing.id as string,
+        notebookId,
+        comment: input.comment,
+        selectedAnswer: selected,
+        confidenceLevel: confidence,
+        durationMs: duration,
+        tags: input.tags,
+      })
+    }
     if (input.tags?.length) {
       await supabaseServer
         .from("question_attempts")
@@ -871,7 +928,7 @@ export async function ingestWhatsappAnswer(input: {
   }
 
   try {
-    await recordAttempt({
+    const recorded = await recordAttempt({
       user_id: userId,
       question_id: questionId,
       notebook_id: notebookId,
@@ -882,6 +939,7 @@ export async function ingestWhatsappAnswer(input: {
       confidence_level: confidence,
       attempt_tags: input.tags?.length ? input.tags : undefined,
     })
+    inboundAttemptId = recorded.id
   } catch (e) {
     const msg = e instanceof Error ? e.message : ""
     if (!/attempt_tags/i.test(msg)) throw e
@@ -904,7 +962,31 @@ export async function ingestWhatsappAnswer(input: {
     }
   }
 
-  if (input.comment) await upsertSyncedNote(userId, questionId, input.comment)
+  if (input.comment) {
+    await insertInboundNoteAndEnqueueAi({
+      userId,
+      questionId,
+      attemptId: inboundAttemptId,
+      notebookId,
+      comment: input.comment,
+      selectedAnswer: selected,
+      confidenceLevel: confidence,
+      durationMs: duration,
+      tags: input.tags,
+    })
+  } else if (inboundAttemptId) {
+    await insertInboundNoteAndEnqueueAi({
+      userId,
+      questionId,
+      attemptId: inboundAttemptId,
+      notebookId,
+      comment: null,
+      selectedAnswer: selected,
+      confidenceLevel: confidence,
+      durationMs: duration,
+      tags: input.tags,
+    })
+  }
   if (notebookId) await refreshNotebookProgress(notebookId, userId)
 
   return {
@@ -977,6 +1059,32 @@ export async function addWhatsappStudyNote(input: {
     .select("id, body, created_at")
     .single()
   if (error) throw new Error(error.message)
+
+  const { data: attempt } = await supabaseServer
+    .from("question_attempts")
+    .select("id, selected_answer, confidence_level, duration_ms, notebook_id")
+    .eq("user_id", target.userId)
+    .eq("question_id", target.questionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (attempt?.id) {
+    const { enqueueQuestionResolveAi } = await import("./ai/question-resolve-ai")
+    await enqueueQuestionResolveAi({
+      userId: target.userId,
+      questionId: target.questionId,
+      attemptId: attempt.id as string,
+      notebookId: (attempt.notebook_id as string | null) ?? target.notebookId,
+      selectedAnswer: String(attempt.selected_answer ?? ""),
+      confidenceLevel: attempt.confidence_level as string | undefined,
+      durationMs: attempt.duration_ms == null ? null : Number(attempt.duration_ms),
+      pushWhatsapp: false,
+      idempotencyKey: `question_ai:${attempt.id}:note:${data.id}`,
+    })
+    void import("./ai/jobs/kick").then((m) => m.kickQuestionAiWorker(target.userId))
+  }
+
   return {
     ok: true,
     note: {
@@ -1348,9 +1456,6 @@ export async function maybePushNotebookAnswer(input: {
     .eq("user_id", input.userId)
     .maybeSingle()
   if (!sent && !replica) return { skipped: true }
-  if (input.comment) {
-    await upsertSyncedNote(input.userId, input.questionId, input.comment)
-  }
   return pushAnswerToWhatsapp({
     userId: input.userId,
     questionId: input.questionId,

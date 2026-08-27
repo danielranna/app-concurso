@@ -102,7 +102,7 @@ async function handleApi(msg) {
         duration_ms: asDurationMs(msg.duration_ms),
         tec_id: msg.tec_id,
         confidence_level: msg.confidence_level || "seguro",
-        comment: msg.comment ?? null,
+        note_draft: msg.note_draft ?? msg.comment ?? null,
       });
     }
     case "loadOmissas": {
@@ -133,7 +133,7 @@ async function handleApi(msg) {
         selected_answer: msg.selected_answer,
         duration_ms: asDurationMs(msg.duration_ms),
         confidence_level: msg.confidence_level || "seguro",
-        comment: msg.comment ?? null,
+        note_draft: msg.note_draft ?? msg.comment ?? null,
       });
     case "listNotes": {
       if (!msg.questionId) return { ok: false, error: "Questão ausente." };

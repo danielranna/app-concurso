@@ -71,6 +71,8 @@ export default function ResolverQuestaoAvulsaPage() {
       duration_ms: number
       tec_id: number
       confidence_level: ConfidenceLevel
+      tags?: string[]
+      note_draft?: string | null
     }) => {
       if (!userId) return { error: "Não autenticado", is_correct: null }
       const res = await fetch(`/api/questions/${questionId}/answer`, {
@@ -81,6 +83,8 @@ export default function ResolverQuestaoAvulsaPage() {
           selected_answer: payload.selected_answer,
           duration_ms: payload.duration_ms,
           confidence_level: payload.confidence_level,
+          tags: payload.tags,
+          note_draft: payload.note_draft,
         }),
       })
       const data = await res.json()

@@ -217,14 +217,19 @@ export async function recordAttempt(params: {
     outcome_category,
   }
   if (params.attempt_tags?.length) payload.attempt_tags = params.attempt_tags
-  const { error } = await supabaseServer.from("question_attempts").insert(payload)
+  const { data, error } = await supabaseServer
+    .from("question_attempts")
+    .insert(payload)
+    .select("id")
+    .single()
   if (error && /attempt_tags/i.test(error.message)) {
     delete payload.attempt_tags
-    const retry = await supabaseServer.from("question_attempts").insert(payload)
+    const retry = await supabaseServer.from("question_attempts").insert(payload).select("id").single()
     if (retry.error) throw new Error(retry.error.message)
-    return
+    return { id: retry.data.id as string }
   }
   if (error) throw new Error(error.message)
+  return { id: data!.id as string }
 }
 
 export type StudyOption = { label: string; text: string; sort_order?: number }
@@ -500,6 +505,17 @@ export async function refreshNotebookProgress(
   }
 
   await supabaseServer.from("notebooks").update(update).eq("id", notebookId)
+  if (willComplete) {
+    try {
+      const { enqueueNotebookReport } = await import("./ai/notebook-report")
+      await enqueueNotebookReport(notebookId, userId)
+    } catch (e) {
+      console.warn(
+        "[notebook] enqueue report:",
+        e instanceof Error ? e.message : e
+      )
+    }
+  }
   return { justCompleted: willComplete }
 }
 

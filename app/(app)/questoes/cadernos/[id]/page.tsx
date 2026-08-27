@@ -179,7 +179,7 @@ export default function ResolverCadernoPage() {
       tec_id: number
       confidence_level: ConfidenceLevel
       tags?: string[]
-      comment?: string | null
+      note_draft?: string | null
     }) => {
       const res = await fetch(`/api/notebooks/${notebookId}/answer`, {
         method: "POST",

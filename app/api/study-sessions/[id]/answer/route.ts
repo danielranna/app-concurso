@@ -9,7 +9,10 @@ import {
   recordAttempt,
   refreshNotebookProgress,
 } from "@/lib/question-study"
-import { maybePushNotebookAnswer } from "@/lib/quiz-sync"
+import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
+import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+
+export const maxDuration = 60
 
 export async function POST(
   req: Request,
@@ -27,6 +30,7 @@ export async function POST(
     confidence_level,
     tags,
     comment,
+    note_draft,
   } = body
 
   if (!user_id || !question_id || !selected_answer || tec_id == null) {
@@ -90,7 +94,7 @@ export async function POST(
   )
 
   const confidence = parseConfidenceLevel(confidence_level)
-  await recordAttempt({
+  const { id: attemptId } = await recordAttempt({
     user_id,
     question_id,
     notebook_id: notebook_id ?? null,
@@ -102,21 +106,21 @@ export async function POST(
     attempt_tags: Array.isArray(tags) ? tags : undefined,
   })
 
+  await enqueueQuestionResolveAi({
+    userId: user_id,
+    questionId: question_id,
+    attemptId,
+    notebookId: notebook_id ?? null,
+    noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    selectedAnswer: selected_answer,
+    confidenceLevel: confidence,
+    durationMs: duration_ms ?? null,
+    tags: Array.isArray(tags) ? tags : [],
+    pushWhatsapp: true,
+  })
+  scheduleQuestionAiKick(user_id)
+
   if (notebook_id) {
-    try {
-      await maybePushNotebookAnswer({
-        notebookId: notebook_id,
-        userId: user_id,
-        questionId: question_id,
-        selectedAnswer: selected_answer,
-        confidenceLevel: confidence,
-        durationMs: duration_ms ?? null,
-        comment: comment ?? null,
-        tags: Array.isArray(tags) ? tags : [],
-      })
-    } catch (e) {
-      console.warn("[quiz-sync] push answer:", e instanceof Error ? e.message : e)
-    }
     await refreshNotebookProgress(notebook_id, user_id)
 
     const { data: snb } = await supabaseServer

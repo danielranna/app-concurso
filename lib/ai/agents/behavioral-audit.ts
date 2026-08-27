@@ -249,6 +249,8 @@ export async function runBehavioralAuditAgent(params: {
   skipLlm?: boolean
   prioritizeGreenNotes?: boolean
   taxonomyByQuestion?: Map<string, PerQuestionError>
+  ignoreDailyCap?: boolean
+  agentType?: "report" | "question_explain"
 }): Promise<RunBehavioralAuditResult> {
   const taxHint = (qid: string) =>
     params.taxonomyByQuestion?.get(qid)?.error_taxonomy
@@ -299,12 +301,16 @@ export async function runBehavioralAuditAgent(params: {
   }
 
   const prefs = await getEffectiveReportPreferences(params.userId, params.subjectId)
-  const reportsToday = await countReportLlmRunsToday(params.userId)
+  const reportsToday = params.ignoreDailyCap
+    ? 0
+    : await countReportLlmRunsToday(params.userId)
 
   const pendingRed = pending.filter((p) => p.zone === "red")
   const pendingYellow = pending.filter((p) => p.zone === "yellow")
 
-  const atDailyCap = reportsToday >= prefs.max_llm_explanations_per_day
+  const atDailyCap =
+    !params.ignoreDailyCap &&
+    reportsToday >= prefs.max_llm_explanations_per_day
 
   if (atDailyCap) {
     appendPendingFallbacks(baseAudit, pending, optionsByQ, taxHint)
@@ -347,7 +353,7 @@ export async function runBehavioralAuditAgent(params: {
   }
 
   const result = await runAgent({
-    agentType: "report",
+    agentType: params.agentType ?? "report",
     userId: params.userId,
     subjectId: params.subjectId,
     systemPrompt: UNIFIED_EXPLAIN_SYSTEM_PROMPT,

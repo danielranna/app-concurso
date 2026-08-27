@@ -117,7 +117,7 @@ export default function EstudoCombinadoPage() {
       notebook_id?: string
       confidence_level: ConfidenceLevel
       tags?: string[]
-      comment?: string | null
+      note_draft?: string | null
     }) => {
       const res = await fetch(`/api/study-sessions/${sessionId}/answer`, {
         method: "POST",

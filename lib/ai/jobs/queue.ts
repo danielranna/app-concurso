@@ -2,6 +2,7 @@ import { supabaseServer } from "../../supabase-server"
 
 export type JobType =
   | "notebook_report_aggregate"
+  | "question_resolve_ai"
   | "classify_wrong_attempts"
   | "brain_ingest_report"
   | "subject_dossier_generate"

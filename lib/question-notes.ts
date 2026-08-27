@@ -25,6 +25,85 @@ export type QuestionNoteEntryPublic = {
   body: string
   created_at: string
   has_ai_response: boolean
+  ai_feedback: string | null
+  ai_pending: boolean
+}
+
+export function toPublicNoteEntry(row: {
+  id: string
+  body: string
+  created_at: string
+  ai_processed_at?: string | null
+  ai_feedback?: string | null
+}, options?: { expectAi?: boolean }): QuestionNoteEntryPublic {
+  const aiFeedback = row.ai_feedback?.trim() || null
+  const processed = Boolean(row.ai_processed_at)
+  const expectAi = options?.expectAi ?? true
+  return {
+    id: row.id,
+    body: row.body,
+    created_at: row.created_at,
+    has_ai_response: processed && Boolean(aiFeedback),
+    ai_feedback: aiFeedback,
+    ai_pending: expectAi && !processed,
+  }
+}
+
+export async function insertQuestionNote(
+  userId: string,
+  questionId: string,
+  body: string,
+  options?: { syncOrigin?: "whatsapp" | null }
+): Promise<QuestionNoteEntryPublic> {
+  const trimmed = body.trim()
+  if (!trimmed) throw new Error("Escreva algo antes de enviar")
+
+  const row: Record<string, unknown> = {
+    user_id: userId,
+    question_id: questionId,
+    body: trimmed,
+  }
+  if (options?.syncOrigin) row.sync_origin = options.syncOrigin
+
+  const { data, error } = await supabaseServer
+    .from("question_note_entries")
+    .insert(row)
+    .select("id, body, created_at, ai_processed_at, ai_feedback")
+    .single()
+
+  if (error) throw new Error(error.message)
+  return toPublicNoteEntry(data)
+}
+
+export async function latestAttemptForQuestion(
+  userId: string,
+  questionId: string
+): Promise<{
+  id: string
+  notebook_id: string | null
+  selected_answer: string
+  confidence_level: string | null
+  duration_ms: number | null
+  error_detail: Record<string, unknown> | null
+} | null> {
+  const { data, error } = await supabaseServer
+    .from("question_attempts")
+    .select("id, notebook_id, selected_answer, confidence_level, duration_ms, error_detail")
+    .eq("user_id", userId)
+    .eq("question_id", questionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data?.id) return null
+  return {
+    id: data.id as string,
+    notebook_id: (data.notebook_id as string | null) ?? null,
+    selected_answer: String(data.selected_answer ?? ""),
+    confidence_level: (data.confidence_level as string | null) ?? null,
+    duration_ms: data.duration_ms == null ? null : Number(data.duration_ms),
+    error_detail: (data.error_detail as Record<string, unknown> | null) ?? null,
+  }
 }
 
 export async function loadNoteEntriesByQuestion(

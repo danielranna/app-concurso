@@ -205,7 +205,7 @@ export async function runNoteClarificationsAgent(params: {
   items: NoteClarificationItem[]
   subjectName?: string
   skipLlm?: boolean
-  agentType?: "report" | "dossier"
+  agentType?: "report" | "dossier" | "question_explain"
 }): Promise<NoteClarificationsResult> {
   const empty: NoteClarificationsResult = {
     clarifications: [],
@@ -443,6 +443,7 @@ export async function runNotebookNoteClarifications(params: {
   audit: BehavioralAudit
   taxonomyByQuestion: Map<string, PerQuestionError>
   skipLlm?: boolean
+  agentType?: "report" | "dossier" | "question_explain"
 }): Promise<{
   audit: BehavioralAudit
   result: NoteClarificationsResult
@@ -459,7 +460,7 @@ export async function runNotebookNoteClarifications(params: {
     items,
     subjectName: params.payload.subject_name,
     skipLlm: params.skipLlm,
-    agentType: "report",
+    agentType: params.agentType ?? "report",
   })
 
   await persistClarificationsToNoteEntries(

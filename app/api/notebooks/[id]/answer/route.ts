@@ -7,7 +7,10 @@ import {
   recordAttempt,
   refreshNotebookProgress,
 } from "@/lib/question-study"
-import { maybePushNotebookAnswer } from "@/lib/quiz-sync"
+import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
+import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+
+export const maxDuration = 60
 
 export async function POST(
   req: Request,
@@ -15,8 +18,16 @@ export async function POST(
 ) {
   const { id: notebook_id } = await params
   const body = await req.json()
-  const { user_id, question_id, selected_answer, duration_ms, confidence_level, tags, comment } =
-    body
+  const {
+    user_id,
+    question_id,
+    selected_answer,
+    duration_ms,
+    confidence_level,
+    tags,
+    comment,
+    note_draft,
+  } = body
 
   if (!user_id || !question_id || !selected_answer) {
     return NextResponse.json({ error: "Campos obrigatórios" }, { status: 400 })
@@ -34,7 +45,7 @@ export async function POST(
   )
 
   const confidence = parseConfidenceLevel(confidence_level)
-  await recordAttempt({
+  const { id: attemptId } = await recordAttempt({
     user_id,
     question_id,
     notebook_id,
@@ -47,20 +58,19 @@ export async function POST(
   })
 
   await refreshNotebookProgress(notebook_id, user_id)
-  try {
-    await maybePushNotebookAnswer({
-      notebookId: notebook_id,
-      userId: user_id,
-      questionId: question_id,
-      selectedAnswer: selected_answer,
-      confidenceLevel: confidence,
-      durationMs: duration_ms ?? null,
-      comment: comment ?? null,
-      tags: Array.isArray(tags) ? tags : [],
-    })
-  } catch (e) {
-    console.warn("[quiz-sync] push answer:", e instanceof Error ? e.message : e)
-  }
+  await enqueueQuestionResolveAi({
+    userId: user_id,
+    questionId: question_id,
+    attemptId,
+    notebookId: notebook_id,
+    noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    selectedAnswer: selected_answer,
+    confidenceLevel: confidence,
+    durationMs: duration_ms ?? null,
+    tags: Array.isArray(tags) ? tags : [],
+    pushWhatsapp: true,
+  })
+  scheduleQuestionAiKick(user_id)
 
   return NextResponse.json({
     is_correct,

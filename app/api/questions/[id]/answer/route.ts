@@ -6,6 +6,10 @@ import {
   parseConfidenceLevel,
   recordAttempt,
 } from "@/lib/question-study"
+import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
+import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+
+export const maxDuration = 60
 
 /** Resposta avulsa (fora de caderno/sessão) — alimenta estatísticas e cérebro via tentativas. */
 export async function POST(
@@ -19,11 +23,17 @@ export async function POST(
     selected_answer,
     duration_ms,
     confidence_level,
+    comment,
+    note_draft,
+    tags,
   } = body as {
     user_id: string
     selected_answer: string
     duration_ms?: number | null
     confidence_level?: string
+    comment?: string | null
+    note_draft?: string | null
+    tags?: string[]
   }
 
   if (!user_id || !selected_answer) {
@@ -45,7 +55,7 @@ export async function POST(
   )
   const confidence = parseConfidenceLevel(confidence_level)
 
-  await recordAttempt({
+  const { id: attemptId } = await recordAttempt({
     user_id,
     question_id,
     notebook_id: null,
@@ -54,7 +64,22 @@ export async function POST(
     is_correct,
     duration_ms: duration_ms ?? null,
     confidence_level: confidence,
+    attempt_tags: Array.isArray(tags) ? tags : undefined,
   })
+
+  await enqueueQuestionResolveAi({
+    userId: user_id,
+    questionId: question_id,
+    attemptId,
+    notebookId: null,
+    noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    selectedAnswer: selected_answer,
+    confidenceLevel: confidence,
+    durationMs: duration_ms ?? null,
+    tags: Array.isArray(tags) ? tags : [],
+    pushWhatsapp: true,
+  })
+  scheduleQuestionAiKick(user_id)
 
   const outcome_category = computeOutcomeCategory(confidence, is_correct)
 

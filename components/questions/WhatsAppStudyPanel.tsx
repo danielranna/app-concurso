@@ -15,9 +15,7 @@ type Props = {
   options: { label: string; text: string }[]
   selected: string | null
   tags: string[]
-  comment: string
   onTagsChange: (tags: string[]) => void
-  onCommentChange: (comment: string) => void
 }
 
 function letterOf(type: string, selected: string | null) {
@@ -39,9 +37,7 @@ export default function WhatsAppStudyPanel({
   options,
   selected,
   tags,
-  comment,
   onTagsChange,
-  onCommentChange,
 }: Props) {
   const [enabled, setEnabled] = useState(Boolean(forceEnabled))
   const [loading, setLoading] = useState(!forceEnabled)
@@ -76,7 +72,6 @@ export default function WhatsAppStudyPanel({
           }
           if (data.short_id) setShortId(String(data.short_id))
           else if (shortIdHint) setShortId(shortIdHint)
-          if (data.synced_comment && !comment) onCommentChange(String(data.synced_comment))
         } else {
           setEnabled(nextEnabled)
           if (shortIdHint) setShortId(shortIdHint)
@@ -177,7 +172,7 @@ export default function WhatsAppStudyPanel({
 
       <p className="text-xs text-slate-600">
         {forceEnabled
-          ? "Tags, comentário da resposta e verificação vão para o Papa Vagas. O double-click que risca alternativa continua local."
+          ? "Tags e verificação vão para o Papa Vagas. Anotações ficam na thread ao lado e viajam com a resposta depois da IA. O double-click que risca alternativa continua local."
           : "Tags e verificação de alternativa valem só neste caderno sincronizado com o Papa Vagas. O double-click que risca alternativa continua grátis e local."}
       </p>
 
@@ -238,16 +233,6 @@ export default function WhatsAppStudyPanel({
           </div>
         )}
       </div>
-
-      <label className="mt-3 block text-xs font-medium text-slate-700">
-        Anotação da resposta (sincronizada)
-        <textarea
-          value={comment}
-          onChange={(e) => onCommentChange(e.target.value)}
-          rows={2}
-          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900"
-        />
-      </label>
 
       <div className="mt-3 border-t border-emerald-100 pt-3">
         <p className="mb-2 text-xs font-medium text-slate-700">
