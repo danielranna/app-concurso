@@ -20,6 +20,7 @@ import type { ResolvedSharedBlock } from "@/lib/shared-assets"
 import type { NavMode } from "@/lib/study-navigation"
 import type { ConfidenceLevel, StudySessionNotebookBreakdown } from "@/lib/question-types"
 import CombinedSessionNotebookSummary from "@/components/questions/CombinedSessionNotebookSummary"
+import NotebookCompleteSummary from "@/components/questions/NotebookCompleteSummary"
 import {
   draftScopeKey,
   getDraft,
@@ -86,6 +87,9 @@ type Props = {
       outcome_category?: string | null
       duration_ms?: number | null
     } | null
+    study_elapsed_ms?: number
+    report_id?: string | null
+    report_pending?: boolean
   }>
   submitAnswer: (payload: {
     question_id: string
@@ -108,6 +112,8 @@ type Props = {
   onNotebookComplete?: () => void
   /** Pausa o timer da questão (ex.: quando o cronômetro do caderno está pausado). */
   timerPaused?: boolean
+  /** Tempo acumulado do caderno (conclusão). */
+  elapsedMs?: number
   /** Chamado ao zerar o tempo da questão atual (caderno já persistido). */
   onQuestionTimeReset?: (studyElapsedMs: number) => void
   whatsappOverlay?: {
@@ -172,6 +178,7 @@ export default function QuestionSolver({
   refreshKey,
   onNotebookComplete,
   timerPaused = false,
+  elapsedMs: elapsedMsProp,
   onQuestionTimeReset,
   soloQuestionId,
   returnHref,
@@ -211,6 +218,10 @@ export default function QuestionSolver({
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [showNotebookSummary, setShowNotebookSummary] = useState(false)
+  const [reportId, setReportId] = useState<string | null>(null)
+  const [reportPending, setReportPending] = useState(false)
+  const [elapsedMs, setElapsedMs] = useState(elapsedMsProp ?? 0)
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [batchResolving, setBatchResolving] = useState(false)
@@ -305,6 +316,18 @@ export default function QuestionSolver({
         )
         setStats(statsNext)
         setPosition(data.position ?? 1)
+        if (typeof data.study_elapsed_ms === "number") {
+          setElapsedMs(data.study_elapsed_ms)
+        }
+        if (data.report_id) setReportId(data.report_id)
+        setReportPending(Boolean(data.report_pending) && !data.report_id)
+        const notebookDone =
+          mode === "notebook" && statsNext.pending === 0 && statsNext.total > 0
+        if (notebookDone && (!opts?.nav || opts.nav === "unsolved")) {
+          setShowNotebookSummary(true)
+        } else if (opts?.nav) {
+          setShowNotebookSummary(false)
+        }
 
         const qid = data.current?.question_id
         if (qid && data.current) {
@@ -556,6 +579,7 @@ export default function QuestionSolver({
         }
         if (mode === "notebook" && next.pending === 0 && next.total > 0) {
           onNotebookComplete?.()
+          setShowNotebookSummary(true)
         }
         return next
       })
@@ -659,6 +683,28 @@ export default function QuestionSolver({
         setResettingQuestionTime(false)
       }
     }
+  }
+
+  if (showNotebookSummary && mode === "notebook" && notebookId) {
+    return (
+      <NotebookCompleteSummary
+        userId={userId}
+        notebookId={notebookId}
+        notebookName={completedNotebookName}
+        stats={stats}
+        elapsedMs={elapsedMsProp ?? elapsedMs}
+        initialReportId={reportId}
+        reportPending={reportPending}
+        onReview={() => {
+          setShowNotebookSummary(false)
+          if (!question || !current) navigate("prev")
+        }}
+        onCreateWrongNotebook={onCreateWrongNotebook}
+        creatingWrongNotebook={creatingWrongNotebook}
+        onResetNotebook={onResetNotebook}
+        resettingNotebook={resettingNotebook}
+      />
+    )
   }
 
   if (loading && !question) {

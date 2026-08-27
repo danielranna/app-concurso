@@ -12,10 +12,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
   }
 
+  const compact = searchParams.get("compact") === "1"
+
   let query = supabaseServer
     .from("subject_notebook_reports")
     .select(
-      `
+      compact
+        ? "id, notebook_id, created_at"
+        : `
       id, notebook_id, subject_id, summary_md, structured,
       model_used, created_at,
       notebooks ( name, question_count )

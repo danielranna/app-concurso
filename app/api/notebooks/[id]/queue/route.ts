@@ -36,7 +36,9 @@ export async function GET(
       loadNotebookAttemptRows(id, user_id),
       supabaseServer
         .from("notebooks")
-        .select("question_count, name, study_elapsed_ms, active_question_id")
+        .select(
+          "question_count, name, study_elapsed_ms, active_question_id, report_pending"
+        )
         .eq("id", id)
         .single(),
     ])
@@ -97,6 +99,21 @@ export async function GET(
         ? fullQueue.findIndex((q) => q.question_id === current.question_id) + 1
         : 0
 
+    const pendingCount = pendingQueue.length
+    const notebookDone = pendingCount === 0 && fullQueue.length > 0
+    let reportId: string | null = null
+    if (notebookDone) {
+      const { data: reportRow } = await supabaseServer
+        .from("subject_notebook_reports")
+        .select("id")
+        .eq("notebook_id", id)
+        .eq("user_id", user_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      reportId = reportRow?.id ?? null
+    }
+
     return NextResponse.json({
       full_queue_length: fullQueue.length,
       current,
@@ -105,12 +122,16 @@ export async function GET(
       attempt,
       position,
       study_elapsed_ms: nb?.study_elapsed_ms ?? 0,
+      report_id: reportId,
+      report_pending: Boolean(
+        (nb as { report_pending?: boolean } | null)?.report_pending
+      ),
       stats: {
         total: nb?.question_count ?? fullQueue.length,
         resolved: attemptStats.resolved,
         correct: attemptStats.correct,
         wrong: attemptStats.wrong,
-        pending: pendingQueue.length,
+        pending: pendingCount,
       },
       notebook: nb,
     })

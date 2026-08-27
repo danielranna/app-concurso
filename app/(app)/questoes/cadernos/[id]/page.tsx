@@ -160,6 +160,9 @@ export default function ResolverCadernoPage() {
         stats: data.stats,
         position: data.position,
         attempt: data.attempt ?? null,
+        study_elapsed_ms: data.study_elapsed_ms,
+        report_id: data.report_id ?? null,
+        report_pending: Boolean(data.report_pending),
       }
     },
     [notebookId, userId]
@@ -401,6 +404,7 @@ export default function ResolverCadernoPage() {
           mode="notebook"
           notebookId={notebookId}
           timerPaused={timersPaused}
+          elapsedMs={elapsedMs}
           fetchQueue={fetchQueueSimple}
           submitAnswer={submitAnswer}
           mapping={mapping}
