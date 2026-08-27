@@ -3,6 +3,8 @@ import { getQuizBotSecret } from "@/lib/quiz-bot-url"
 import { ingestWhatsappAnswer } from "@/lib/quiz-sync"
 import { logQuizSyncEvent } from "@/lib/quiz-sync-log"
 
+export const maxDuration = 60
+
 export async function POST(req: Request) {
   const secret = getQuizBotSecret()
   const auth = req.headers.get("authorization")

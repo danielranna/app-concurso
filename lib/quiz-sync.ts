@@ -703,7 +703,8 @@ async function insertInboundNoteAndEnqueueAi(input: {
       ? `question_ai:${attemptId}:inbound`
       : `question_ai:${attemptId}`,
   })
-  void import("./ai/jobs/kick").then((m) => m.kickQuestionAiWorker(input.userId))
+  const { scheduleQuestionAiKick } = await import("./ai/jobs/kick")
+  scheduleQuestionAiKick(input.userId)
 }
 
 async function findQuestionInNotebook(
@@ -1086,7 +1087,8 @@ export async function addWhatsappStudyNote(input: {
       pushWhatsapp: false,
       idempotencyKey: `question_ai:${attempt.id}:note:${data.id}`,
     })
-    void import("./ai/jobs/kick").then((m) => m.kickQuestionAiWorker(target.userId))
+    const { scheduleQuestionAiKick } = await import("./ai/jobs/kick")
+    scheduleQuestionAiKick(target.userId)
   }
 
   return {

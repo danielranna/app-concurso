@@ -17,8 +17,11 @@ import { runNotebookNoteClarifications } from "./note-clarifications"
 import { buildAttemptAuditPayload } from "./notebook-audit-payload"
 import { maybePushNotebookAnswer } from "../quiz-sync"
 import { splitPublishParts } from "./whatsapp-comment"
+import type { BehavioralAudit } from "../coach-types"
 
-const QUESTION_AI_TIMEOUT_MS = 45_000
+const QUESTION_AI_TIMEOUT_MS = 50_000
+const LATE_AI_POLL_MS = 3_000
+const LATE_AI_POLL_TRIES = 4
 const WHATSAPP_PUSHED_KEY = "whatsapp_pushed_at"
 const WHATSAPP_AI_PUSHED_KEY = "whatsapp_ai_pushed_at"
 
@@ -186,23 +189,62 @@ async function pushAttemptToWhatsapp(input: {
   })
 }
 
-async function runQuestionAiPipeline(input: {
+function stubAudit(): BehavioralAudit {
+  return {
+    performance_summary: {
+      correct: 0,
+      total: 0,
+      pct: 0,
+      groups: { red: 0, yellow: 0, green: 0 },
+    },
+    red_zone: [],
+    yellow_zone: [],
+    green_zone: { mastered_indexes: [], theory_balance: "" },
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function runNoteReplyPipeline(input: {
   userId: string
   attemptId: string
   notebookId: string | null
 }) {
   const payload = await buildAttemptAuditPayload(input.userId, input.attemptId)
   const subjectId = await loadSubjectId(input.notebookId)
-  const zone = payload.questions[0]?.zone
-  const notebookKey = payload.notebook_id
+  const { result: clarifyResult } = await runNotebookNoteClarifications({
+    userId: input.userId,
+    subjectId,
+    payload,
+    audit: stubAudit(),
+    taxonomyByQuestion: new Map(),
+    skipLlm: false,
+    agentType: "question_explain",
+  })
+  return {
+    usedLlm: clarifyResult.usedLlm,
+    modelUsed: clarifyResult.modelUsed,
+    payload,
+    subjectId,
+  }
+}
 
+async function runAuditExtrasPipeline(input: {
+  userId: string
+  notebookId: string | null
+  payload: Awaited<ReturnType<typeof buildAttemptAuditPayload>>
+  subjectId: string | null
+}) {
+  const zone = input.payload.questions[0]?.zone
   let taxonomyByQuestion = new Map()
   if (zone === "red" || zone === "yellow") {
     const classified = await classifyNotebookQuestions(
       input.userId,
-      notebookKey,
-      subjectId,
-      payload,
+      input.payload.notebook_id,
+      input.subjectId,
+      input.payload,
       { skipLlm: false, agentType: "question_explain" }
     )
     taxonomyByQuestion = classified.byQuestionId
@@ -210,32 +252,14 @@ async function runQuestionAiPipeline(input: {
 
   const auditResult = await runBehavioralAuditAgent({
     userId: input.userId,
-    subjectId,
-    payload,
+    subjectId: input.subjectId,
+    payload: input.payload,
     skipLlm: false,
     taxonomyByQuestion,
     ignoreDailyCap: true,
     agentType: "question_explain",
   })
-  await persistAuditInsightsToAttempts(auditResult.audit, payload)
-
-  const refreshed = await buildAttemptAuditPayload(input.userId, input.attemptId)
-  const { result: clarifyResult } = await runNotebookNoteClarifications({
-    userId: input.userId,
-    subjectId,
-    payload: refreshed,
-    audit: auditResult.audit,
-    taxonomyByQuestion,
-    skipLlm: false,
-    agentType: "question_explain",
-  })
-
-  return {
-    usedLlm: auditResult.usedLlm || clarifyResult.usedLlm,
-    modelUsed: clarifyResult.usedLlm
-      ? clarifyResult.modelUsed
-      : auditResult.modelUsed,
-  }
+  await persistAuditInsightsToAttempts(auditResult.audit, input.payload)
 }
 
 export async function processQuestionResolveAi(
@@ -290,26 +314,39 @@ export async function processQuestionResolveAi(
   let usedLlm = false
   let modelUsed = "rule-based"
   let timedOut = false
+  let auditPayload: Awaited<ReturnType<typeof buildAttemptAuditPayload>> | null =
+    null
+  let auditSubjectId: string | null = null
   try {
     const result = await withTimeout(
-      runQuestionAiPipeline({ userId, attemptId, notebookId }),
+      runNoteReplyPipeline({ userId, attemptId, notebookId }),
       QUESTION_AI_TIMEOUT_MS
     )
     usedLlm = result.usedLlm
     modelUsed = result.modelUsed
+    auditPayload = result.payload
+    auditSubjectId = result.subjectId
   } catch (e) {
     timedOut = e instanceof Error && e.message === "question_ai_timeout"
     if (!timedOut) {
       console.warn(
-        "[question-resolve-ai] pipeline:",
+        "[question-resolve-ai] note reply:",
         e instanceof Error ? e.message : e
       )
     }
   }
 
-  const parts = hasNotes
+  let parts = hasNotes
     ? await buildPublishParts(userId, questionId, noteEntryIds)
     : { comment: null, aiComment: null }
+
+  if (hasNotes && !parts.aiComment) {
+    for (let i = 0; i < LATE_AI_POLL_TRIES; i++) {
+      await sleep(LATE_AI_POLL_MS)
+      parts = await buildPublishParts(userId, questionId, noteEntryIds)
+      if (parts.aiComment) break
+    }
+  }
 
   if (pushWhatsapp && !alreadyPushed && hasNotes) {
     await pushAttemptToWhatsapp({
@@ -327,6 +364,22 @@ export async function processQuestionResolveAi(
       aiUpdate: true,
     })
     await markAiPushed(attemptId)
+  }
+
+  if (auditPayload) {
+    try {
+      await runAuditExtrasPipeline({
+        userId,
+        notebookId,
+        payload: auditPayload,
+        subjectId: auditSubjectId,
+      })
+    } catch (e) {
+      console.warn(
+        "[question-resolve-ai] audit extras:",
+        e instanceof Error ? e.message : e
+      )
+    }
   }
 
   return {
