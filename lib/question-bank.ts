@@ -7,6 +7,7 @@ import {
   type TecTaxonomyGroup,
 } from "./tec-facets"
 import { getTecTopicsForSubject } from "./study-cycle-content-blocks-db"
+import { fetchAllPages } from "./supabase-pages"
 
 export type { TecTaxonomyGroup }
 
@@ -62,13 +63,20 @@ export async function fetchFilterFacets(opts?: {
   tec_topics: string[]
   tec_groups: TecTaxonomyGroup[]
 }> {
-  const { data, error } = await supabaseServer
-    .from("questions")
-    .select("banca, orgao, cargo, ano, tec_subject, tec_topic")
-
-  if (error) throw new Error(error.message)
-
-  const rows = data ?? []
+  const rows = await fetchAllPages<{
+    banca: string | null
+    orgao: string | null
+    cargo: string | null
+    ano: number | null
+    tec_subject: string | null
+    tec_topic: string | null
+  }>((from, to) =>
+    supabaseServer
+      .from("questions")
+      .select("banca, orgao, cargo, ano, tec_subject, tec_topic")
+      .order("id", { ascending: true })
+      .range(from, to)
+  )
   const uniq = (arr: (string | number | null)[]) =>
     [...new Set(arr.filter(Boolean) as string[])].sort()
 

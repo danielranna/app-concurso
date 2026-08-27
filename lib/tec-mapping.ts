@@ -1,6 +1,9 @@
 import { supabaseServer } from "./supabase-server"
 import { assessTecFacetQuality } from "./tec-facets"
-import { fetchQuestionTaxonomyForUser } from "./question-taxonomy"
+import {
+  fetchQuestionTaxonomyForUser,
+  fetchSampleStatementsByTecSubject,
+} from "./question-taxonomy"
 import { flattenFolderTopics } from "./study-cycle-topic-utils"
 import {
   fetchTecSubjectTree,
@@ -45,6 +48,30 @@ function normKey(s: string) {
 
 export function isSubjectLevelMapping(tec_topic: string | null | undefined) {
   return !tec_topic || tec_topic.trim() === ""
+}
+
+function applySampleStatements<T extends { tec_subject: string; sample_statement: string }>(
+  items: T[],
+  samples: Map<string, string>
+): T[] {
+  return items.map((item) =>
+    item.sample_statement.trim()
+      ? item
+      : {
+          ...item,
+          sample_statement: samples.get(item.tec_subject) ?? item.sample_statement,
+        }
+  )
+}
+
+async function fillSampleStatements<
+  T extends { tec_subject: string; sample_statement: string },
+>(items: T[]): Promise<T[]> {
+  if (!items.length) return items
+  const samples = await fetchSampleStatementsByTecSubject(
+    items.map((i) => i.tec_subject)
+  )
+  return applySampleStatements(items, samples)
 }
 
 export async function loadMappings(userId: string) {
@@ -113,7 +140,7 @@ export async function listUnmappedTecSubjects(
     groups.set(sub, g)
   }
 
-  return [...groups.entries()]
+  const items = [...groups.entries()]
     .map(([tec_subject, g]) => ({
       tec_subject,
       count: g.count,
@@ -121,6 +148,7 @@ export async function listUnmappedTecSubjects(
       topics_preview: [...g.topics].slice(0, 5),
     }))
     .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+  return fillSampleStatements(items)
 }
 
 /** Assuntos TEC ainda sem vínculo com o seu tema (matéria TEC já pode estar vinculada). */
@@ -171,7 +199,7 @@ export async function listUnmappedTecTopics(userId: string): Promise<TecTopicGro
     groups.set(key, g)
   }
 
-  return [...groups.values()]
+  const items = [...groups.values()]
     .map((g) => {
       const sm = subjectMap.get(normKey(g.tec_subject))
       const sid = sm?.subject_id ?? null
@@ -185,6 +213,7 @@ export async function listUnmappedTecTopics(userId: string): Promise<TecTopicGro
       a.tec_subject.localeCompare(b.tec_subject, "pt-BR") ||
       a.tec_topic.localeCompare(b.tec_topic, "pt-BR")
     )
+  return fillSampleStatements(items)
 }
 
 export async function saveSubjectMapping(
@@ -548,7 +577,7 @@ export async function listAllTecSubjectsOverview(
     groups.set(sub, g)
   }
 
-  return [...groups.entries()]
+  const overview = [...groups.entries()]
     .map(([tec_subject, g]) => {
       const sm = subjectLevelByTec.get(tec_subject)
       const mapped_subject_id = sm?.subject_id ?? null
@@ -570,6 +599,7 @@ export async function listAllTecSubjectsOverview(
       }
     })
     .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
+  return fillSampleStatements(overview)
 }
 
 export type MappingBundle = {
@@ -681,7 +711,7 @@ export async function loadMappingBundle(userId: string): Promise<MappingBundle> 
     topicGroups.set(key, g)
   }
 
-  const topics = [...topicGroups.values()]
+  const topicsRaw = [...topicGroups.values()]
     .map((g) => {
       const sid = subjectLevelByTec.get(normKey(g.tec_subject))?.subject_id ?? null
       return {
@@ -695,6 +725,13 @@ export async function loadMappingBundle(userId: string): Promise<MappingBundle> 
         a.tec_subject.localeCompare(b.tec_subject, "pt-BR") ||
         a.tec_topic.localeCompare(b.tec_topic, "pt-BR")
     )
+
+  const samples = await fetchSampleStatementsByTecSubject([
+    ...subjects_overview.map((s) => s.tec_subject),
+    ...topicsRaw.map((t) => t.tec_subject),
+  ])
+  const subjects_overview_filled = applySampleStatements(subjects_overview, samples)
+  const topics = applySampleStatements(topicsRaw, samples)
 
   const groupedMap = new Map<string, TecTopicGroup[]>()
   for (const t of topics) {
@@ -710,7 +747,7 @@ export async function loadMappingBundle(userId: string): Promise<MappingBundle> 
     }))
     .sort((a, b) => a.tec_subject.localeCompare(b.tec_subject, "pt-BR"))
 
-  const progress = subjects_overview.map((s) => ({
+  const progress = subjects_overview_filled.map((s) => ({
     tec_subject: s.tec_subject,
     total_topics: s.total_topics,
     mapped_topics: s.mapped_topics,
@@ -734,7 +771,7 @@ export async function loadMappingBundle(userId: string): Promise<MappingBundle> 
         (a.tec_topic ?? "").localeCompare(b.tec_topic ?? "", "pt-BR")
     )
 
-  return { subjects_overview, topics, topics_grouped, progress, mapped }
+  return { subjects_overview: subjects_overview_filled, topics, topics_grouped, progress, mapped }
 }
 
 function findNodeInTree(nodes: TecSubjectNode[], id: string): TecSubjectNode | null {

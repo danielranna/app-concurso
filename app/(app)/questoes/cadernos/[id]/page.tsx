@@ -129,6 +129,9 @@ export default function ResolverCadernoPage() {
       if (opts?.nav) qParams.set("nav", opts.nav)
       const res = await fetch(`/api/notebooks/${notebookId}/queue?${qParams}`)
       const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error ?? "Erro ao carregar a questão")
+      }
       const options: { label: string; text: string }[] = (data.options ?? []).map(
         (o: { label: string; text: string }) => ({ label: o.label, text: o.text })
       )
@@ -141,13 +144,17 @@ export default function ResolverCadernoPage() {
           tec_subject: question.tec_subject ?? "",
         })
         if (question.tec_topic) mParams.set("tec_topic", question.tec_topic)
-        const m = await fetch(`/api/questions/mappings?${mParams}`).then((r) => r.json())
-        if (m?.subject_id) {
-          setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
-        }
+        void fetch(`/api/questions/mappings?${mParams}`)
+          .then((r) => r.json())
+          .then((m) => {
+            if (m?.subject_id) {
+              setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+            }
+          })
+          .catch(() => {})
       }
       return {
-        current: data.current ?? data.queue?.[0] ?? null,
+        current: data.current ?? null,
         question,
         options,
         stats: data.stats,

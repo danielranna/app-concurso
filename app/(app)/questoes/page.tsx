@@ -48,9 +48,11 @@ type Ephemeral = {
 export default function QuestoesHomePage() {
   const router = useRouter()
   const [subjects, setSubjects] = useState<SubjectRow[]>([])
-  const [bankTotal, setBankTotal] = useState(0)
+  const [bankTotal, setBankTotal] = useState<number | null>(null)
   const [unassigned, setUnassigned] = useState<Unassigned | null>(null)
   const [ephemeral, setEphemeral] = useState<Ephemeral | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -59,13 +61,19 @@ export default function QuestoesHomePage() {
         return
       }
       fetch(`/api/questions/panel?user_id=${user.id}`)
-        .then((r) => r.json())
-        .then((d) => {
+        .then(async (r) => {
+          const d = await r.json()
+          if (!r.ok) throw new Error(d.error ?? "Erro ao carregar o painel")
           setSubjects(d.subjects ?? [])
           setBankTotal(d.bank_total ?? 0)
           setUnassigned(d.unassigned ?? null)
           setEphemeral(d.ephemeral ?? null)
+          setError(null)
         })
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : "Erro ao carregar o painel")
+        })
+        .finally(() => setLoading(false))
     })
   }, [router])
 
@@ -75,7 +83,9 @@ export default function QuestoesHomePage() {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Questões</h1>
           <Badge variant="outline" className="tabular-nums">
-            {bankTotal.toLocaleString("pt-BR")} no banco
+            {loading || bankTotal == null
+              ? "…"
+              : `${bankTotal.toLocaleString("pt-BR")} no banco`}
           </Badge>
         </div>
         <p className="max-w-xl text-sm text-slate-500">
@@ -168,7 +178,20 @@ export default function QuestoesHomePage() {
           )}
         </div>
 
-        {subjects.length === 0 ? (
+        {loading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-[76px] animate-pulse rounded-xl border border-slate-200 bg-slate-50"
+              />
+            ))}
+          </div>
+        ) : error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </p>
+        ) : subjects.length === 0 ? (
           <QuestoesEmptyState
             title="Nenhuma matéria ainda"
             description="Crie matérias no Mapa de erros para organizar seus cadernos."

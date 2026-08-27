@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { fetchAllPages, mapPool } from "./supabase-pages"
 import { loadSharedBlocksForQuestion } from "./shared-assets-server"
 import type { ResolvedSharedBlock } from "./shared-assets-types"
 import type {
@@ -46,38 +47,83 @@ function mapNotebookRows(
   })
 }
 
+type NotebookQuestionQueueRow = {
+  position: number
+  question_id: string
+  questions: { tec_id: number } | { tec_id: number }[] | null
+}
+
+type NotebookAttemptStatRow = {
+  question_id: string
+  is_correct: boolean
+}
+
 export async function buildNotebookFullQueue(
   notebookId: string
 ): Promise<StudyQueueItem[]> {
-  const { data: rows, error } = await supabaseServer
-    .from("notebook_questions")
-    .select(
-      `
-      position,
-      question_id,
-      questions ( tec_id )
-    `
-    )
-    .eq("notebook_id", notebookId)
-    .order("position", { ascending: true })
+  const rows = await fetchAllPages<NotebookQuestionQueueRow>((from, to) =>
+    supabaseServer
+      .from("notebook_questions")
+      .select("position, question_id, questions ( tec_id )")
+      .eq("notebook_id", notebookId)
+      .order("position", { ascending: true })
+      .range(from, to)
+  )
+  return mapNotebookRows(rows, notebookId)
+}
 
-  if (error) throw new Error(error.message)
-  return mapNotebookRows(rows ?? [], notebookId)
+export async function loadNotebookAttemptRows(
+  notebookId: string,
+  userId: string
+): Promise<NotebookAttemptStatRow[]> {
+  return fetchAllPages<NotebookAttemptStatRow>((from, to) =>
+    supabaseServer
+      .from("question_attempts")
+      .select("question_id, is_correct")
+      .eq("user_id", userId)
+      .eq("notebook_id", notebookId)
+      .order("created_at", { ascending: true })
+      .range(from, to)
+  )
+}
+
+export function pendingFromFullQueue(
+  full: StudyQueueItem[],
+  answeredIds: Set<string>
+): StudyQueueItem[] {
+  return full.filter((item) => !answeredIds.has(item.question_id))
+}
+
+export function statsFromAttemptRows(attempts: NotebookAttemptStatRow[]) {
+  const byQuestion = new Map<string, boolean>()
+  for (const a of attempts) {
+    byQuestion.set(a.question_id, a.is_correct)
+  }
+  let correct = 0
+  let wrong = 0
+  for (const ok of byQuestion.values()) {
+    if (ok) correct++
+    else wrong++
+  }
+  return {
+    resolved: byQuestion.size,
+    correct,
+    wrong,
+  }
 }
 
 export async function buildNotebookQueue(
   notebookId: string,
   userId: string
 ): Promise<StudyQueueItem[]> {
-  const full = await buildNotebookFullQueue(notebookId)
-  const { data: attempts } = await supabaseServer
-    .from("question_attempts")
-    .select("question_id")
-    .eq("user_id", userId)
-    .eq("notebook_id", notebookId)
-
-  const answered = new Set((attempts ?? []).map((a) => a.question_id))
-  return full.filter((item) => !answered.has(item.question_id))
+  const [full, attempts] = await Promise.all([
+    buildNotebookFullQueue(notebookId),
+    loadNotebookAttemptRows(notebookId, userId),
+  ])
+  return pendingFromFullQueue(
+    full,
+    new Set(attempts.map((a) => a.question_id))
+  )
 }
 
 export async function getLatestNotebookAttempt(
@@ -106,59 +152,19 @@ export async function getLatestNotebookAttempt(
 }
 
 export async function getNotebookAttemptStats(notebookId: string, userId: string) {
-  const { data: attempts } = await supabaseServer
-    .from("question_attempts")
-    .select("question_id, is_correct")
-    .eq("user_id", userId)
-    .eq("notebook_id", notebookId)
-
-  const byQuestion = new Map<string, boolean>()
-  for (const a of attempts ?? []) {
-    byQuestion.set(a.question_id, a.is_correct)
-  }
-  let correct = 0
-  let wrong = 0
-  for (const ok of byQuestion.values()) {
-    if (ok) correct++
-    else wrong++
-  }
-  return {
-    resolved: byQuestion.size,
-    correct,
-    wrong,
-  }
+  const attempts = await loadNotebookAttemptRows(notebookId, userId)
+  return statsFromAttemptRows(attempts)
 }
 
 export async function buildCombinedQueue(
   notebookIds: string[],
-  userId: string,
+  _userId: string,
   shuffle: boolean
 ): Promise<StudyQueueItem[]> {
-  const all: StudyQueueItem[] = []
-  for (const nbId of notebookIds) {
-    const { data: rows } = await supabaseServer
-      .from("notebook_questions")
-      .select(
-        `
-        position,
-        question_id,
-        questions ( tec_id )
-      `
-      )
-      .eq("notebook_id", nbId)
-      .order("position", { ascending: true })
-
-    for (const r of rows ?? []) {
-      const q = r.questions as { tec_id: number } | { tec_id: number }[] | null
-      const tecId = Array.isArray(q) ? q[0]?.tec_id : q?.tec_id
-      all.push({
-        question_id: r.question_id,
-        tec_id: tecId ?? 0,
-        notebook_id: nbId,
-        position: r.position,
-      })
-    }
-  }
+  const perNotebook = await mapPool(notebookIds, 3, (nbId) =>
+    buildNotebookFullQueue(nbId)
+  )
+  const all: StudyQueueItem[] = perNotebook.flat()
 
   const seenTec = new Set<number>()
   const deduped: StudyQueueItem[] = []

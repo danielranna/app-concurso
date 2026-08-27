@@ -210,6 +210,7 @@ export default function QuestionSolver({
   } | null>(null)
 
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [batchResolving, setBatchResolving] = useState(false)
@@ -284,73 +285,91 @@ export default function QuestionSolver({
       }
 
       setLoading(true)
-      const data = await fetchQueue(opts)
-      setCurrent(data.current)
-      setQuestion(data.question)
-      setOptions(
-        (data.options ?? []).map((o: { label: string; text: string }) => ({
-          label: o.label,
-          text: o.text,
-        }))
-      )
-      setStats(data.stats)
-      setPosition(data.position ?? 1)
-
-      const qid = data.current?.question_id
-      if (qid && data.current) {
-        currentQuestionId.current = qid
-        const draft = getDraft(scopeKey, qid)
-        setDraft(scopeKey, qid, {
-          ...draft,
-          tec_id: data.current.tec_id,
-          notebook_id: data.current.notebook_id,
-        })
-        let nextDraft = getDraft(scopeKey, qid)
-        const attempt = data.attempt
-        if (attempt?.selected_answer && data.question) {
-          const conf = attempt.confidence_level
-          const confidence: ConfidenceLevel =
-            conf === "inseguro" || conf === "chute" ? conf : "seguro"
-          const opts = (data.options ?? []).map((o: { label: string; text: string }) => ({
+      setLoadError(null)
+      try {
+        const data = await fetchQueue(opts)
+        const statsNext = data.stats ?? {
+          total: 0,
+          resolved: 0,
+          correct: 0,
+          wrong: 0,
+          pending: 0,
+        }
+        setCurrent(data.current)
+        setQuestion(data.question)
+        setOptions(
+          (data.options ?? []).map((o: { label: string; text: string }) => ({
             label: o.label,
             text: o.text,
           }))
-          const selectedAnswer = matchSavedAnswer(
-            attempt.selected_answer,
-            opts,
-            data.question.type
-          )
-          const storedMs = Math.max(0, Number(attempt.duration_ms) || 0)
-          nextDraft = {
-            ...nextDraft,
-            selectedAnswer,
-            confidence,
-            durationMsAccumulated: Math.max(nextDraft.durationMsAccumulated || 0, storedMs),
-            resolved: true,
-            result: {
-              is_correct: attempt.is_correct,
-              correct_answer: data.question.correct_answer,
-              tec_url: data.question.tec_url ?? "",
-              outcome_category: attempt.outcome_category ?? undefined,
-            },
+        )
+        setStats(statsNext)
+        setPosition(data.position ?? 1)
+
+        const qid = data.current?.question_id
+        if (qid && data.current) {
+          currentQuestionId.current = qid
+          const draft = getDraft(scopeKey, qid)
+          setDraft(scopeKey, qid, {
+            ...draft,
+            tec_id: data.current.tec_id,
+            notebook_id: data.current.notebook_id,
+          })
+          let nextDraft = getDraft(scopeKey, qid)
+          const attempt = data.attempt
+          if (attempt?.selected_answer && data.question) {
+            const conf = attempt.confidence_level
+            const confidence: ConfidenceLevel =
+              conf === "inseguro" || conf === "chute" ? conf : "seguro"
+            const optsList = (data.options ?? []).map(
+              (o: { label: string; text: string }) => ({
+                label: o.label,
+                text: o.text,
+              })
+            )
+            const selectedAnswer = matchSavedAnswer(
+              attempt.selected_answer,
+              optsList,
+              data.question.type
+            )
+            const storedMs = Math.max(0, Number(attempt.duration_ms) || 0)
+            nextDraft = {
+              ...nextDraft,
+              selectedAnswer,
+              confidence,
+              durationMsAccumulated: Math.max(
+                nextDraft.durationMsAccumulated || 0,
+                storedMs
+              ),
+              resolved: true,
+              result: {
+                is_correct: attempt.is_correct,
+                correct_answer: data.question.correct_answer,
+                tec_url: data.question.tec_url ?? "",
+                outcome_category: attempt.outcome_category ?? undefined,
+              },
+            }
+            setDraft(scopeKey, qid, nextDraft)
           }
-          setDraft(scopeKey, qid, nextDraft)
+          applyDraft(qid, nextDraft)
+          questionStartedAt.current = Date.now()
+          setWaTags([])
+        } else {
+          currentQuestionId.current = null
+          setSelected(null)
+          setEliminated(new Set())
+          setConfidence("seguro")
+          setQuestionMs(0)
+          setResult(null)
+          if (mode === "notebook" && statsNext.pending === 0 && statsNext.total > 0) {
+            onNotebookComplete?.()
+          }
         }
-        applyDraft(qid, nextDraft)
-        questionStartedAt.current = Date.now()
-        setWaTags([])
-      } else {
-        currentQuestionId.current = null
-        setSelected(null)
-        setEliminated(new Set())
-        setConfidence("seguro")
-        setQuestionMs(0)
-        setResult(null)
-        if (mode === "notebook" && data.stats.pending === 0 && data.stats.total > 0) {
-          onNotebookComplete?.()
-        }
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "Erro ao carregar a questão")
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     },
     [
       fetchQueue,
@@ -642,8 +661,16 @@ export default function QuestionSolver({
     }
   }
 
-  if (loading) {
+  if (loading && !question) {
     return <p className="p-8 text-slate-500">Carregando questão...</p>
+  }
+
+  if (loadError && !question) {
+    return (
+      <p className="rounded-xl border border-red-200 bg-red-50 p-8 text-sm text-red-800">
+        {loadError}
+      </p>
+    )
   }
 
   if (!question || !current) {
@@ -731,7 +758,9 @@ export default function QuestionSolver({
     .join(" - ")
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4">
+    <div
+      className={`mx-auto w-full max-w-6xl space-y-4 ${loading ? "pointer-events-none opacity-60" : ""}`}
+    >
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-slate-700">

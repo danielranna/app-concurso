@@ -69,6 +69,9 @@ export default function EstudoCombinadoPage() {
       if (opts?.nav) qParams.set("nav", opts.nav)
       const res = await fetch(`/api/study-sessions/${sessionId}/queue?${qParams}`)
       const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error ?? "Erro ao carregar a sessão")
+      }
       setSessionName(data.session?.name ?? "")
       setChildProgress(data.child_progress ?? [])
       const options = data.options ?? []
@@ -79,10 +82,14 @@ export default function EstudoCombinadoPage() {
           tec_subject: data.question.tec_subject ?? "",
         })
         if (data.question.tec_topic) mParams.set("tec_topic", data.question.tec_topic)
-        const m = await fetch(`/api/questions/mappings?${mParams}`).then((r) => r.json())
-        if (m?.subject_id) {
-          setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
-        }
+        void fetch(`/api/questions/mappings?${mParams}`)
+          .then((r) => r.json())
+          .then((m) => {
+            if (m?.subject_id) {
+              setMapping({ subject_id: m.subject_id, topic_id: m.topic_id ?? "" })
+            }
+          })
+          .catch(() => {})
       }
       return {
         current: data.current,
