@@ -3,6 +3,7 @@ import {
   dedupeDailyWrongAttempts,
   dayBounds,
   splitDailyWrongOptions,
+  todayDateString,
 } from "./daily-wrong-attempts-utils"
 import type { DailyWrongItem } from "./daily-wrong-attempts-types"
 
@@ -46,9 +47,12 @@ assert.equal(deduped.length, 2)
 assert.equal(deduped[0]!.attempt_id, "a1")
 assert.equal(deduped[1]!.question_id, "q2")
 
-const { start, end } = dayBounds("2026-06-16")
-assert.ok(start < end)
-assert.ok(start.includes("2026-06-16") || new Date(start).getDate() === 16)
+const { start, end } = dayBounds("2026-08-26")
+assert.equal(start, "2026-08-26T03:00:00.000Z")
+assert.equal(end, "2026-08-27T03:00:00.000Z")
+const lateNightUtc = "2026-08-27T02:13:00.000Z"
+assert.ok(start <= lateNightUtc && lateNightUtc < end)
+assert.equal(todayDateString(new Date(lateNightUtc)), "2026-08-26")
 
 const split = splitDailyWrongOptions(
   [

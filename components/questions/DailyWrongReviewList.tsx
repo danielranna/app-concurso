@@ -140,15 +140,19 @@ function DailyWrongReviewCard({ item }: { item: DailyWrongItem }) {
             <span className="text-xs tabular-nums text-slate-400">
               {formatTime(item.created_at)}
             </span>
-            <a
-              href={item.tec_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-sm font-medium text-teal-700 hover:underline"
-            >
-              TEC #{item.tec_id}
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+            {item.tec_url ? (
+              <a
+                href={item.tec_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm font-medium text-teal-700 hover:underline"
+              >
+                TEC #{item.tec_id}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : (
+              <span className="text-sm font-medium text-slate-700">Questão</span>
+            )}
           </div>
           {ctx && <p className="text-sm text-slate-500">{ctx}</p>}
         </div>
@@ -192,15 +196,20 @@ function DailyWrongReviewCard({ item }: { item: DailyWrongItem }) {
               />
             ) : (
               <p className="text-sm text-slate-500">
-                Enunciado não importado.{" "}
-                <a
-                  href={item.tec_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-teal-700 hover:underline"
-                >
-                  Abrir no TEC
-                </a>
+                Enunciado não importado.
+                {item.tec_url ? (
+                  <>
+                    {" "}
+                    <a
+                      href={item.tec_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-teal-700 hover:underline"
+                    >
+                      Abrir no TEC
+                    </a>
+                  </>
+                ) : null}
               </p>
             )}
           </div>
@@ -294,34 +303,70 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    setLoading(true)
-    setError(null)
-    fetch(
-      `/api/questions/daily-wrongs?user_id=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) {
-          setError(data.error)
-          setItems([])
-          onCountChange?.(0)
-          return
-        }
-        const list = (data.items ?? []) as DailyWrongItem[]
-        setItems(list)
-        onCountChange?.(list.length)
-      })
-      .catch(() => {
-        setError("Não foi possível carregar as correções.")
-        setItems([])
-        onCountChange?.(0)
-      })
-      .finally(() => setLoading(false))
-  }, [userId, date, onCountChange])
+  const load = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) {
+        setLoading(true)
+        setError(null)
+      }
+      return fetch(
+        `/api/questions/daily-wrongs?user_id=${encodeURIComponent(userId)}&date=${encodeURIComponent(date)}`
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            if (!opts?.silent) {
+              setError(data.error)
+              setItems([])
+              onCountChange?.(0)
+            }
+            return
+          }
+          const list = (data.items ?? []) as DailyWrongItem[]
+          setItems(list)
+          onCountChange?.(list.length)
+        })
+        .catch(() => {
+          if (!opts?.silent) {
+            setError("Não foi possível carregar as correções.")
+            setItems([])
+            onCountChange?.(0)
+          }
+        })
+        .finally(() => {
+          if (!opts?.silent) setLoading(false)
+        })
+    },
+    [userId, date, onCountChange]
+  )
 
   useEffect(() => {
-    load()
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    const pendingAi = items.some(
+      (item) =>
+        (item.notes ?? []).some((n) => n.body.trim() && !n.ai_feedback) ||
+        (Boolean(item.notes?.length) && !item.feedback_detailed && !item.misconception)
+    )
+    if (!pendingAi) return
+    const interval = window.setInterval(() => {
+      void load({ silent: true })
+    }, 4000)
+    const stop = window.setTimeout(() => window.clearInterval(interval), 60_000)
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(stop)
+    }
+  }, [items, load])
+
+  useEffect(() => {
+    function onFocus() {
+      void load({ silent: true })
+    }
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
   }, [load])
 
   function openAllInTec() {
@@ -335,7 +380,7 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
       return
     }
     for (const item of items) {
-      window.open(item.tec_url, "_blank", "noopener,noreferrer")
+      if (item.tec_url) window.open(item.tec_url, "_blank", "noopener,noreferrer")
     }
   }
 
@@ -359,7 +404,7 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
     return (
       <QuestoesEmptyState
         title="Nenhum erro neste dia — ótimo!"
-        description="Quando você errar questões, elas aparecem aqui com enunciado, o que você marcou e o gabarito."
+        description="Cada questão errada entra aqui na hora, mesmo se o caderno ainda estiver pela metade."
       />
     )
   }
@@ -370,9 +415,11 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
         <Badge variant="secondary">
           {items.length} {items.length === 1 ? "questão errada" : "questões erradas"}
         </Badge>
-        <Button variant="secondary" size="sm" onClick={openAllInTec}>
-          Abrir todos no TEC
-        </Button>
+        {items.some((item) => item.tec_url) && (
+          <Button variant="secondary" size="sm" onClick={openAllInTec}>
+            Abrir todos no TEC
+          </Button>
+        )}
       </div>
 
       <Card>

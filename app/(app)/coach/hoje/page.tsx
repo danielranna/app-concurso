@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { todayDateString } from "@/lib/daily-wrong-attempts-utils"
 import type {
   DailyStudyBlock,
   DailyStudyPlan,
@@ -201,7 +202,7 @@ export default function CoachHojePage() {
     Promise.all([
       fetch(`/api/coach/daily-plan?user_id=${uid}`).then((r) => r.json()),
       fetch(
-        `/api/questions/daily-wrongs?user_id=${encodeURIComponent(uid)}&count_only=1`
+        `/api/questions/daily-wrongs?user_id=${encodeURIComponent(uid)}&count_only=1&date=${encodeURIComponent(todayDateString())}`
       ).then((r) => r.json()),
     ])
       .then(([planData, wrongData]) => {

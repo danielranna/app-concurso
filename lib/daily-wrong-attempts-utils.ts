@@ -1,23 +1,72 @@
-import { startOfDay } from "./flashcard-due"
 import type {
   DailyWrongItem,
   DailyWrongOption,
 } from "./daily-wrong-attempts-types"
 
-/** Limites do dia civil para `YYYY-MM-DD` (hora local do servidor). */
-export function dayBounds(dateStr: string): { start: string; end: string } {
-  const anchor = new Date(`${dateStr}T12:00:00`)
-  const start = startOfDay(anchor)
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
+/** Dia civil do app (Brasil). Independente do fuso do servidor (Vercel = UTC). */
+export const APP_CALENDAR_TZ = "America/Sao_Paulo"
+
+function zonedOffsetMs(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant)
+  const num = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value)
+  const asUtc = Date.UTC(
+    num("year"),
+    num("month") - 1,
+    num("day"),
+    num("hour"),
+    num("minute"),
+    num("second")
+  )
+  return asUtc - instant.getTime()
+}
+
+function zonedMidnightUtc(dateStr: string, timeZone: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number)
+  if (!y || !m || !d) throw new Error("data inválida")
+  const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  const offsetMs = zonedOffsetMs(probe, timeZone)
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - offsetMs)
+}
+
+function nextDateString(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number)
+  const next = new Date(Date.UTC(y!, m! - 1, d! + 1))
+  const yy = next.getUTCFullYear()
+  const mm = String(next.getUTCMonth() + 1).padStart(2, "0")
+  const dd = String(next.getUTCDate()).padStart(2, "0")
+  return `${yy}-${mm}-${dd}`
+}
+
+/** Limites do dia civil `YYYY-MM-DD` em `America/Sao_Paulo`. */
+export function dayBounds(
+  dateStr: string,
+  timeZone = APP_CALENDAR_TZ
+): { start: string; end: string } {
+  const start = zonedMidnightUtc(dateStr, timeZone)
+  const end = zonedMidnightUtc(nextDateString(dateStr), timeZone)
   return { start: start.toISOString(), end: end.toISOString() }
 }
 
-export function todayDateString(now = new Date()): string {
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, "0")
-  const d = String(now.getDate()).padStart(2, "0")
-  return `${y}-${m}-${d}`
+export function todayDateString(
+  now = new Date(),
+  timeZone = APP_CALENDAR_TZ
+): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
 }
 
 /** Mantém só a tentativa errada mais recente de cada questão no dia. */

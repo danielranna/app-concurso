@@ -16,10 +16,11 @@ import {
 import { runNotebookNoteClarifications } from "./note-clarifications"
 import { buildAttemptAuditPayload } from "./notebook-audit-payload"
 import { maybePushNotebookAnswer } from "../quiz-sync"
-import { formatWhatsappComment } from "./whatsapp-comment"
+import { splitPublishParts } from "./whatsapp-comment"
 
 const QUESTION_AI_TIMEOUT_MS = 45_000
 const WHATSAPP_PUSHED_KEY = "whatsapp_pushed_at"
+const WHATSAPP_AI_PUSHED_KEY = "whatsapp_ai_pushed_at"
 
 export type EnqueueQuestionResolveAiInput = {
   userId: string
@@ -67,6 +68,11 @@ export async function isWhatsappPushed(attemptId: string): Promise<boolean> {
   return Boolean(detail[WHATSAPP_PUSHED_KEY])
 }
 
+async function isAiPushed(attemptId: string): Promise<boolean> {
+  const detail = await readErrorDetail(attemptId)
+  return Boolean(detail[WHATSAPP_AI_PUSHED_KEY])
+}
+
 async function markWhatsappPushed(attemptId: string) {
   const prev = await readErrorDetail(attemptId)
   if (prev[WHATSAPP_PUSHED_KEY]) return
@@ -76,6 +82,20 @@ async function markWhatsappPushed(attemptId: string) {
       error_detail: {
         ...prev,
         [WHATSAPP_PUSHED_KEY]: new Date().toISOString(),
+      },
+    })
+    .eq("id", attemptId)
+}
+
+async function markAiPushed(attemptId: string) {
+  const prev = await readErrorDetail(attemptId)
+  if (prev[WHATSAPP_AI_PUSHED_KEY]) return
+  await supabaseServer
+    .from("question_attempts")
+    .update({
+      error_detail: {
+        ...prev,
+        [WHATSAPP_AI_PUSHED_KEY]: new Date().toISOString(),
       },
     })
     .eq("id", attemptId)
@@ -105,26 +125,25 @@ async function questionHasPublishableNotes(
   return pending.some((e) => e.body.trim())
 }
 
-async function buildPublishComment(
+async function buildPublishParts(
   userId: string,
   questionId: string,
   noteEntryIds: string[]
-): Promise<string | null> {
+): Promise<{ comment: string | null; aiComment: string | null }> {
   const map = await loadNoteEntriesByQuestion(userId, [questionId])
   const entries = map.get(questionId) ?? []
   const target = noteEntryIds.length
     ? entries.filter((e) => noteEntryIds.includes(e.id))
     : splitPendingNoteEntries(entries).pending
   const withBody = (target.length ? target : entries).filter((e) => e.body.trim())
-  if (!withBody.length) return null
+  if (!withBody.length) return { comment: null, aiComment: null }
   const note = combineNoteBodies(withBody)
   const ai =
     withBody
       .map((e) => e.ai_feedback?.trim())
       .filter(Boolean)
       .sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))[0] ?? null
-  const formatted = formatWhatsappComment(note, ai)
-  return formatted || null
+  return splitPublishParts(note, ai)
 }
 
 async function pushAttemptToWhatsapp(input: {
@@ -136,6 +155,8 @@ async function pushAttemptToWhatsapp(input: {
   durationMs: number | null
   tags: string[]
   comment: string | null
+  aiComment?: string | null
+  aiUpdate?: boolean
 }) {
   if (!input.notebookId) {
     const { pushAnswerToWhatsapp } = await import("../quiz-sync")
@@ -146,6 +167,8 @@ async function pushAttemptToWhatsapp(input: {
       confidenceLevel: input.confidenceLevel,
       durationMs: input.durationMs,
       comment: input.comment,
+      aiComment: input.aiComment,
+      aiUpdate: input.aiUpdate,
       tags: input.tags,
     })
   }
@@ -157,6 +180,8 @@ async function pushAttemptToWhatsapp(input: {
     confidenceLevel: input.confidenceLevel,
     durationMs: input.durationMs,
     comment: input.comment,
+    aiComment: input.aiComment,
+    aiUpdate: input.aiUpdate,
     tags: input.tags,
   })
 }
@@ -240,6 +265,7 @@ export async function processQuestionResolveAi(
   }
 
   const alreadyPushed = await isWhatsappPushed(attemptId)
+  const alreadyAiPushed = await isAiPushed(attemptId)
   const hasNotes = await questionHasPublishableNotes(
     userId,
     questionId,
@@ -281,10 +307,26 @@ export async function processQuestionResolveAi(
     }
   }
 
+  const parts = hasNotes
+    ? await buildPublishParts(userId, questionId, noteEntryIds)
+    : { comment: null, aiComment: null }
+
   if (pushWhatsapp && !alreadyPushed && hasNotes) {
-    const comment = await buildPublishComment(userId, questionId, noteEntryIds)
-    await pushAttemptToWhatsapp({ ...pushArgs, comment })
+    await pushAttemptToWhatsapp({
+      ...pushArgs,
+      comment: parts.comment,
+      aiComment: parts.aiComment,
+    })
     await markWhatsappPushed(attemptId)
+    if (parts.aiComment) await markAiPushed(attemptId)
+  } else if (!pushWhatsapp && hasNotes && !alreadyAiPushed && parts.aiComment) {
+    await pushAttemptToWhatsapp({
+      ...pushArgs,
+      comment: null,
+      aiComment: parts.aiComment,
+      aiUpdate: true,
+    })
+    await markAiPushed(attemptId)
   }
 
   return {

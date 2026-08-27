@@ -1020,7 +1020,7 @@ export async function getWhatsappStudyContext(input: {
 
   const { data: notes } = await supabaseServer
     .from("question_note_entries")
-    .select("id, body, created_at, sync_origin")
+    .select("id, body, created_at, sync_origin, ai_feedback")
     .eq("user_id", target.userId)
     .eq("question_id", target.questionId)
     .order("created_at", { ascending: true })
@@ -1033,6 +1033,10 @@ export async function getWhatsappStudyContext(input: {
       body: n.body,
       created_at: n.created_at,
       origin: n.sync_origin === "whatsapp" ? "whatsapp" : "app",
+      ai_feedback:
+        typeof n.ai_feedback === "string" && n.ai_feedback.trim()
+          ? n.ai_feedback
+          : null,
     })),
   }
 }
@@ -1103,6 +1107,8 @@ export async function pushAnswerToWhatsapp(input: {
   confidenceLevel: ConfidenceLevel
   durationMs: number | null
   comment?: string | null
+  aiComment?: string | null
+  aiUpdate?: boolean
   tags?: string[]
   notebookId?: string | null
   cadernoId?: number | null
@@ -1159,6 +1165,8 @@ export async function pushAnswerToWhatsapp(input: {
         shortId: link?.short_id ?? null,
         answerLetter: toWaLetter(q.type, input.selectedAnswer),
         comment: input.comment ?? null,
+        aiComment: input.aiComment ?? null,
+        aiUpdate: Boolean(input.aiUpdate),
         confidenceLevel: input.confidenceLevel,
         durationMs: input.durationMs,
         tags: input.tags ?? [],
@@ -1446,6 +1454,8 @@ export async function maybePushNotebookAnswer(input: {
   confidenceLevel: ConfidenceLevel
   durationMs: number | null
   comment?: string | null
+  aiComment?: string | null
+  aiUpdate?: boolean
   tags?: string[]
 }) {
   const sent = await getSentCadernoForNotebook(input.notebookId)
@@ -1463,6 +1473,8 @@ export async function maybePushNotebookAnswer(input: {
     confidenceLevel: input.confidenceLevel,
     durationMs: input.durationMs,
     comment: input.comment,
+    aiComment: input.aiComment,
+    aiUpdate: input.aiUpdate,
     tags: input.tags,
     notebookId: input.notebookId,
     cadernoId: sent?.cadernoId ?? null,

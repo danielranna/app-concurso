@@ -58,12 +58,12 @@ function unwrapQ(
 
 function mapAttemptRow(a: AttemptRow): DailyWrongItem | null {
   const q = unwrapQ(a.questions)
-  if (!q?.tec_id || !q.tec_url) return null
+  if (!q) return null
   return {
     attempt_id: a.id,
     question_id: a.question_id,
-    tec_id: q.tec_id,
-    tec_url: q.tec_url,
+    tec_id: q.tec_id || 0,
+    tec_url: q.tec_url || "",
     selected_answer: a.selected_answer,
     correct_answer: q.correct_answer,
     tec_subject: q.tec_subject,

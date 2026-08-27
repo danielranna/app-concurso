@@ -14,8 +14,19 @@ export function formatWhatsappComment(
   noteBody: string | null | undefined,
   aiFeedback?: string | null
 ): string {
+  const { comment, aiComment } = splitPublishParts(noteBody, aiFeedback)
+  if (comment && aiComment) return `${comment}\n\n${WHATSAPP_AI_SEPARATOR}\n${aiComment}`
+  return comment || aiComment || ""
+}
+
+export function splitPublishParts(
+  noteBody: string | null | undefined,
+  aiFeedback?: string | null
+): { comment: string | null; aiComment: string | null } {
   const note = noteBody?.trim() ?? ""
   const ai = isPublishableAiFeedback(aiFeedback) ? aiFeedback!.trim() : ""
-  if (note && ai) return `${note}\n\n${WHATSAPP_AI_SEPARATOR}\n${ai}`
-  return note || ai
+  return {
+    comment: note || null,
+    aiComment: ai || null,
+  }
 }

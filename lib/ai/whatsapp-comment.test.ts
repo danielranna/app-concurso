@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import {
   formatWhatsappComment,
   isPublishableAiFeedback,
+  splitPublishParts,
   WHATSAPP_AI_SEPARATOR,
 } from "./whatsapp-comment"
 
@@ -23,5 +24,9 @@ assert.equal(
   `o que é competência?\n\n${WHATSAPP_AI_SEPARATOR}\n${ai}`
 )
 assert.equal(formatWhatsappComment("", ai), ai)
+assert.deepEqual(splitPublishParts("o que é competência?", ai), {
+  comment: "o que é competência?",
+  aiComment: ai,
+})
 
 console.log("whatsapp-comment.test.ts: ok")
