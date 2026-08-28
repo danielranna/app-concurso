@@ -24,6 +24,7 @@ type QueueItem = {
   notebook_id: string
   position: number
   short_id: string
+  caderno_id?: number | null
   statement?: string
   correct_answer?: string
   type?: string
@@ -218,6 +219,7 @@ function OmissasAppPage() {
           tec_id: item.tec_id,
           notebook_id: item.notebook_id,
           short_id: item.short_id,
+          caderno_id: item.caderno_id ?? null,
         },
         question: data.question ?? null,
         options: data.options ?? [],
@@ -239,6 +241,8 @@ function OmissasAppPage() {
       confidence_level: ConfidenceLevel
       tags?: string[]
       note_draft?: string | null
+      short_id?: string | null
+      caderno_id?: number | null
     }) => {
       const item = queue.find((q) => q.question_id === payload.question_id)
       const notebookId = payload.notebook_id || item?.notebook_id
@@ -252,6 +256,8 @@ function OmissasAppPage() {
           user_id: userId,
           ...payload,
           notebook_id: notebookId || null,
+          short_id: payload.short_id || item?.short_id || null,
+          caderno_id: payload.caderno_id ?? item?.caderno_id ?? null,
         }),
       })
       const data = await res.json()

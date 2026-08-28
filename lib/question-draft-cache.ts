@@ -7,6 +7,8 @@ export type QuestionDraft = {
   durationMsAccumulated: number
   tec_id?: number
   notebook_id?: string
+  short_id?: string | null
+  caderno_id?: number | null
   resolved?: boolean
   result?: {
     is_correct: boolean

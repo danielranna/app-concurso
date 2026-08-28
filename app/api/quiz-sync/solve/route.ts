@@ -24,6 +24,8 @@ export async function POST(req: Request) {
     tags,
     comment,
     note_draft,
+    short_id,
+    caderno_id,
   } = body as {
     user_id?: string
     question_id?: string
@@ -34,6 +36,8 @@ export async function POST(req: Request) {
     tags?: string[]
     comment?: string | null
     note_draft?: string | null
+    short_id?: string | null
+    caderno_id?: number | null
   }
 
   if (!user_id || !question_id || !selected_answer) {
@@ -74,6 +78,11 @@ export async function POST(req: Request) {
     durationMs: duration_ms ?? null,
     tags: Array.isArray(tags) ? tags : [],
     pushWhatsapp: true,
+    shortId: typeof short_id === "string" ? short_id : null,
+    cadernoId:
+      caderno_id != null && Number.isFinite(Number(caderno_id)) && Number(caderno_id) > 0
+        ? Number(caderno_id)
+        : null,
   })
   scheduleQuestionAiKick(user_id)
 

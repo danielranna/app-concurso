@@ -37,6 +37,42 @@ function capDurationMs(ms: unknown): number | null {
   return Math.min(n, CAP)
 }
 
+export function normalizeShortId(raw: unknown): string | null {
+  const s = String(raw ?? "").trim().toUpperCase()
+  return s || null
+}
+
+export function parseCadernoId(raw: unknown): number | null {
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null
+}
+
+export async function rememberQuizQuestionLink(input: {
+  notebookId: string
+  questionId: string
+  tecId: number
+  cadernoId: number
+  shortId?: string | null
+}): Promise<void> {
+  if (!input.notebookId || !input.questionId || input.tecId <= 0 || input.cadernoId <= 0) {
+    return
+  }
+  const { error } = await supabaseServer.from("quiz_question_links").upsert(
+    {
+      notebook_id: input.notebookId,
+      question_id: input.questionId,
+      tec_id: input.tecId,
+      caderno_id: input.cadernoId,
+      short_id: normalizeShortId(input.shortId),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "notebook_id,question_id" }
+  )
+  if (error) {
+    console.warn("[quiz-sync] remember link:", error.message)
+  }
+}
+
 export function fromWaLetter(type: string, letter: string): string {
   const L = letter.trim().toLowerCase()
   const certoErrado =
@@ -1114,6 +1150,7 @@ export async function pushAnswerToWhatsapp(input: {
   tags?: string[]
   notebookId?: string | null
   cadernoId?: number | null
+  shortId?: string | null
 }) {
   const ident = await resolveWhatsappIdentity(input.userId)
   if (!ident) {
@@ -1139,21 +1176,25 @@ export async function pushAnswerToWhatsapp(input: {
     .maybeSingle()
   if (!q) return { skipped: true, reason: "no_question" }
 
-  let cadernoId = input.cadernoId ?? null
-  if (!cadernoId && input.notebookId) {
+  let cadernoId = parseCadernoId(input.cadernoId)
+  let shortId = normalizeShortId(input.shortId)
+  if (!cadernoId && !shortId && input.notebookId) {
     const sent = await getSentCadernoForNotebook(input.notebookId)
     cadernoId = sent?.cadernoId ?? null
   }
 
-  let linkQuery = supabaseServer
-    .from("quiz_question_links")
-    .select("short_id, caderno_id")
-    .eq("question_id", input.questionId)
-    .not("short_id", "is", null)
-  if (cadernoId) linkQuery = linkQuery.eq("caderno_id", cadernoId)
-  const { data: link } = await linkQuery.limit(1).maybeSingle()
-
-  if (!cadernoId && link?.caderno_id) cadernoId = Number(link.caderno_id)
+  if (!shortId) {
+    let linkQuery = supabaseServer
+      .from("quiz_question_links")
+      .select("short_id, caderno_id")
+      .eq("question_id", input.questionId)
+      .not("short_id", "is", null)
+    if (cadernoId) linkQuery = linkQuery.eq("caderno_id", cadernoId)
+    else if (input.notebookId) linkQuery = linkQuery.eq("notebook_id", input.notebookId)
+    const { data: link } = await linkQuery.limit(1).maybeSingle()
+    shortId = normalizeShortId(link?.short_id)
+    if (!cadernoId && link?.caderno_id) cadernoId = parseCadernoId(link.caderno_id)
+  }
 
   const { res, data } = await quizFetch(
     ingestUrl,
@@ -1164,7 +1205,7 @@ export async function pushAnswerToWhatsapp(input: {
         userName,
         tecId: q.tec_id,
         cadernoId,
-        shortId: link?.short_id ?? null,
+        shortId,
         answerLetter: toWaLetter(q.type, input.selectedAnswer),
         comment: input.comment ?? null,
         aiComment: input.aiComment ?? null,
@@ -1459,6 +1500,8 @@ export async function maybePushNotebookAnswer(input: {
   aiComment?: string | null
   aiUpdate?: boolean
   tags?: string[]
+  cadernoId?: number | null
+  shortId?: string | null
 }) {
   const sent = await getSentCadernoForNotebook(input.notebookId)
   const { data: replica } = await supabaseServer
@@ -1467,7 +1510,10 @@ export async function maybePushNotebookAnswer(input: {
     .eq("notebook_id", input.notebookId)
     .eq("user_id", input.userId)
     .maybeSingle()
-  if (!sent && !replica) return { skipped: true }
+  const shortId = normalizeShortId(input.shortId)
+  const cadernoId =
+    parseCadernoId(input.cadernoId) ?? (shortId ? null : sent?.cadernoId ?? null)
+  if (!sent && !replica && !shortId && !cadernoId) return { skipped: true }
   return pushAnswerToWhatsapp({
     userId: input.userId,
     questionId: input.questionId,
@@ -1479,7 +1525,8 @@ export async function maybePushNotebookAnswer(input: {
     aiUpdate: input.aiUpdate,
     tags: input.tags,
     notebookId: input.notebookId,
-    cadernoId: sent?.cadernoId ?? null,
+    cadernoId,
+    shortId,
   })
 }
 

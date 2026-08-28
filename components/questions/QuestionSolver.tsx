@@ -75,6 +75,7 @@ type Props = {
       tec_id: number
       notebook_id: string
       short_id?: string
+      caderno_id?: number | null
     } | null
     question: Question | null
     options: Option[]
@@ -100,6 +101,8 @@ type Props = {
     confidence_level: ConfidenceLevel
     tags?: string[]
     note_draft?: string | null
+    short_id?: string | null
+    caderno_id?: number | null
   }) => Promise<SubmitAnswerResult>
   mapping?: { subject_id: string; topic_id: string } | null
   onCreateWrongNotebook?: () => Promise<void>
@@ -201,6 +204,7 @@ export default function QuestionSolver({
     tec_id: number
     notebook_id: string
     short_id?: string
+    caderno_id?: number | null
   } | null>(null)
 
   const [selected, setSelected] = useState<string | null>(null)
@@ -337,6 +341,8 @@ export default function QuestionSolver({
             ...draft,
             tec_id: data.current.tec_id,
             notebook_id: data.current.notebook_id,
+            short_id: data.current.short_id,
+            caderno_id: data.current.caderno_id ?? null,
           })
           let nextDraft = getDraft(scopeKey, qid)
           const attempt = data.attempt
@@ -548,6 +554,8 @@ export default function QuestionSolver({
         confidence_level: confidence,
         tags: waTags,
         note_draft: quickNoteRef.current?.consumeDraft() || null,
+        short_id: current.short_id ?? null,
+        caderno_id: current.caderno_id ?? null,
       })
       if ("error" in res) {
         setResolveError(res.error)
@@ -623,6 +631,8 @@ export default function QuestionSolver({
         tec_id: draft.tec_id,
         notebook_id: draft.notebook_id ?? current.notebook_id,
         confidence_level: draft.confidence,
+        short_id: draft.short_id ?? current.short_id ?? null,
+        caderno_id: draft.caderno_id ?? current.caderno_id ?? null,
       })
       if ("error" in res) continue
       setDraft(scopeKey, qid, {

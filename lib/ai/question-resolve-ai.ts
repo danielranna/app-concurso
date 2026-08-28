@@ -15,7 +15,7 @@ import {
 } from "./agents/behavioral-audit"
 import { runNotebookNoteClarifications } from "./note-clarifications"
 import { buildAttemptAuditPayload } from "./notebook-audit-payload"
-import { maybePushNotebookAnswer } from "../quiz-sync"
+import { maybePushNotebookAnswer, parseCadernoId } from "../quiz-sync"
 import { splitPublishParts } from "./whatsapp-comment"
 import type { BehavioralAudit } from "../coach-types"
 
@@ -37,6 +37,8 @@ export type EnqueueQuestionResolveAiInput = {
   tags?: string[]
   pushWhatsapp?: boolean
   idempotencyKey?: string
+  shortId?: string | null
+  cadernoId?: number | null
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -160,6 +162,8 @@ async function pushAttemptToWhatsapp(input: {
   comment: string | null
   aiComment?: string | null
   aiUpdate?: boolean
+  shortId?: string | null
+  cadernoId?: number | null
 }) {
   if (!input.notebookId) {
     const { pushAnswerToWhatsapp } = await import("../quiz-sync")
@@ -173,6 +177,8 @@ async function pushAttemptToWhatsapp(input: {
       aiComment: input.aiComment,
       aiUpdate: input.aiUpdate,
       tags: input.tags,
+      shortId: input.shortId,
+      cadernoId: input.cadernoId,
     })
   }
   return maybePushNotebookAnswer({
@@ -186,6 +192,8 @@ async function pushAttemptToWhatsapp(input: {
     aiComment: input.aiComment,
     aiUpdate: input.aiUpdate,
     tags: input.tags,
+    shortId: input.shortId,
+    cadernoId: input.cadernoId,
   })
 }
 
@@ -283,6 +291,9 @@ export async function processQuestionResolveAi(
   const tags = Array.isArray(payload.tags)
     ? payload.tags.filter((t): t is string => typeof t === "string")
     : []
+  const shortId =
+    typeof payload.short_id === "string" ? payload.short_id : null
+  const cadernoId = parseCadernoId(payload.caderno_id)
 
   if (!questionId || !attemptId) {
     throw new Error("question_id e attempt_id obrigatórios")
@@ -304,6 +315,8 @@ export async function processQuestionResolveAi(
     confidenceLevel,
     durationMs,
     tags,
+    shortId,
+    cadernoId,
   }
 
   if (pushWhatsapp && !alreadyPushed && !hasNotes) {
@@ -426,6 +439,8 @@ export async function enqueueQuestionResolveAi(input: EnqueueQuestionResolveAiIn
         duration_ms: input.durationMs ?? null,
         tags: input.tags ?? [],
         push_whatsapp: input.pushWhatsapp !== false,
+        short_id: input.shortId ?? null,
+        caderno_id: input.cadernoId ?? null,
       },
       priority: 20,
     })

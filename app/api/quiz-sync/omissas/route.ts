@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase-server"
 import {
   ensureReplica,
   fetchOmissasFromQuiz,
+  rememberQuizQuestionLink,
   resolveUserIdByJid,
   retryFailedIngests,
 } from "@/lib/quiz-sync"
@@ -55,6 +56,7 @@ export async function GET(req: Request) {
       notebook_id: string
       position: number
       short_id: string
+      caderno_id: number | null
     }[] = []
 
     const replicaBySource = new Map<string, string>()
@@ -100,12 +102,24 @@ export async function GET(req: Request) {
           replicaBySource.set(sourceNb, notebookId)
         }
       }
+      const resolvedTecId =
+        Number.isFinite(tecId) && tecId > 0 ? tecId : Number(shortLink?.tec_id) || 0
+      if (notebookId && questionId && cadernoId && resolvedTecId > 0) {
+        await rememberQuizQuestionLink({
+          notebookId,
+          questionId,
+          tecId: resolvedTecId,
+          cadernoId,
+          shortId,
+        })
+      }
       queue.push({
         question_id: questionId,
-        tec_id: Number.isFinite(tecId) && tecId > 0 ? tecId : Number(shortLink?.tec_id) || 0,
+        tec_id: resolvedTecId,
         notebook_id: notebookId,
         position: queue.length,
         short_id: shortId,
+        caderno_id: cadernoId,
       })
     }
 
