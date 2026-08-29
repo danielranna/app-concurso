@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import type { User } from "@supabase/supabase-js"
-import { supabaseServer } from "@/lib/supabase-server"
+import { createAuthClient } from "@/lib/supabase-server"
+
+const AUTH_TIMEOUT_MS = 8000
 
 /** Lista de e-mails (vírgula) com permissão para criar/editar/excluir tutoriais. */
 export function getTutorialManagerEmails(): string[] {
@@ -15,6 +17,22 @@ export function isTutorialManagerEmail(email: string | undefined | null): boolea
   return getTutorialManagerEmails().includes(email.trim().toLowerCase())
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
+
 export async function getAuthUserFromRequest(
   req: Request
 ): Promise<{ user: User | null; error: string | null }> {
@@ -22,9 +40,16 @@ export async function getAuthUserFromRequest(
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : ""
   if (!token) return { user: null, error: "Não autenticado" }
 
-  const { data, error } = await supabaseServer.auth.getUser(token)
-  if (error || !data.user) return { user: null, error: "Não autenticado" }
-  return { user: data.user, error: null }
+  try {
+    const { data, error } = await withTimeout(
+      createAuthClient().auth.getUser(token),
+      AUTH_TIMEOUT_MS
+    )
+    if (error || !data.user) return { user: null, error: "Não autenticado" }
+    return { user: data.user, error: null }
+  } catch {
+    return { user: null, error: "Não autenticado" }
+  }
 }
 
 export async function requireAuthUser(req: Request): Promise<

@@ -3,6 +3,8 @@ import { requireAuthUser, requireTutorialManager } from "@/lib/tutorial-permissi
 import { supabaseServer } from "@/lib/supabase-server"
 import { sanitizeTutorialSearch } from "@/lib/tutorials"
 
+export const dynamic = "force-dynamic"
+
 export async function GET(req: Request) {
   const auth = await requireAuthUser(req)
   if (!auth.user) return auth.response

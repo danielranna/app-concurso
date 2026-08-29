@@ -14,19 +14,31 @@ export default function NovoTutorialPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        router.push("/login")
-        return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (!session?.user) {
+          router.push("/login")
+          return
+        }
+        const res = await tutorialsFetch("/api/tutorials/can-manage")
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!data.canManage) {
+          router.replace("/tutoriais")
+          return
+        }
+        setAllowed(true)
+      } catch {
+        if (!cancelled) router.replace("/tutoriais")
       }
-      const res = await tutorialsFetch("/api/tutorials/can-manage")
-      const data = await res.json().catch(() => ({}))
-      if (!data.canManage) {
-        router.replace("/tutoriais")
-        return
-      }
-      setAllowed(true)
-    })
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [router])
 
   if (!allowed) {

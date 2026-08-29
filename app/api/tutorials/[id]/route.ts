@@ -7,6 +7,8 @@ import {
 import { supabaseServer } from "@/lib/supabase-server"
 import { TUTORIALS_BUCKET } from "@/lib/tutorials"
 
+export const dynamic = "force-dynamic"
+
 async function removeStorageFiles(paths: Array<string | null | undefined>) {
   const clean = paths.filter((p): p is string => Boolean(p))
   if (!clean.length) return

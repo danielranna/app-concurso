@@ -17,25 +17,40 @@ export default function EditarTutorialPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        router.push("/login")
-        return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (!session?.user) {
+          router.push("/login")
+          return
+        }
+        const manageRes = await tutorialsFetch("/api/tutorials/can-manage")
+        const manageData = await manageRes.json().catch(() => ({}))
+        if (cancelled) return
+        if (!manageData.canManage) {
+          router.replace("/tutoriais")
+          return
+        }
+        const res = await tutorialsFetch(`/api/tutorials/${params.id}`)
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          setError(data.error ?? "Tutorial não encontrado")
+          return
+        }
+        setTutorial(data.tutorial as Tutorial)
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Tutorial não encontrado")
+        }
       }
-      const manageRes = await tutorialsFetch("/api/tutorials/can-manage")
-      const manageData = await manageRes.json().catch(() => ({}))
-      if (!manageData.canManage) {
-        router.replace("/tutoriais")
-        return
-      }
-      const res = await tutorialsFetch(`/api/tutorials/${params.id}`)
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data.error ?? "Tutorial não encontrado")
-        return
-      }
-      setTutorial(data.tutorial as Tutorial)
-    })
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [params.id, router])
 
   if (error) {

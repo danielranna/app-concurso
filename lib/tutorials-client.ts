@@ -12,7 +12,12 @@ export async function tutorialsFetch(input: RequestInfo | URL, init?: RequestIni
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
-  return fetch(input, { ...init, headers })
+  return fetch(input, {
+    ...init,
+    headers,
+    cache: "no-store",
+    signal: init?.signal ?? AbortSignal.timeout(15_000),
+  })
 }
 
 export function uploadToSignedUrl(

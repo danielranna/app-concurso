@@ -18,26 +18,51 @@ export default function TutorialWatchPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        router.push("/login")
-        return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (!session?.user) {
+          router.push("/login")
+          return
+        }
+
+        const { data, error: queryError } = await supabase
+          .from("tutorials")
+          .select("*")
+          .eq("id", params.id)
+          .maybeSingle()
+
+        if (cancelled) return
+        if (queryError) {
+          setError(queryError.message)
+          return
+        }
+        if (!data || data.status !== "published") {
+          setError("Tutorial não encontrado")
+          return
+        }
+
+        setTutorial(data as Tutorial)
+        tutorialsFetch("/api/tutorials/can-manage")
+          .then((res) => res.json().catch(() => ({})))
+          .then((manageData) => {
+            if (!cancelled) setCanManage(Boolean(manageData.canManage))
+          })
+          .catch(() => {})
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Tutorial não encontrado")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      const [detailRes, manageRes] = await Promise.all([
-        tutorialsFetch(`/api/tutorials/${params.id}`),
-        tutorialsFetch("/api/tutorials/can-manage"),
-      ])
-      const detailData = await detailRes.json().catch(() => ({}))
-      const manageData = await manageRes.json().catch(() => ({}))
-      if (!detailRes.ok) {
-        setError(detailData.error ?? "Tutorial não encontrado")
-        setLoading(false)
-        return
-      }
-      setTutorial(detailData.tutorial as Tutorial)
-      setCanManage(Boolean(manageData.canManage))
-      setLoading(false)
-    })
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [params.id, router])
 
   async function handleDelete() {

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import TutorialCard from "@/components/tutorials/TutorialCard"
 import TutorialGridSkeleton from "@/components/tutorials/TutorialGridSkeleton"
 import { tutorialsFetch } from "@/lib/tutorials-client"
-import type { Tutorial } from "@/lib/tutorials"
+import { sanitizeTutorialSearch, type Tutorial } from "@/lib/tutorials"
 
 export default function TutoriaisPage() {
   const router = useRouter()
@@ -43,33 +43,50 @@ export default function TutoriaisPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const qs = search ? `?q=${encodeURIComponent(search)}` : ""
-    const [listRes, manageRes] = await Promise.all([
-      tutorialsFetch(`/api/tutorials${qs}`),
-      tutorialsFetch("/api/tutorials/can-manage"),
-    ])
-    const listData = await listRes.json().catch(() => ({}))
-    const manageData = await manageRes.json().catch(() => ({}))
-
-    if (!listRes.ok) {
-      setError(listData.error ?? "Não foi possível carregar os tutoriais")
-      setTutorials([])
-    } else {
-      setTutorials((listData.tutorials ?? []) as Tutorial[])
-    }
-    setCanManage(Boolean(manageData.canManage))
-    setLoading(false)
-  }, [search])
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!session?.user) {
         router.push("/login")
         return
       }
-      load()
-    })
-  }, [router, load])
+
+      let listQuery = supabase
+        .from("tutorials")
+        .select("*")
+        .eq("status", "published")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
+
+      const q = sanitizeTutorialSearch(search)
+      if (q) {
+        listQuery = listQuery.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+      }
+
+      const { data, error: listError } = await listQuery
+      if (listError) {
+        setError(listError.message)
+        setTutorials([])
+      } else {
+        setTutorials((data ?? []) as Tutorial[])
+      }
+
+      tutorialsFetch("/api/tutorials/can-manage")
+        .then((res) => res.json().catch(() => ({})))
+        .then((manageData) => setCanManage(Boolean(manageData.canManage)))
+        .catch(() => setCanManage(false))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os tutoriais")
+      setTutorials([])
+    } finally {
+      setLoading(false)
+    }
+  }, [search, router])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   async function handleDelete(tutorial: Tutorial) {
     if (!confirm(`Excluir o tutorial "${tutorial.title}"? Esta ação não pode ser desfeita.`)) {
