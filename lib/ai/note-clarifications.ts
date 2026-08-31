@@ -7,6 +7,7 @@ import type {
 import { splitPendingNoteEntries, combineNoteBodies } from "../note-entry-utils"
 import { persistExplainOnEntry } from "./note-incremental-audit"
 import { runAgent } from "./run-agent"
+import { isPublishableAiFeedback } from "./whatsapp-comment"
 import type { NotebookAuditPayload, NotebookAuditQuestion } from "./notebook-audit-payload"
 import { filterGreenNoteQuestions } from "./behavioral-audit-helpers"
 import { loadOptionsByQuestion } from "./question-options"
@@ -243,54 +244,46 @@ export async function runNoteClarificationsAgent(params: {
   if (pendingItems.length > 0 && !params.skipLlm) {
     const questionIds = [...new Set(pendingItems.map((i) => i.question_id))]
     const optionsByQ = await loadOptionsByQuestion(questionIds)
+    const userContent = JSON.stringify(
+      itemsToAgentInput(pendingItems, optionsByQ, params.subjectName)
+    )
+    const maxAttempts = 2
 
-    const result = await runAgent({
-      agentType: params.agentType ?? "report",
-      userId: params.userId,
-      subjectId: params.subjectId,
-      systemPrompt: NOTE_CLARIFICATION_SYSTEM,
-      userContent: JSON.stringify(
-        itemsToAgentInput(pendingItems, optionsByQ, params.subjectName)
-      ),
-      jsonMode: true,
-      maxTokens: 2000,
-      model: "gpt-4o",
-      metadata: { phase: "note_clarifications" },
-    })
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const result = await runAgent({
+        agentType: params.agentType ?? "report",
+        userId: params.userId,
+        subjectId: params.subjectId,
+        systemPrompt: NOTE_CLARIFICATION_SYSTEM,
+        userContent,
+        jsonMode: true,
+        maxTokens: 2000,
+        model: "gpt-4o",
+        metadata: {
+          phase: "note_clarifications",
+          retry: attempt > 1,
+        },
+      })
 
-    tokensIn = result.tokensIn
-    tokensOut = result.tokensOut
-    costUsd = result.costUsd
+      tokensIn += result.tokensIn
+      tokensOut += result.tokensOut
+      costUsd += result.costUsd
 
-    if (result.usedLlm && result.text) {
-      try {
-        const llmClarifications = parseClarificationResponse(
-          result.text,
-          pendingItems
-        )
-        if (llmClarifications.length) {
-          clarifications.push(...llmClarifications)
-          usedLlm = true
-          modelUsed = result.model
+      if (result.usedLlm && result.text) {
+        try {
+          const llmClarifications = parseClarificationResponse(
+            result.text,
+            pendingItems
+          ).filter((c) => isPublishableAiFeedback(c.answer_md))
+          if (llmClarifications.length) {
+            clarifications.push(...llmClarifications)
+            usedLlm = true
+            modelUsed = result.model
+            break
+          }
+        } catch {
+          /* retry or give up */
         }
-      } catch {
-        /* fall through */
-      }
-    }
-
-    if (!usedLlm) {
-      for (const item of pendingItems) {
-        if (clarifications.some((c) => c.question_id === item.question_id)) {
-          continue
-        }
-        clarifications.push({
-          question_id: item.question_id,
-          note_body: item.note_body,
-          answer_md:
-            item.cached_feedback?.trim() ||
-            "Revise a explicação no relatório do caderno ou regenere as explicações com IA.",
-          linked_topics: item.tec_topic ? [item.tec_topic] : [],
-        })
       }
     }
   }
@@ -301,6 +294,7 @@ export async function runNoteClarificationsAgent(params: {
   const seenQ = new Set<string>()
   for (const c of clarifications) {
     if (!c.answer_md?.trim()) continue
+    if (!isPublishableAiFeedback(c.answer_md)) continue
     const prev = byQuestionId.get(c.question_id)
     if (!prev || c.answer_md.length > prev.length) {
       byQuestionId.set(c.question_id, c.answer_md.trim())
@@ -425,10 +419,10 @@ export async function persistClarificationsToNoteEntries(
     if (!item.note_entry_id) continue
     if (persistedEntries.has(item.note_entry_id)) continue
     const answer = byQuestionId.get(item.question_id)
-    if (!answer?.trim()) continue
+    if (!answer || !isPublishableAiFeedback(answer)) continue
     await persistExplainOnEntry(
       item.note_entry_id,
-      answer,
+      answer.trim(),
       item.zone,
       modelUsed
     )

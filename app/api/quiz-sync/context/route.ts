@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getQuizBotSecret } from "@/lib/quiz-bot-url"
 import { addWhatsappStudyNote, getWhatsappStudyContext } from "@/lib/quiz-sync"
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 function authOk(req: Request) {
   const secret = getQuizBotSecret()

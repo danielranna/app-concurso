@@ -3,7 +3,7 @@ import { runJobWorker } from "@/lib/ai/jobs/worker"
 import type { JobType } from "@/lib/ai/jobs/queue"
 
 export const runtime = "nodejs"
-export const maxDuration = 60
+export const maxDuration = 120
 
 export async function POST(req: Request) {
   try {

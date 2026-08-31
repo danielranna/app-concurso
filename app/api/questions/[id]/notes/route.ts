@@ -8,7 +8,7 @@ import { supabaseServer } from "@/lib/supabase-server"
 import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
 import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 export async function GET(
   req: Request,

@@ -9,7 +9,7 @@ import {
 import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
 import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 /** Resposta avulsa (fora de caderno/sessão) — alimenta estatísticas e cérebro via tentativas. */
 export async function POST(

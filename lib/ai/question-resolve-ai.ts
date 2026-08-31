@@ -4,7 +4,6 @@ import { parseConfidenceLevel } from "../question-study"
 import {
   insertQuestionNote,
   loadNoteEntriesByQuestion,
-  splitPendingNoteEntries,
 } from "../question-notes"
 import { combineNoteBodies } from "../note-entry-utils"
 import { enqueueJob } from "./jobs/queue"
@@ -116,6 +115,10 @@ async function loadSubjectId(notebookId: string | null): Promise<string | null> 
   return (data?.subject_id as string | null) ?? null
 }
 
+function hasRealNoteBody(body: string | null | undefined): boolean {
+  return (body?.trim().length ?? 0) > 0
+}
+
 async function questionHasPublishableNotes(
   userId: string,
   questionId: string,
@@ -123,11 +126,11 @@ async function questionHasPublishableNotes(
 ): Promise<boolean> {
   const map = await loadNoteEntriesByQuestion(userId, [questionId])
   const entries = map.get(questionId) ?? []
-  if (noteEntryIds.length) {
-    return entries.some((e) => noteEntryIds.includes(e.id) && e.body.trim())
-  }
-  const { pending } = splitPendingNoteEntries(entries)
-  return pending.some((e) => e.body.trim())
+  const pool = noteEntryIds.length
+    ? entries.filter((e) => noteEntryIds.includes(e.id))
+    : entries
+  const source = pool.length ? pool : entries
+  return source.some((e) => hasRealNoteBody(e.body))
 }
 
 async function buildPublishParts(
@@ -139,14 +142,16 @@ async function buildPublishParts(
   const entries = map.get(questionId) ?? []
   const target = noteEntryIds.length
     ? entries.filter((e) => noteEntryIds.includes(e.id))
-    : splitPendingNoteEntries(entries).pending
-  const withBody = (target.length ? target : entries).filter((e) => e.body.trim())
+    : entries
+  const withBody = (target.length ? target : entries).filter((e) =>
+    hasRealNoteBody(e.body)
+  )
   if (!withBody.length) return { comment: null, aiComment: null }
   const note = combineNoteBodies(withBody)
   const ai =
     withBody
       .map((e) => e.ai_feedback?.trim())
-      .filter(Boolean)
+      .filter((t) => hasRealNoteBody(t))
       .sort((a, b) => (b?.length ?? 0) - (a?.length ?? 0))[0] ?? null
   return splitPublishParts(note, ai)
 }
@@ -319,8 +324,15 @@ export async function processQuestionResolveAi(
     cadernoId,
   }
 
-  if (pushWhatsapp && !alreadyPushed && !hasNotes) {
-    await pushAttemptToWhatsapp({ ...pushArgs, comment: null })
+  if (pushWhatsapp && !alreadyPushed) {
+    const immediate = hasNotes
+      ? await buildPublishParts(userId, questionId, noteEntryIds)
+      : { comment: null, aiComment: null }
+    await pushAttemptToWhatsapp({
+      ...pushArgs,
+      comment: immediate.comment,
+      aiComment: null,
+    })
     await markWhatsappPushed(attemptId)
   }
 
@@ -361,15 +373,7 @@ export async function processQuestionResolveAi(
     }
   }
 
-  if (pushWhatsapp && !alreadyPushed && hasNotes) {
-    await pushAttemptToWhatsapp({
-      ...pushArgs,
-      comment: parts.comment,
-      aiComment: parts.aiComment,
-    })
-    await markWhatsappPushed(attemptId)
-    if (parts.aiComment) await markAiPushed(attemptId)
-  } else if (!pushWhatsapp && hasNotes && !alreadyAiPushed && parts.aiComment) {
+  if (hasNotes && !alreadyAiPushed && parts.aiComment) {
     await pushAttemptToWhatsapp({
       ...pushArgs,
       comment: null,
