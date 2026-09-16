@@ -6,7 +6,7 @@ import type { FSRSParameters } from "ts-fsrs"
 export const ERROR_REVIEW_DECK_NAME = "Revisão de Erros"
 export const ERROR_REVIEW_RETENTION_DEFAULT = 0.85
 export const ERROR_REVIEW_RETENTION_MIN = 0.8
-export const ERROR_REVIEW_RETENTION_MAX = 0.9
+export const ERROR_REVIEW_RETENTION_MAX = 0.95
 
 export function clampErrorReviewRetention(value: number): number {
   return Math.min(

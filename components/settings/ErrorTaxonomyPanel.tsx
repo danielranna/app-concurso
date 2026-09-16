@@ -13,7 +13,7 @@ type Props = {
 
 export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
   const cache = useDataCache()
-  const [tab, setTab] = useState<"errorTypes" | "status" | "categories">("errorTypes")
+  const [tab, setTab] = useState<"fsrs" | "errorTypes" | "status" | "categories">("fsrs")
   const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
   const [errorStatuses, setErrorStatuses] = useState<
     Array<{ id: string; name: string; color?: string | null }>
@@ -28,6 +28,46 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
   const [editingCategoryName, setEditingCategoryName] = useState("")
   const [editingColor, setEditingColor] = useState<{ [key: string]: string }>({})
   const [showColorPicker, setShowColorPicker] = useState<{ [key: string]: boolean }>({})
+  const [requestRetention, setRequestRetention] = useState(0.85)
+  const [retentionMin, setRetentionMin] = useState(0.8)
+  const [retentionMax, setRetentionMax] = useState(0.95)
+  const [savingRetention, setSavingRetention] = useState(false)
+  const [retentionSaved, setRetentionSaved] = useState(false)
+
+  async function loadFsrsSettings() {
+    const res = await fetch(`/api/erros/revisao/fsrs-settings?user_id=${userId}`)
+    const data = await res.json()
+    if (!res.ok) return
+    if (typeof data.request_retention === "number") {
+      setRequestRetention(data.request_retention)
+    }
+    if (typeof data.min === "number") setRetentionMin(data.min)
+    if (typeof data.max === "number") setRetentionMax(data.max)
+  }
+
+  async function saveFsrsRetention() {
+    setSavingRetention(true)
+    setRetentionSaved(false)
+    try {
+      const res = await fetch("/api/erros/revisao/fsrs-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          request_retention: requestRetention,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Falha ao salvar")
+      setRequestRetention(data.request_retention)
+      setRetentionSaved(true)
+      window.setTimeout(() => setRetentionSaved(false), 2000)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao salvar retenção")
+    } finally {
+      setSavingRetention(false)
+    }
+  }
 
   async function loadErrorTypes() {
     const data = await cache.getErrorTypes(userId)
@@ -49,6 +89,7 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
     void loadErrorTypes()
     void loadErrorStatuses()
     void loadCategories()
+    void loadFsrsSettings()
   }, [userId])
 
   async function createErrorType() {
@@ -245,6 +286,15 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
       <div className="mb-4 flex flex-wrap gap-2">
         <button
           type="button"
+          onClick={() => setTab("fsrs")}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            tab === "fsrs" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
+          }`}
+        >
+          FSRS
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("errorTypes")}
           className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
             tab === "errorTypes" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
@@ -271,6 +321,52 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
           Categorias
         </button>
       </div>
+
+      {tab === "fsrs" && (
+        <section className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+          <h2 className="text-base font-semibold text-slate-900">
+            Revisão de erros · FSRS
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+            Retenção só do deck “Revisão de Erros”. Não altera o FSRS dos flashcards gerais.
+            Menor = assertivas voltam mais cedo.
+          </p>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between text-sm">
+              <label htmlFor="error-request-retention" className="font-medium text-slate-700">
+                Retenção desejada
+              </label>
+              <span className="rounded-full bg-white px-2.5 py-0.5 text-sm font-semibold tabular-nums text-slate-900 ring-1 ring-slate-200">
+                {Math.round(requestRetention * 100)}%
+              </span>
+            </div>
+            <input
+              id="error-request-retention"
+              type="range"
+              min={retentionMin}
+              max={retentionMax}
+              step={0.01}
+              value={requestRetention}
+              onChange={(e) => setRequestRetention(parseFloat(e.target.value))}
+              className="mt-3 w-full accent-slate-900"
+            />
+            <p className="mt-1.5 text-xs text-slate-500">
+              {Math.round(retentionMin * 100)}% mais repetições ·{" "}
+              {Math.round(retentionMax * 100)}% menos · padrão 85%
+            </p>
+          </div>
+
+          <button
+            type="button"
+            disabled={savingRetention}
+            onClick={() => void saveFsrsRetention()}
+            className="mt-5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+          >
+            {savingRetention ? "Salvando…" : retentionSaved ? "Salvo" : "Salvar"}
+          </button>
+        </section>
+      )}
 
       {tab === "errorTypes" && (
         <>

@@ -98,8 +98,6 @@ export default function ErrosRevisaoPage() {
   const [grading, setGrading] = useState(false)
   const [check, setCheck] = useState<CheckResult | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
-  const [retention, setRetention] = useState(0.85)
-  const [savingRetention, setSavingRetention] = useState(false)
 
   const loadQueue = useCallback(async (uid: string) => {
     setLoading(true)
@@ -107,9 +105,6 @@ export default function ErrosRevisaoPage() {
     const res = await fetch(`/api/erros/revisao/queue?user_id=${uid}`)
     const data = await res.json()
     setLoading(false)
-    if (typeof data.request_retention === "number") {
-      setRetention(data.request_retention)
-    }
     if (!data.card) {
       setDone(true)
       setCard(null)
@@ -205,31 +200,6 @@ export default function ErrosRevisaoPage() {
     }
   }
 
-  async function saveRetention(value: number) {
-    if (!userId) return
-    setRetention(value)
-    setSavingRetention(true)
-    try {
-      const res = await fetch("/api/erros/revisao/fsrs-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          request_retention: value,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Falha ao salvar")
-      setRetention(data.request_retention)
-      // Recarrega preview com novos params se ainda no verso
-      if (card && !check) {
-        await loadQueue(userId)
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setSavingRetention(false)
-    }
   }
 
   if (loading && !card) {
@@ -254,14 +224,15 @@ export default function ErrosRevisaoPage() {
             Não há assertivas de revisão pendentes agora. O FSRS define quando voltam.
           </p>
         )}
-        <RetentionSlider
-          value={retention}
-          saving={savingRetention}
-          onChange={saveRetention}
-        />
-        <div className="flex gap-3 text-sm">
+        <div className="flex flex-wrap gap-3 text-sm">
           <Link href="/erros" className="text-blue-600 hover:underline">
             Caderno de erros
+          </Link>
+          <Link
+            href="/configuracoes?tab=erros"
+            className="text-blue-600 hover:underline"
+          >
+            Configurar FSRS
           </Link>
           <Link href="/flashcards/study" className="text-blue-600 hover:underline">
             Flashcards
@@ -291,16 +262,18 @@ export default function ErrosRevisaoPage() {
             {remaining + 1} na fila · deck Revisão de Erros · FSRS próprio
           </p>
         </div>
-        <Link href="/erros" className="text-sm text-slate-600 hover:underline">
-          Caderno
-        </Link>
+        <div className="flex flex-col items-end gap-1 text-sm">
+          <Link href="/erros" className="text-slate-600 hover:underline">
+            Caderno
+          </Link>
+          <Link
+            href="/configuracoes?tab=erros"
+            className="text-xs text-slate-500 hover:underline"
+          >
+            Configurar FSRS
+          </Link>
+        </div>
       </div>
-
-      <RetentionSlider
-        value={retention}
-        saving={savingRetention}
-        onChange={saveRetention}
-      />
 
       {card.from_error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -415,43 +388,6 @@ export default function ErrosRevisaoPage() {
           </div>
         )}
       </section>
-    </div>
-  )
-}
-
-function RetentionSlider({
-  value,
-  saving,
-  onChange,
-}: {
-  value: number
-  saving: boolean
-  onChange: (v: number) => void
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2 text-xs text-slate-600">
-        <span className="font-medium text-slate-800">Retenção FSRS (erros)</span>
-        <span>
-          {Math.round(value * 100)}%
-          {saving ? " · salvando…" : ""}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={80}
-        max={90}
-        step={1}
-        value={Math.round(value * 100)}
-        onChange={(e) => onChange(Number(e.target.value) / 100)}
-        className="mt-2 w-full accent-slate-800"
-        aria-label="Retenção FSRS do deck de erros"
-      />
-      <div className="mt-0.5 flex justify-between text-[10px] text-slate-400">
-        <span>80%</span>
-        <span>Só este deck · não altera flashcards</span>
-        <span>90%</span>
-      </div>
     </div>
   )
 }
