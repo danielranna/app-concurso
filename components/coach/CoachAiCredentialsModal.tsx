@@ -3,14 +3,21 @@
 import { useEffect, useState } from "react"
 import { KeyRound, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import {
+  defaultModelForProvider,
+  modelsForProvider,
+  resolvePreferredModel,
+  type AiProvider,
+} from "@/lib/ai/models"
 
 type Status =
   | { configured: false }
   | {
       configured: true
-      provider: "openai" | "anthropic"
+      provider: AiProvider
       key_hint: string
       updated_at: string
+      preferred_model: string
     }
 
 type Props = {
@@ -28,7 +35,10 @@ export default function CoachAiCredentialsModal({
 }: Props) {
   const [userId, setUserId] = useState<string | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
-  const [provider, setProvider] = useState<"openai" | "anthropic">("openai")
+  const [provider, setProvider] = useState<AiProvider>("openai")
+  const [preferredModel, setPreferredModel] = useState(
+    defaultModelForProvider("openai")
+  )
   const [apiKey, setApiKey] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,6 +50,9 @@ export default function CoachAiCredentialsModal({
     if (data.configured) {
       setStatus(data)
       setProvider(data.provider)
+      setPreferredModel(
+        resolvePreferredModel(data.provider, data.preferred_model)
+      )
     } else {
       setStatus({ configured: false })
     }
@@ -57,6 +70,11 @@ export default function CoachAiCredentialsModal({
     })
   }, [open, embedded])
 
+  function handleProviderChange(next: AiProvider) {
+    setProvider(next)
+    setPreferredModel((prev) => resolvePreferredModel(next, prev))
+  }
+
   async function handleSave() {
     if (!userId || !apiKey.trim()) {
       setError("Cole sua chave de API.")
@@ -72,6 +90,7 @@ export default function CoachAiCredentialsModal({
           user_id: userId,
           api_key: apiKey.trim(),
           provider,
+          preferred_model: preferredModel,
         }),
       })
       const data = await res.json()
@@ -80,7 +99,42 @@ export default function CoachAiCredentialsModal({
         return
       }
       setStatus(data)
+      setPreferredModel(
+        resolvePreferredModel(data.provider, data.preferred_model)
+      )
       setApiKey("")
+      setSaved(true)
+      onSaved?.()
+    } catch {
+      setError("Erro de rede.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSavePreferences() {
+    if (!userId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/coach/ai-credentials", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          provider,
+          preferred_model: preferredModel,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error ?? "Não foi possível atualizar.")
+        return
+      }
+      setStatus(data)
+      setPreferredModel(
+        resolvePreferredModel(data.provider, data.preferred_model)
+      )
       setSaved(true)
       onSaved?.()
     } catch {
@@ -114,6 +168,11 @@ export default function CoachAiCredentialsModal({
 
   if (!embedded && !open) return null
 
+  const modelOptions = modelsForProvider(provider)
+  const prefsDirty =
+    status?.configured === true &&
+    (status.provider !== provider || status.preferred_model !== preferredModel)
+
   const form = (
         <>
         <div className="mb-4 flex items-start justify-between gap-3">
@@ -146,7 +205,7 @@ export default function CoachAiCredentialsModal({
         {status?.configured && (
           <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
             Chave {status.provider === "openai" ? "OpenAI" : "Anthropic"}{" "}
-            ativa ({status.key_hint})
+            ativa ({status.key_hint}) · {status.preferred_model}
           </p>
         )}
 
@@ -157,11 +216,26 @@ export default function CoachAiCredentialsModal({
           className="mb-3 w-full rounded-lg border border-slate-300 p-2 text-slate-900"
           value={provider}
           onChange={(e) =>
-            setProvider(e.target.value as "openai" | "anthropic")
+            handleProviderChange(e.target.value as AiProvider)
           }
         >
-          <option value="openai">OpenAI (gpt-4o-mini)</option>
-          <option value="anthropic">Anthropic (Claude Haiku)</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+        </select>
+
+        <label className="mb-1 block text-sm font-medium text-slate-700">
+          Modelo
+        </label>
+        <select
+          className="mb-3 w-full rounded-lg border border-slate-300 p-2 text-slate-900"
+          value={preferredModel}
+          onChange={(e) => setPreferredModel(e.target.value)}
+        >
+          {modelOptions.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
         </select>
 
         <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -182,7 +256,7 @@ export default function CoachAiCredentialsModal({
           <p className="mb-3 text-sm text-red-600">{error}</p>
         )}
         {saved && (
-          <p className="mb-3 text-sm text-emerald-700">Chave salva e validada.</p>
+          <p className="mb-3 text-sm text-emerald-700">Configuração salva.</p>
         )}
 
         <div className="flex flex-wrap gap-2">
@@ -192,8 +266,18 @@ export default function CoachAiCredentialsModal({
             disabled={loading || !apiKey.trim()}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {loading ? "Validando…" : "Salvar chave"}
+            {loading && apiKey.trim() ? "Validando…" : "Salvar chave"}
           </button>
+          {status?.configured && (
+            <button
+              type="button"
+              onClick={handleSavePreferences}
+              disabled={loading || !prefsDirty}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {loading && !apiKey.trim() ? "Salvando…" : "Salvar modelo"}
+            </button>
+          )}
           {status?.configured && (
             <button
               type="button"

@@ -3,9 +3,11 @@ import {
   deleteUserAiCredentials,
   getUserAiCredentialsStatus,
   saveUserAiCredentials,
+  updateUserAiPreferences,
   validateProviderApiKey,
   type AiProvider,
 } from "@/lib/ai/user-credentials"
+import { resolvePreferredModel } from "@/lib/ai/models"
 
 function parseProvider(v: unknown): AiProvider {
   if (v === "anthropic") return "anthropic"
@@ -24,7 +26,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, api_key, provider: rawProvider } = body
+  const { user_id, api_key, provider: rawProvider, preferred_model } = body
 
   if (!user_id || !api_key || typeof api_key !== "string") {
     return NextResponse.json(
@@ -34,14 +36,44 @@ export async function POST(req: Request) {
   }
 
   const provider = parseProvider(rawProvider)
+  const model = resolvePreferredModel(
+    provider,
+    typeof preferred_model === "string" ? preferred_model : null
+  )
 
   try {
     await validateProviderApiKey(provider, api_key)
-    await saveUserAiCredentials(user_id, provider, api_key)
+    await saveUserAiCredentials(user_id, provider, api_key, model)
     const status = await getUserAiCredentialsStatus(user_id)
     return NextResponse.json(status)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro ao salvar chave"
+    return NextResponse.json({ error: msg }, { status: 400 })
+  }
+}
+
+/** Atualiza provedor/modelo sem exigir nova chave. */
+export async function PATCH(req: Request) {
+  const body = await req.json()
+  const { user_id, provider: rawProvider, preferred_model } = body
+
+  if (!user_id || typeof user_id !== "string") {
+    return NextResponse.json({ error: "user_id obrigatório" }, { status: 400 })
+  }
+
+  const provider =
+    rawProvider === undefined ? undefined : parseProvider(rawProvider)
+
+  try {
+    await updateUserAiPreferences(user_id, {
+      provider,
+      preferredModel:
+        typeof preferred_model === "string" ? preferred_model : null,
+    })
+    const status = await getUserAiCredentialsStatus(user_id)
+    return NextResponse.json(status)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro ao atualizar preferências"
     return NextResponse.json({ error: msg }, { status: 400 })
   }
 }

@@ -1,3 +1,4 @@
+import { defaultModelForProvider } from "./models"
 import type { UserAiCredentials } from "./user-credentials"
 
 export type AiMessage = { role: "system" | "user"; content: string }
@@ -24,15 +25,26 @@ function estimateCost(tokensIn: number, tokensOut: number) {
   return ((tokensIn + tokensOut) / 1000) * MINI_COST_PER_1K
 }
 
+function resolveModel(
+  opts: AiCompleteOptions,
+  credentials: UserAiCredentials
+): string {
+  return (
+    opts.model ??
+    credentials.preferredModel ??
+    defaultModelForProvider(credentials.provider)
+  )
+}
+
 async function completeOpenAI(
   opts: AiCompleteOptions,
-  apiKey: string
+  credentials: UserAiCredentials
 ): Promise<AiCompleteResult> {
-  const model = opts.model ?? "gpt-4o-mini"
+  const model = resolveModel(opts, credentials)
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${credentials.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -65,16 +77,16 @@ async function completeOpenAI(
 
 async function completeAnthropic(
   opts: AiCompleteOptions,
-  apiKey: string
+  credentials: UserAiCredentials
 ): Promise<AiCompleteResult> {
-  const model = opts.model ?? "claude-3-5-haiku-latest"
+  const model = resolveModel(opts, credentials)
   const system = opts.messages.find((m) => m.role === "system")?.content ?? ""
   const userMsgs = opts.messages.filter((m) => m.role === "user")
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": apiKey,
+      "x-api-key": credentials.apiKey,
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
@@ -113,10 +125,10 @@ export async function aiComplete(
   credentials?: UserAiCredentials | null
 ): Promise<AiCompleteResult> {
   if (credentials?.provider === "openai") {
-    return completeOpenAI(opts, credentials.apiKey)
+    return completeOpenAI(opts, credentials)
   }
   if (credentials?.provider === "anthropic") {
-    return completeAnthropic(opts, credentials.apiKey)
+    return completeAnthropic(opts, credentials)
   }
   return {
     text: "",

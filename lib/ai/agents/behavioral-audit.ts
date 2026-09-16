@@ -360,7 +360,6 @@ export async function runBehavioralAuditAgent(params: {
     userContent: `Explicação unificada (auditoria):\n${JSON.stringify(input)}`,
     jsonMode: true,
     maxTokens: 8000,
-    model: "gpt-4o",
     metadata: {
       notebook_id: params.payload.notebook_id,
       phase: "unified_explain",

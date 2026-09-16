@@ -258,7 +258,6 @@ export async function runNoteClarificationsAgent(params: {
         userContent,
         jsonMode: true,
         maxTokens: 2000,
-        model: "gpt-4o",
         metadata: {
           phase: "note_clarifications",
           retry: attempt > 1,

@@ -5,14 +5,19 @@ import {
   randomBytes,
 } from "crypto"
 import { supabaseServer } from "../supabase-server"
+import {
+  resolvePreferredModel,
+  type AiProvider,
+} from "./models"
+
+export type { AiProvider } from "./models"
 
 const ALGO = "aes-256-gcm"
-
-export type AiProvider = "openai" | "anthropic"
 
 export type UserAiCredentials = {
   provider: AiProvider
   apiKey: string
+  preferredModel: string
 }
 
 function encryptionKey(): Buffer {
@@ -68,7 +73,7 @@ export async function userHasAiCredentials(userId: string): Promise<boolean> {
 export async function getUserAiCredentialsStatus(userId: string) {
   const { data } = await supabaseServer
     .from("user_ai_credentials")
-    .select("provider, key_hint, updated_at")
+    .select("provider, key_hint, updated_at, preferred_model")
     .eq("user_id", userId)
     .maybeSingle()
 
@@ -76,11 +81,16 @@ export async function getUserAiCredentialsStatus(userId: string) {
     return { configured: false as const }
   }
 
+  const provider = data.provider as AiProvider
   return {
     configured: true as const,
-    provider: data.provider as AiProvider,
+    provider,
     key_hint: data.key_hint as string,
     updated_at: data.updated_at as string,
+    preferred_model: resolvePreferredModel(
+      provider,
+      data.preferred_model as string | null
+    ),
   }
 }
 
@@ -89,16 +99,21 @@ export async function getUserAiCredentials(
 ): Promise<UserAiCredentials | null> {
   const { data, error } = await supabaseServer
     .from("user_ai_credentials")
-    .select("provider, encrypted_key")
+    .select("provider, encrypted_key, preferred_model")
     .eq("user_id", userId)
     .maybeSingle()
 
   if (error || !data) return null
 
   try {
+    const provider = data.provider as AiProvider
     return {
-      provider: data.provider as AiProvider,
+      provider,
       apiKey: decryptApiKey(data.encrypted_key),
+      preferredModel: resolvePreferredModel(
+        provider,
+        data.preferred_model as string | null
+      ),
     }
   } catch {
     return null
@@ -108,10 +123,13 @@ export async function getUserAiCredentials(
 export async function saveUserAiCredentials(
   userId: string,
   provider: AiProvider,
-  apiKey: string
+  apiKey: string,
+  preferredModel?: string | null
 ) {
   const trimmed = apiKey.trim()
   if (!trimmed) throw new Error("Chave vazia")
+
+  const model = resolvePreferredModel(provider, preferredModel)
 
   const { error } = await supabaseServer.from("user_ai_credentials").upsert(
     {
@@ -119,10 +137,39 @@ export async function saveUserAiCredentials(
       provider,
       encrypted_key: encryptApiKey(trimmed),
       key_hint: keyHint(trimmed),
+      preferred_model: model,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
   )
+
+  if (error) throw new Error(error.message)
+}
+
+/** Atualiza provedor/modelo sem recolher a chave (chave já existente). */
+export async function updateUserAiPreferences(
+  userId: string,
+  opts: { provider?: AiProvider; preferredModel?: string | null }
+) {
+  const existing = await getUserAiCredentials(userId)
+  if (!existing) {
+    throw new Error("Configure a chave de API antes de alterar o modelo.")
+  }
+
+  const provider = opts.provider ?? existing.provider
+  const preferred_model = resolvePreferredModel(
+    provider,
+    opts.preferredModel ?? existing.preferredModel
+  )
+
+  const { error } = await supabaseServer
+    .from("user_ai_credentials")
+    .update({
+      provider,
+      preferred_model,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
 
   if (error) throw new Error(error.message)
 }

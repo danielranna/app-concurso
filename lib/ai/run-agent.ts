@@ -51,15 +51,10 @@ export async function runAgent(params: RunAgentParams): Promise<RunAgentResult> 
 
   let result: AiCompleteResult
   try {
-    const defaultModel =
-      params.model ??
-      (params.agentType === "edital" && credentials.provider === "openai"
-        ? "gpt-4o"
-        : undefined)
-
+    // Preferência do usuário sempre vence; params.model é ignorado.
     result = await aiComplete(
       {
-        model: defaultModel,
+        model: credentials.preferredModel,
         jsonMode: params.jsonMode,
         maxTokens: params.maxTokens ?? 2000,
         messages: [

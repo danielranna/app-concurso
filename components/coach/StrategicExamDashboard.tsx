@@ -155,7 +155,7 @@ export default function StrategicExamDashboard({
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
-          Enriquecer com IA (gpt-4o)
+          Enriquecer com IA
         </button>
       </div>
 

@@ -294,7 +294,6 @@ export async function classifyNotebookQuestions(
       userContent: JSON.stringify(input),
       jsonMode: true,
       maxTokens: 4000,
-      model: "gpt-4o",
       metadata: {
         notebook_id: payload.notebook_id,
         phase: "error_classify",

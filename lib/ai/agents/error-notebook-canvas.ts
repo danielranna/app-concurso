@@ -52,7 +52,6 @@ export async function runErrorNotebookCanvasAgent(params: {
     userContent: JSON.stringify(compact),
     jsonMode: true,
     maxTokens: 2000,
-    model: "gpt-4o-mini",
     metadata: { phase: "error_notebook_canvas" },
   })
 

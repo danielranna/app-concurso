@@ -89,7 +89,6 @@ export async function runSubjectDossierAgent(params: {
     userContent: JSON.stringify(compact),
     jsonMode: true,
     maxTokens: 4000,
-    model: "gpt-4o",
     skipLlm: params.skipLlm,
     metadata: { phase: "subject_dossier" },
   })
