@@ -92,6 +92,13 @@ export function draftScopeKey(
   return `draft:solo:${id}`
 }
 
+export function removeDraft(scopeKey: string, questionId: string): void {
+  const all = loadAllDrafts(scopeKey)
+  if (!(questionId in all)) return
+  delete all[questionId]
+  saveAllDrafts(scopeKey, all)
+}
+
 export function clearDraftScope(scopeKey: string): void {
   if (typeof window === "undefined") {
     memoryStore.delete(scopeKey)

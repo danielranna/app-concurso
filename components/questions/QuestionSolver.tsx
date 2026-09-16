@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { BarChart2, ExternalLink, Flag, RotateCcw } from "lucide-react"
+import { BarChart2, ExternalLink, Flag, RotateCcw, Trash2 } from "lucide-react"
 import AddErrorModal from "@/components/AddErrorModal"
 import QuickNote, { type QuickNoteHandle } from "@/components/questions/QuickNote"
 import PerformanceModal from "@/components/questions/PerformanceModal"
@@ -25,6 +25,7 @@ import {
   draftScopeKey,
   getDraft,
   listResolvableDrafts,
+  removeDraft,
   setDraft,
   type QuestionDraft,
 } from "@/lib/question-draft-cache"
@@ -111,6 +112,8 @@ type Props = {
   resettingNotebook?: boolean
   completedNotebookName?: string
   onEditQuestion?: (questionId: string) => void
+  /** Chamado após remover a questão do caderno (e opcionalmente do banco). */
+  onQuestionRemoved?: () => void
   refreshKey?: number
   onNotebookComplete?: () => void
   /** Pausa o timer da questão (ex.: quando o cronômetro do caderno está pausado). */
@@ -178,6 +181,7 @@ export default function QuestionSolver({
   resettingNotebook,
   completedNotebookName,
   onEditQuestion,
+  onQuestionRemoved,
   refreshKey,
   onNotebookComplete,
   timerPaused = false,
@@ -231,6 +235,9 @@ export default function QuestionSolver({
   const [batchResolving, setBatchResolving] = useState(false)
   const [showPerf, setShowPerf] = useState(false)
   const [showError, setShowError] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [timerTick, setTimerTick] = useState(0)
   const [notebookBreakdown, setNotebookBreakdown] = useState<
     StudySessionNotebookBreakdown[] | null
@@ -429,6 +436,54 @@ export default function QuestionSolver({
     if (refreshKey != null && refreshKey > 0) load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
+
+  useEffect(() => {
+    setConfirmDelete(false)
+    setDeleteError(null)
+  }, [question?.id])
+
+  const removeCurrentQuestion = useCallback(
+    async (removeMode: "notebook" | "bank") => {
+      if (mode !== "notebook" || !notebookId || !question || deleting) return
+      const qid = question.id
+      setDeleting(true)
+      setDeleteError(null)
+      try {
+        const res = await fetch(
+          `/api/notebooks/${notebookId}/questions/${qid}`,
+          {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: userId, mode: removeMode }),
+          }
+        )
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setDeleteError(data.error ?? "Erro ao excluir")
+          return
+        }
+        removeDraft(scopeKey, qid)
+        currentQuestionId.current = null
+        setConfirmDelete(false)
+        onQuestionRemoved?.()
+        await load()
+      } catch {
+        setDeleteError("Erro ao excluir")
+      } finally {
+        setDeleting(false)
+      }
+    },
+    [
+      mode,
+      notebookId,
+      question,
+      deleting,
+      userId,
+      scopeKey,
+      onQuestionRemoved,
+      load,
+    ]
+  )
 
   const sessionComplete =
     !loading && mode === "study" && studySessionId && (!question || !current)
@@ -899,7 +954,64 @@ export default function QuestionSolver({
               Editar questão
             </button>
           )}
+          {mode === "notebook" && notebookId && (
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmDelete(true)
+                setDeleteError(null)
+              }}
+              disabled={deleting}
+              className="flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" /> Excluir
+            </button>
+          )}
         </div>
+        {mode === "notebook" && notebookId && confirmDelete && (
+          <div className="mt-3 rounded-lg border border-red-100 bg-red-50/60 px-3 py-2.5">
+            <p className="text-xs font-medium text-slate-700">
+              Remover esta questão do caderno?
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+              <strong>Só do caderno</strong> remove daqui e mantém no banco.{" "}
+              <strong>Do caderno e do banco</strong> apaga de vez (some de outros
+              cadernos que usem a mesma questão).
+            </p>
+            {deleteError && (
+              <p className="mt-2 text-xs text-red-600">{deleteError}</p>
+            )}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => removeCurrentQuestion("notebook")}
+                disabled={deleting}
+                className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {deleting ? "Excluindo…" : "Só do caderno"}
+              </button>
+              <button
+                type="button"
+                onClick={() => removeCurrentQuestion("bank")}
+                disabled={deleting}
+                className="rounded-md border border-red-200 bg-white px-2.5 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Do caderno e do banco
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDelete(false)
+                  setDeleteError(null)
+                }}
+                disabled={deleting}
+                className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
