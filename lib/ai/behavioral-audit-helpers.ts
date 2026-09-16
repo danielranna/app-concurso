@@ -1,5 +1,6 @@
 import type { ErrorTaxonomy, PerQuestionError } from "../coach-types"
 import type { NotebookAuditQuestion } from "./notebook-audit-payload"
+import { clipStatementForLlm } from "./prompts/statement-for-llm"
 import {
   resolveOptionText,
   type QuestionOption,
@@ -36,7 +37,7 @@ export function buildExplainLlmItem(
     question_id: q.question_id,
     header_label: q.header_label,
     tec_topic: q.tec_topic,
-    statement_excerpt: q.statement_excerpt,
+    statement: clipStatementForLlm(q.statement || q.statement_excerpt),
     options,
     marked: q.selected_answer,
     marked_option_text: markedText,

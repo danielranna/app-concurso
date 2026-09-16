@@ -5,7 +5,13 @@ import {
   filterGreenNoteQuestions,
 } from "../behavioral-audit-helpers"
 import type { NotebookAuditQuestion } from "../notebook-audit-payload"
+import { NOTE_CLARIFICATION_SYSTEM } from "../prompts/note-clarification-prompt"
 import { UNIFIED_EXPLAIN_SYSTEM_PROMPT } from "../prompts/unified-explain-prompt"
+import {
+  clipStatementForLlm,
+  STATEMENT_LLM_MAX_CHARS,
+  STATEMENT_TRUNCATED_SUFFIX,
+} from "../prompts/statement-for-llm"
 import { resolveOptionText } from "../question-option-utils"
 
 function baseQuestion(
@@ -66,6 +72,20 @@ const options = [
   assert.deepEqual(item.classification_evidence, [
     "Nota reduz falhas de mercado a estrutura",
   ])
+  assert.equal(
+    item.statement,
+    "Enunciado completo sobre externalidades e guerra fiscal."
+  )
+  assert.ok(!("statement_excerpt" in item))
+}
+
+// --- clipStatementForLlm ---
+{
+  assert.equal(clipStatementForLlm("curto"), "curto")
+  const long = "x".repeat(STATEMENT_LLM_MAX_CHARS + 50)
+  const clipped = clipStatementForLlm(long)
+  assert.ok(clipped.endsWith(STATEMENT_TRUNCATED_SUFFIX))
+  assert.equal(clipped.length, STATEMENT_LLM_MAX_CHARS)
 }
 
 // --- resolveOptionText ---
@@ -133,12 +153,24 @@ const options = [
   assert.doesNotMatch(fb, /Você errou/)
 }
 
-// --- prompt ---
+// --- prompt regression (texto; não valida comportamento do modelo) ---
 {
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /CÁLCULO/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /ANTI-ALUCINAÇÃO/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /APENAS com um único objeto JSON/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /bater EXATAMENTE/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /NÃO force/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /MESMA formatação/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /red_yellow/)
-  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_only/)
-  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_zone/)
-  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /PROIBIDO texto genérico/)
+  assert.doesNotMatch(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_only/)
+  assert.doesNotMatch(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_zone/)
+
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /CÁLCULO/)
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /ANTI-ALUCINAÇÃO/)
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /APENAS com um único objeto JSON/)
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /bater EXATAMENTE/)
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /NÃO force/)
+  assert.match(NOTE_CLARIFICATION_SYSTEM, /MESMA formatação/)
 }
 
 console.log("behavioral-audit.test.ts: all assertions passed")

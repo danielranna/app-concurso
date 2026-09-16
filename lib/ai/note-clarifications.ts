@@ -12,35 +12,18 @@ import type { NotebookAuditPayload, NotebookAuditQuestion } from "./notebook-aud
 import { filterGreenNoteQuestions } from "./behavioral-audit-helpers"
 import { loadOptionsByQuestion } from "./question-options"
 import type { DossierAnnotationInput } from "./subject-dossier-payload"
+import { clipStatementForLlm } from "./prompts/statement-for-llm"
+import { NOTE_CLARIFICATION_SYSTEM } from "./prompts/note-clarification-prompt"
 
-export const NOTE_CLARIFICATION_SYSTEM = `Você é tutor de concurso. Sua ÚNICA tarefa é esclarecer as dúvidas do aluno nas anotações (notes) de questões que ele acertou ou errou.
-
-REGRAS:
-1. Responda DIRETAMENTE à user_note — cada pergunta ou ponto levantado deve ter resposta explícita
-2. Se a nota pedir definições, liste e explique cada conceito pedido de forma didática
-3. Se a nota pedir exemplo numérico, cenário hipotético ("vamos supor", "como fica") ou comparação, inclua exemplo passo a passo com números concretos (mínimo 3 passos)
-4. Use statement_excerpt, options e report_feedback como contexto — não invente trechos do enunciado
-5. Se cached_feedback existir mas for genérico ou não responder à nota, substitua por resposta específica
-6. Tom didático, português (BR), 4–8 frases por anotação quando a nota tiver dúvidas substantivas
-7. PROIBIDO respostas vagas tipo "revise o conceito" ou só repetir definição sem ligar à dúvida
-
-Responda JSON:
-{
-  "annotation_clarifications": [{
-    "question_id": "uuid",
-    "note_body": "cópia da nota",
-    "answer_md": "resposta completa à dúvida",
-    "linked_topics": ["tópico TEC"]
-  }]
-}
-
-Inclua TODAS as anotações do input com o mesmo question_id.`
+export { NOTE_CLARIFICATION_SYSTEM } from "./prompts/note-clarification-prompt"
 
 export type NoteClarificationItem = {
   question_id: string
   note_entry_id?: string | null
   note_body: string
   tec_topic?: string
+  /** Enunciado completo (ou o melhor disponível), já clipado para o LLM. */
+  statement?: string
   statement_excerpt?: string
   zone: "red" | "yellow" | "green_note"
   cached_feedback?: string
@@ -124,11 +107,14 @@ export function buildNotebookClarificationItems(
     const perQ = taxonomyByQuestion.get(q.question_id)
     const reportFeedback = reportFeedbackForQuestion(audit, q.question_id)
 
+    const statement = clipStatementForLlm(q.statement || q.statement_excerpt)
+
     if (entries.length === 0) {
       items.push({
         question_id: q.question_id,
         note_body: q.user_note.trim(),
         tec_topic: q.tec_topic,
+        statement,
         statement_excerpt: q.statement_excerpt,
         zone,
         report_feedback: reportFeedback,
@@ -143,6 +129,7 @@ export function buildNotebookClarificationItems(
         note_entry_id: entry.id,
         note_body: entry.body.trim(),
         tec_topic: q.tec_topic,
+        statement,
         statement_excerpt: q.statement_excerpt,
         zone,
         cached_feedback: entry.ai_feedback?.trim() || undefined,
@@ -166,7 +153,9 @@ function itemsToAgentInput(
       question_id: item.question_id,
       note_body: item.note_body,
       tec_topic: item.tec_topic,
-      statement_excerpt: item.statement_excerpt,
+      statement:
+        item.statement ||
+        clipStatementForLlm(item.statement_excerpt),
       options: (optionsByQ.get(item.question_id) ?? []).slice(0, 6),
       cached_feedback: item.cached_feedback,
       report_feedback: item.report_feedback,
@@ -331,11 +320,13 @@ export function buildDossierClarificationItems(
     .filter((a) => a.note_body.trim())
     .map((a) => {
       const err = errorByQ.get(a.question_id)
+      const rawStatement = a.statement_excerpt ?? err?.statement_excerpt
       return {
         question_id: a.question_id,
         note_body: a.note_body,
         tec_topic: a.tec_topic ?? err?.tec_topic,
-        statement_excerpt: a.statement_excerpt ?? err?.statement_excerpt,
+        statement: clipStatementForLlm(rawStatement),
+        statement_excerpt: rawStatement,
         zone: "green_note" as const,
         cached_feedback: a.cached_feedback,
         report_feedback: err?.feedback_detailed?.slice(0, 800),

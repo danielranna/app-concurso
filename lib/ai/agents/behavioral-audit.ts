@@ -352,6 +352,11 @@ export async function runBehavioralAuditAgent(params: {
     })),
   }
 
+  // Pós-rollout (não automatizado neste PR):
+  // - tokens_out / cost_usd group by error_taxonomy (atenção a calculo_procedimento)
+  // - taxa de misconception === "" por taxonomia (vazio frequente pode ser correto ou preguiça do modelo)
+  // - amostra manual 20–30 feedbacks de cálculo: conferir aritmética real (teste de strings do prompt ≠ comportamento)
+  // - débito técnico: parser que extrai números do feedback e reexecuta a operação
   const result = await runAgent({
     agentType: params.agentType ?? "report",
     userId: params.userId,
