@@ -13,13 +13,19 @@ type Props = {
 
 export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
   const cache = useDataCache()
-  const [tab, setTab] = useState<"errorTypes" | "status">("errorTypes")
+  const [tab, setTab] = useState<"errorTypes" | "status" | "categories">("errorTypes")
   const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
   const [errorStatuses, setErrorStatuses] = useState<
     Array<{ id: string; name: string; color?: string | null }>
   >([])
+  const [categories, setCategories] = useState<
+    Array<{ id: string; name: string; color?: string | null }>
+  >([])
   const [newErrorType, setNewErrorType] = useState("")
   const [newErrorStatus, setNewErrorStatus] = useState("")
+  const [newCategory, setNewCategory] = useState("")
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState("")
   const [editingColor, setEditingColor] = useState<{ [key: string]: string }>({})
   const [showColorPicker, setShowColorPicker] = useState<{ [key: string]: boolean }>({})
 
@@ -33,10 +39,16 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
     setErrorStatuses(data)
   }
 
+  async function loadCategories() {
+    const data = await cache.getErrorCategories(userId)
+    setCategories(data ?? [])
+  }
+
   useEffect(() => {
     if (!userId) return
     void loadErrorTypes()
     void loadErrorStatuses()
+    void loadCategories()
   }, [userId])
 
   async function createErrorType() {
@@ -172,9 +184,65 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
     setShowColorPicker((prev) => ({ ...prev, [id]: false }))
   }
 
+  async function createCategory() {
+    if (!newCategory.trim()) return
+    const name = newCategory.trim()
+    setNewCategory("")
+    const res = await fetch("/api/error-categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, name }),
+    })
+    const json = await res.json()
+    if (res.ok && json.data) {
+      setCategories((prev) => [...prev, { id: json.data.id, name: json.data.name }])
+      cache.invalidateErrorCategories(userId)
+      onDataChange?.()
+    } else if (!res.ok) {
+      alert(json.error || "Falha ao criar categoria")
+      setNewCategory(name)
+    }
+  }
+
+  async function renameCategory(id: string) {
+    if (!editingCategoryName.trim()) return
+    const res = await fetch(`/api/error-categories/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editingCategoryName.trim() }),
+    })
+    if (res.ok) {
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === id ? { ...c, name: editingCategoryName.trim() } : c
+        )
+      )
+      setEditingCategoryId(null)
+      cache.invalidateErrorCategories(userId)
+      onDataChange?.()
+    } else {
+      const err = await res.json().catch(() => ({}))
+      alert(err.error || "Falha ao renomear")
+    }
+  }
+
+  async function deleteCategory(id: string) {
+    if (!confirm("Excluir esta categoria? Os erros vinculados ficam sem categoria.")) return
+    const removed = categories.find((c) => c.id === id)
+    setCategories((prev) => prev.filter((c) => c.id !== id))
+    const res = await fetch(`/api/error-categories/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      cache.invalidateErrorCategories(userId)
+      cache.invalidateErrors(userId)
+      onDataChange?.()
+    } else {
+      if (removed) setCategories((prev) => [...prev, removed])
+    }
+  }
+
   return (
     <div>
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setTab("errorTypes")}
@@ -192,6 +260,15 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
           }`}
         >
           Status
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("categories")}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            tab === "categories" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
+          }`}
+        >
+          Categorias
         </button>
       </div>
 
@@ -348,6 +425,98 @@ export default function ErrorTaxonomyPanel({ userId, onDataChange }: Props) {
                   </div>
                 )
               })
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === "categories" && (
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Separe erros por banca ou caderno (ex.: FCC, Simulado Cespe). “Todos” é só um modo de
+            visualização no mapa, não uma categoria.
+          </p>
+          <div className="mb-4 flex gap-2">
+            <input
+              className="flex-1 rounded border border-slate-300 p-2 text-slate-900 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              placeholder="Nome da categoria"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void createCategory()
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => void createCategory()}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-800"
+            >
+              Adicionar
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {categories.length === 0 ? (
+              <p className="col-span-full text-sm text-slate-700">
+                Nenhuma categoria ainda. Elas são criadas ao abrir o mapa ou ao errar uma questão.
+              </p>
+            ) : (
+              categories.map((cat) => (
+                <div
+                  key={cat.id}
+                  className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3"
+                >
+                  {editingCategoryId === cat.id ? (
+                    <div className="flex flex-1 gap-2">
+                      <input
+                        className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                        value={editingCategoryName}
+                        onChange={(e) => setEditingCategoryName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void renameCategory(cat.id)
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="rounded bg-slate-900 px-2 py-1 text-xs text-white"
+                        onClick={() => void renameCategory(cat.id)}
+                      >
+                        OK
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded border px-2 py-1 text-xs"
+                        onClick={() => setEditingCategoryId(null)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-slate-800">{cat.name}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="text-xs text-slate-600 underline"
+                          onClick={() => {
+                            setEditingCategoryId(cat.id)
+                            setEditingCategoryName(cat.name)
+                          }}
+                        >
+                          Renomear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteCategory(cat.id)}
+                          className="text-slate-600 transition hover:text-red-600"
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </>

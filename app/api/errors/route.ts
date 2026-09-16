@@ -13,6 +13,7 @@ export async function GET(req: Request) {
   const subject_id = searchParams.get("subject_id")
   const error_statuses = searchParams.getAll("error_status")
   const error_types = searchParams.getAll("error_type")
+  const category_id = searchParams.get("category_id")
 
   if (!user_id) {
     return NextResponse.json(
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   }
 
   // Cria uma chave única para o cache baseada nos parâmetros
-  const cacheKey = `errors-${user_id}-${subject_id || 'all'}-${topic_ids.sort().join(',')}-${error_types.sort().join(',')}-${error_statuses.sort().join(',')}`
+  const cacheKey = `errors-${user_id}-${subject_id || 'all'}-${category_id || 'todos'}-${topic_ids.sort().join(',')}-${error_types.sort().join(',')}-${error_statuses.sort().join(',')}`
 
   // Cache por 1 minuto (dados mais dinâmicos)
   const getCachedErrors = unstable_cache(
@@ -31,7 +32,8 @@ export async function GET(req: Request) {
       topicIds: string[],
       subjectId: string | null,
       errorStatuses: string[],
-      errorTypes: string[]
+      errorTypes: string[],
+      categoryId: string | null
     ) => {
       let query = supabaseServer
         .from("errors")
@@ -58,6 +60,7 @@ export async function GET(req: Request) {
           knowledge_key,
           active_flashcard_id,
           last_reviewed_at,
+          category_id,
           topics!inner (
             id,
             name,
@@ -86,6 +89,10 @@ export async function GET(req: Request) {
 
       if (errorTypes.length > 0) {
         query = query.in("error_type", errorTypes)
+      }
+
+      if (categoryId) {
+        query = query.eq("category_id", categoryId)
       }
 
       const { data, error } = await query
@@ -133,7 +140,8 @@ export async function GET(req: Request) {
       topic_ids,
       subject_id,
       error_statuses,
-      error_types
+      error_types,
+      category_id
     )
     return NextResponse.json(data)
   } catch (error: any) {
@@ -159,7 +167,8 @@ export async function POST(req: Request) {
     description,
     reference_link,
     error_type,
-    error_status
+    error_status,
+    category_id,
   } = body
 
   if (!user_id || !topic_id || !error_text || !correction_text) {
@@ -176,6 +185,16 @@ export async function POST(req: Request) {
     .eq("id", topic_id)
     .single()
 
+  const { getFccCategoryId } = await import("@/lib/error-categories")
+  let resolvedCategoryId = category_id as string | null | undefined
+  if (!resolvedCategoryId) {
+    try {
+      resolvedCategoryId = await getFccCategoryId(user_id)
+    } catch {
+      resolvedCategoryId = null
+    }
+  }
+
   const { error } = await supabaseServer
     .from("errors")
     .insert([
@@ -187,7 +206,8 @@ export async function POST(req: Request) {
         description: description || null,
         reference_link: reference_link || null,
         error_type,
-        error_status: error_status || "normal"
+        error_status: error_status || "normal",
+        category_id: resolvedCategoryId || null,
       }
     ])
 

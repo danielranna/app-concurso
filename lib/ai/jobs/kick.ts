@@ -5,7 +5,11 @@ export async function kickQuestionAiWorker(userId: string) {
   try {
     await runJobWorker(5, {
       userId,
-      jobTypes: ["question_resolve_ai", "notebook_report_aggregate"],
+      jobTypes: [
+        "question_resolve_ai",
+        "notebook_report_aggregate",
+        "error_review_question_generate",
+      ],
     })
   } catch (e) {
     console.warn("[jobs] kick:", e instanceof Error ? e.message : e)

@@ -25,6 +25,25 @@ export async function GET(req: Request) {
     )
 
     if (rows.length === 0) {
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const { count: awaitingCard } = await supabaseServer
+        .from("errors")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user_id)
+        .not("source_question_id", "is", null)
+        .is("active_flashcard_id", null)
+        .gte("created_at", since)
+
+      const { count: pendingJobs } = await supabaseServer
+        .from("ai_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user_id)
+        .eq("job_type", "error_review_question_generate")
+        .in("status", ["pending", "running"])
+
+      const generating =
+        (awaitingCard ?? 0) > 0 || (pendingJobs ?? 0) > 0
+
       return NextResponse.json({
         card: null,
         remaining: 0,
@@ -33,6 +52,9 @@ export async function GET(req: Request) {
         later_count: laterCount,
         next_due_at: nextDueAt,
         deck_id: deckId,
+        generating,
+        awaiting_card_count: awaitingCard ?? 0,
+        pending_jobs: pendingJobs ?? 0,
       })
     }
 

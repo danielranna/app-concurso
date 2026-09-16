@@ -13,6 +13,7 @@ import HistoryTab from "@/components/HistoryTab"
 import AnalysisTab from "@/components/AnalysisTab"
 import { Plus, Settings } from "lucide-react"
 import { useDataCache } from "@/contexts/DataCacheContext"
+import ErrorCategorySelector from "@/components/ErrorCategorySelector"
 
 type Subject = {
   id: string
@@ -25,11 +26,18 @@ type ErrorStatus = {
   color?: string | null
 }
 
+type ErrorCategory = {
+  id: string
+  name: string
+  color?: string | null
+}
+
 type Error = {
   id: string
   created_at: string
   error_status?: string
   error_type?: string
+  category_id?: string | null
   topics: {
     subjects: {
       id: string
@@ -47,18 +55,48 @@ export default function ErrosPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [errorStatuses, setErrorStatuses] = useState<ErrorStatus[]>([])
+  const [categories, setCategories] = useState<ErrorCategory[]>([])
   const [errors, setErrors] = useState<Error[]>([])
   const [dashboardKey, setDashboardKey] = useState(0)
-  const [userPreferences, setUserPreferences] = useState<{ history_chart_statuses?: string[] }>({})
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
+  const [userPreferences, setUserPreferences] = useState<{
+    history_chart_statuses?: string[]
+    active_error_category_id?: string | null
+  }>({})
 
   async function loadUserPreferences(user_id: string) {
     try {
       const res = await fetch(`/api/user-preferences?user_id=${user_id}`)
       const data = await res.json()
       setUserPreferences(data || {})
+      setActiveCategoryId(data?.active_error_category_id ?? null)
     } catch (error) {
       console.error("Erro ao carregar preferências:", error)
     }
+  }
+
+  async function setActiveCategory(categoryId: string | null) {
+    if (!userId) return
+    setActiveCategoryId(categoryId)
+    setUserPreferences((prev) => ({
+      ...prev,
+      active_error_category_id: categoryId,
+    }))
+    try {
+      await fetch("/api/user-preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          active_error_category_id: categoryId,
+        }),
+      })
+    } catch (e) {
+      console.error(e)
+    }
+    cache.invalidateErrors(userId)
+    await loadErrors(userId, categoryId)
+    setDashboardKey((k) => k + 1)
   }
 
   async function saveHistoryChartStatus(statusId: string) {
@@ -85,10 +123,17 @@ export default function ErrosPage() {
 
     if (user) {
       setUserId(user.id)
-      loadSubjects(user.id)
-      loadErrorStatuses(user.id)
-      loadErrors(user.id)
-      loadUserPreferences(user.id)
+      const prefsRes = await fetch(`/api/user-preferences?user_id=${user.id}`)
+      const prefs = await prefsRes.json().catch(() => ({}))
+      const catId = prefs?.active_error_category_id ?? null
+      setUserPreferences(prefs || {})
+      setActiveCategoryId(catId)
+      await Promise.all([
+        loadSubjects(user.id),
+        loadErrorStatuses(user.id),
+        loadCategories(user.id),
+        loadErrors(user.id, catId),
+      ])
     } else {
       router.push("/login")
     }
@@ -104,8 +149,15 @@ export default function ErrosPage() {
     setErrorStatuses(data ?? [])
   }
 
-  async function loadErrors(user_id: string) {
-    const data = await cache.getErrors(user_id)
+  async function loadCategories(user_id: string) {
+    const data = await cache.getErrorCategories(user_id)
+    setCategories(data ?? [])
+  }
+
+  async function loadErrors(user_id: string, categoryId?: string | null) {
+    const data = await cache.getErrors(user_id, {
+      category_id: categoryId === undefined ? activeCategoryId : categoryId,
+    })
     setErrors(data ?? [])
   }
 
@@ -114,32 +166,14 @@ export default function ErrosPage() {
     cache.invalidateSubjects(userId)
     cache.invalidateErrorStatuses(userId)
     cache.invalidateErrorTypes(userId)
+    cache.invalidateErrorCategories(userId)
     cache.invalidateErrors(userId)
-    const [subjectsRes, statusesRes, errorsRes] = await Promise.all([
-      fetch(`/api/subjects?user_id=${userId}`),
-      fetch(`/api/error-statuses?user_id=${userId}`),
-      fetch(`/api/errors?user_id=${userId}`),
+    await Promise.all([
+      loadSubjects(userId),
+      loadErrorStatuses(userId),
+      loadCategories(userId),
+      loadErrors(userId, activeCategoryId),
     ])
-    const subjectsData = await subjectsRes.json()
-    const statusesData = await statusesRes.json()
-    const statusesNormalized = (statusesData ?? []).map((item: unknown, i: number) =>
-      typeof item === "string"
-        ? { id: `status-${i}`, name: item, color: null }
-        : {
-            id: (item as { id?: string }).id ?? `status-${i}`,
-            name: (item as { name?: string }).name ?? (item as string),
-            color: (item as { color?: string | null }).color ?? null,
-          }
-    )
-    const errorsData = await errorsRes.json()
-    setSubjects(subjectsData ?? [])
-    setErrorStatuses(statusesNormalized)
-    setErrors(
-      (errorsData ?? []).map((e: { error_status?: string }) => ({
-        ...e,
-        error_status: e.error_status ?? "normal",
-      }))
-    )
   }
 
   useEffect(() => {
@@ -177,6 +211,14 @@ export default function ErrosPage() {
         </div>
       </header>
 
+      <div className="mb-4">
+        <ErrorCategorySelector
+          categories={categories}
+          activeCategoryId={activeCategoryId}
+          onChange={(id) => void setActiveCategory(id)}
+        />
+      </div>
+
       <section className="mb-8" key={dashboardKey}>
         <DashboardTabs>
           {(activeTab) => {
@@ -204,7 +246,12 @@ export default function ErrosPage() {
             }
             if (activeTab === "analise") {
               return (
-                <AnalysisTab userId={userId} subjects={subjects} errorStatuses={errorStatuses} />
+                <AnalysisTab
+                  userId={userId}
+                  subjects={subjects}
+                  errorStatuses={errorStatuses}
+                  categoryId={activeCategoryId}
+                />
               )
             }
             return null

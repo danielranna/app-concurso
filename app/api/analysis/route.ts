@@ -11,6 +11,7 @@ export async function GET(req: Request) {
   const user_id = searchParams.get("user_id")
   const subject_id = searchParams.get("subject_id")
   const only_flagged = searchParams.get("only_flagged") === "true"
+  const category_id = searchParams.get("category_id")
 
   if (!user_id) {
     return NextResponse.json(
@@ -24,7 +25,8 @@ export async function GET(req: Request) {
     async (
       userId: string,
       subjectId: string | null,
-      onlyFlagged: boolean
+      onlyFlagged: boolean,
+      categoryId: string | null
     ) => {
     // Busca todos os erros com review_count
     let query = supabaseServer
@@ -59,6 +61,10 @@ export async function GET(req: Request) {
 
     if (onlyFlagged) {
       query = query.eq("needs_intervention", true)
+    }
+
+    if (categoryId) {
+      query = query.eq("category_id", categoryId)
     }
 
     const { data: errors, error: errorsError } = await query
@@ -250,7 +256,7 @@ export async function GET(req: Request) {
   )
 
   try {
-    const data = await getCachedAnalysis(user_id, subject_id, only_flagged)
+    const data = await getCachedAnalysis(user_id, subject_id, only_flagged, category_id)
     return NextResponse.json(data)
   } catch (error: any) {
     return NextResponse.json(

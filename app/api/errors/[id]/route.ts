@@ -113,6 +113,7 @@ export async function PUT(
     error_type,
     error_status,
     motivo,
+    category_id,
   } = body
 
   if (!topic_id || !error_text || !correction_text) {
@@ -147,6 +148,9 @@ export async function PUT(
   }
   if (motivo !== undefined) {
     patch.motivo = typeof motivo === "string" && motivo.trim() ? motivo.trim() : null
+  }
+  if (category_id !== undefined) {
+    patch.category_id = category_id || null
   }
 
   const { error } = await supabaseServer

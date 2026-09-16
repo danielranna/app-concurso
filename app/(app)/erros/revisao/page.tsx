@@ -29,6 +29,7 @@ export default function ErrosRevisaoPage() {
   const [remaining, setRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [answering, setAnswering] = useState(false)
   const [result, setResult] = useState<AnswerResult | null>(null)
 
@@ -41,9 +42,11 @@ export default function ErrosRevisaoPage() {
     if (!data.card) {
       setDone(true)
       setCard(null)
+      setGenerating(Boolean(data.generating))
       return
     }
     setDone(false)
+    setGenerating(false)
     setCard(data.card)
     setRemaining(data.remaining ?? 0)
   }, [])
@@ -58,6 +61,15 @@ export default function ErrosRevisaoPage() {
       loadQueue(user.id)
     })
   }, [router, loadQueue])
+
+  // Poll while generating
+  useEffect(() => {
+    if (!userId || !generating || card) return
+    const t = setInterval(() => {
+      loadQueue(userId)
+    }, 4000)
+    return () => clearInterval(t)
+  }, [userId, generating, card, loadQueue])
 
   async function answer(selected: "Certo" | "Errado") {
     if (!userId || !card || answering) return
@@ -100,9 +112,16 @@ export default function ErrosRevisaoPage() {
     return (
       <div className="mx-auto max-w-2xl space-y-4 p-6">
         <h1 className="text-xl font-semibold text-slate-900">Revisão de erros</h1>
-        <p className="text-sm text-slate-600">
-          Não há assertivas de revisão pendentes agora. O FSRS define quando voltam.
-        </p>
+        {generating ? (
+          <p className="text-sm text-slate-600">
+            Gerando assertiva C/E a partir dos seus erros recentes… Isso pode levar alguns
+            segundos. A página atualiza automaticamente.
+          </p>
+        ) : (
+          <p className="text-sm text-slate-600">
+            Não há assertivas de revisão pendentes agora. O FSRS define quando voltam.
+          </p>
+        )}
         <div className="flex gap-3 text-sm">
           <Link href="/erros" className="text-blue-600 hover:underline">
             Caderno de erros
@@ -110,6 +129,15 @@ export default function ErrosRevisaoPage() {
           <Link href="/flashcards/study" className="text-blue-600 hover:underline">
             Flashcards
           </Link>
+          {generating && userId && (
+            <button
+              type="button"
+              className="text-blue-600 hover:underline"
+              onClick={() => loadQueue(userId)}
+            >
+              Atualizar agora
+            </button>
+          )}
         </div>
       </div>
     )

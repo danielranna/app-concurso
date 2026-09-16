@@ -8,6 +8,7 @@ import AddErrorModal from "@/components/AddErrorModal"
 import ErrorsByTopicChart from "@/components/ErrorsByTopicChart"
 import { Eye, Filter, Plus } from "lucide-react"
 import { useDataCache } from "@/contexts/DataCacheContext"
+import ErrorCategorySelector from "@/components/ErrorCategorySelector"
 
 type ErrorItem = {
   id: string
@@ -55,6 +56,10 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
   )
   const [allCardsExpanded, setAllCardsExpanded] = useState(false)
   const [openModal, setOpenModal] = useState(false)
+  const [categories, setCategories] = useState<
+    Array<{ id: string; name: string; color?: string | null }>
+  >([])
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
   const [editingError, setEditingError] = useState<null | {
     id: string
     topic_id: string
@@ -67,16 +72,38 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
     error_status?: string
   }>(null)
 
-  async function loadErrors(uid: string) {
+  async function loadErrors(uid: string, categoryId?: string | null) {
     setLoading(true)
+    const cat =
+      categoryId === undefined ? activeCategoryId : categoryId
     const data = await cache.getErrors(uid, {
       subject_id: subjectId,
       topic_ids: selectedTopicIds.length > 0 ? selectedTopicIds : undefined,
       error_types: selectedErrorTypes.length > 0 ? selectedErrorTypes : undefined,
       error_statuses: selectedStatuses.length > 0 ? selectedStatuses : undefined,
+      category_id: cat,
     })
     setErrors(data ?? [])
     setLoading(false)
+  }
+
+  async function setActiveCategory(categoryId: string | null) {
+    if (!userId) return
+    setActiveCategoryId(categoryId)
+    try {
+      await fetch("/api/user-preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          active_error_category_id: categoryId,
+        }),
+      })
+    } catch (e) {
+      console.error(e)
+    }
+    cache.invalidateErrors(userId, subjectId)
+    await loadErrors(userId, categoryId)
   }
 
   function handleEdit(error: ErrorItem) {
@@ -105,8 +132,13 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
 
   useEffect(() => {
     setMounted(true)
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUserId(user.id)
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (user) {
+        setUserId(user.id)
+        const prefsRes = await fetch(`/api/user-preferences?user_id=${user.id}`)
+        const prefs = await prefsRes.json().catch(() => ({}))
+        setActiveCategoryId(prefs?.active_error_category_id ?? null)
+      }
     })
   }, [])
 
@@ -117,11 +149,12 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
       .then((d) => setTopics(d ?? []))
     cache.getErrorTypes(userId).then((d) => setErrorTypes(d ?? []))
     cache.getErrorStatuses(userId).then((d) => setErrorStatuses(d))
+    cache.getErrorCategories(userId).then((d) => setCategories(d ?? []))
   }, [userId, subjectId, cache])
 
   useEffect(() => {
     if (userId) loadErrors(userId)
-  }, [userId, subjectId, selectedTopicIds, selectedErrorTypes, selectedStatuses])
+  }, [userId, subjectId, selectedTopicIds, selectedErrorTypes, selectedStatuses, activeCategoryId])
 
   return (
     <div className={embedded ? "" : "min-h-screen bg-slate-50 px-4 py-6 sm:px-6"}>
@@ -164,6 +197,14 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
             Adicionar erro
           </button>
         </div>
+      </div>
+
+      <div className="mb-4">
+        <ErrorCategorySelector
+          categories={categories}
+          activeCategoryId={activeCategoryId}
+          onChange={(id) => void setActiveCategory(id)}
+        />
       </div>
 
       <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">

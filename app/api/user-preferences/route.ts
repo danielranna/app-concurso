@@ -31,7 +31,8 @@ export async function GET(req: Request) {
     // Retorna preferências ou valores padrão
     return NextResponse.json(data || {
       user_id,
-      history_chart_statuses: []
+      history_chart_statuses: [],
+      active_error_category_id: null,
     })
   } catch (error: any) {
     return NextResponse.json(
@@ -51,7 +52,8 @@ export async function PUT(req: Request) {
   const {
     user_id,
     history_chart_statuses,
-    analysis_config
+    analysis_config,
+    active_error_category_id,
   } = body
 
   if (!user_id) {
@@ -72,6 +74,7 @@ export async function PUT(req: Request) {
         efficiency_threshold: number
         auto_flag_enabled: boolean
       }
+      active_error_category_id?: string | null
     } = { user_id }
 
     if (history_chart_statuses !== undefined) {
@@ -80,6 +83,10 @@ export async function PUT(req: Request) {
 
     if (analysis_config !== undefined) {
       updateData.analysis_config = analysis_config
+    }
+
+    if (active_error_category_id !== undefined) {
+      updateData.active_error_category_id = active_error_category_id || null
     }
 
     // Upsert - insere ou atualiza se já existir

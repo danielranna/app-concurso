@@ -2,6 +2,7 @@ import { supabaseServer } from "./supabase-server"
 import { loadMappings, isSubjectLevelMapping } from "./tec-mapping"
 import { enqueueJob } from "./ai/jobs/queue"
 import { scheduleQuestionAiKick } from "./ai/jobs/kick"
+import { getSimuladoCespeCategoryId } from "./error-categories"
 
 function stripHtml(s: string) {
   return (s ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
@@ -163,6 +164,7 @@ export async function upsertErrorFromWrongAttempt(params: {
   const statement = stripHtml(question.statement ?? "").slice(0, 2000)
   const correct = String(question.correct_answer ?? "")
   const selected = String(params.selectedAnswer ?? "")
+  const simuladoCategoryId = await getSimuladoCespeCategoryId(params.userId)
 
   if (existing?.id) {
     const nextCount = Math.max(1, Number(existing.recurrence_count ?? 1) + 1)
@@ -207,6 +209,7 @@ export async function upsertErrorFromWrongAttempt(params: {
       motivo: null,
       recurrence_count: 1,
       learning_status: "novo_erro",
+      category_id: simuladoCategoryId,
     })
     .select("id")
     .single()

@@ -66,6 +66,7 @@ type Props = {
   userId: string
   subjects: Subject[]
   errorStatuses: ErrorStatus[]
+  categoryId?: string | null
 }
 
 const DEFAULT_STATUS_COLOR = "#64748b"
@@ -86,7 +87,12 @@ function stripHtml(html: string): string {
     .trim()
 }
 
-export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) {
+export default function AnalysisTab({
+  userId,
+  subjects,
+  errorStatuses,
+  categoryId = null,
+}: Props) {
   const router = useRouter()
   const { getAnalysis, invalidateAnalysis, invalidateErrors } = useDataCache()
 
@@ -131,7 +137,8 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     try {
       const data = await getAnalysis(userId, {
         subject_id: selectedSubjectId || undefined,
-        only_flagged: showOnlyFlagged || undefined
+        only_flagged: showOnlyFlagged || undefined,
+        category_id: categoryId,
       })
 
       setCards(data.cards || [])
@@ -143,7 +150,7 @@ export default function AnalysisTab({ userId, subjects, errorStatuses }: Props) 
     } finally {
       setLoading(false)
     }
-  }, [userId, selectedSubjectId, showOnlyFlagged, getAnalysis])
+  }, [userId, selectedSubjectId, showOnlyFlagged, categoryId, getAnalysis])
 
   useEffect(() => {
     loadAnalysisData()

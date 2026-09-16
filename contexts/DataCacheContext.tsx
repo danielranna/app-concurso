@@ -84,12 +84,14 @@ type CacheData = {
   subjects: Map<string, Subject[]>
   errorTypes: Map<string, ErrorType[]>
   errorStatuses: Map<string, ErrorStatus[]>
+  errorCategories: Map<string, ErrorStatus[]>
   errors: Map<string, Error[]>
   analysis: Map<string, AnalysisData>
   timestamps: {
     subjects: Map<string, number>
     errorTypes: Map<string, number>
     errorStatuses: Map<string, number>
+    errorCategories: Map<string, number>
     errors: Map<string, number>
     analysis: Map<string, number>
   }
@@ -114,13 +116,19 @@ type DataCacheContextType = {
     topic_ids?: string[]
     error_types?: string[]
     error_statuses?: string[]
+    category_id?: string | null
   }) => Promise<Error[]>
   invalidateErrors: (userId: string, subjectId?: string) => void
+  
+  // Error Categories
+  getErrorCategories: (userId: string) => Promise<Array<{ id: string; name: string; color?: string | null }>>
+  invalidateErrorCategories: (userId: string) => void
   
   // Analysis
   getAnalysis: (userId: string, params?: {
     subject_id?: string
     only_flagged?: boolean
+    category_id?: string | null
   }) => Promise<AnalysisData>
   invalidateAnalysis: (userId: string, subjectId?: string) => void
   
@@ -134,6 +142,7 @@ const CACHE_DURATION = {
   subjects: 5 * 60 * 1000, // 5 minutos
   errorTypes: 5 * 60 * 1000, // 5 minutos
   errorStatuses: 5 * 60 * 1000, // 5 minutos
+  errorCategories: 5 * 60 * 1000,
   errors: 1 * 60 * 1000, // 1 minuto
   analysis: 1 * 60 * 1000, // 1 minuto
 }
@@ -143,12 +152,14 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     subjects: new Map(),
     errorTypes: new Map(),
     errorStatuses: new Map(),
+    errorCategories: new Map(),
     errors: new Map(),
     analysis: new Map(),
     timestamps: {
       subjects: new Map(),
       errorTypes: new Map(),
       errorStatuses: new Map(),
+      errorCategories: new Map(),
       errors: new Map(),
       analysis: new Map(),
     },
@@ -330,6 +341,56 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const getErrorCategories = useCallback(async (userId: string) => {
+    const cacheKey = userId
+    if (isCacheValid(cacheKey, "errorCategories")) {
+      const cached = cache.errorCategories.get(cacheKey)
+      if (cached) return cached
+    }
+    try {
+      const res = await fetch(
+        `/api/error-categories?user_id=${userId}&ensure=1`
+      )
+      if (!res.ok) return []
+      const data = await res.json()
+      const list = (data ?? []).map(
+        (item: { id: string; name: string; color?: string | null }) => ({
+          id: item.id,
+          name: item.name,
+          color: item.color ?? null,
+        })
+      )
+      setCache((prev) => ({
+        ...prev,
+        errorCategories: new Map(prev.errorCategories).set(cacheKey, list),
+        timestamps: {
+          ...prev.timestamps,
+          errorCategories: new Map(prev.timestamps.errorCategories).set(
+            cacheKey,
+            Date.now()
+          ),
+        },
+      }))
+      return list
+    } catch {
+      return []
+    }
+  }, [cache, isCacheValid])
+
+  const invalidateErrorCategories = useCallback((userId: string) => {
+    setCache((prev) => {
+      const next = new Map(prev.errorCategories)
+      const ts = new Map(prev.timestamps.errorCategories)
+      next.delete(userId)
+      ts.delete(userId)
+      return {
+        ...prev,
+        errorCategories: next,
+        timestamps: { ...prev.timestamps, errorCategories: ts },
+      }
+    })
+  }, [])
+
   // Errors
   const getErrors = useCallback(async (
     userId: string,
@@ -338,6 +399,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       topic_ids?: string[]
       error_types?: string[]
       error_statuses?: string[]
+      category_id?: string | null
     }
   ): Promise<Error[]> => {
     const cacheKey = getCacheKey(userId, params)
@@ -358,6 +420,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     if (params?.topic_ids) params.topic_ids.forEach(id => urlParams.append('topic_id', id))
     if (params?.error_types) params.error_types.forEach(type => urlParams.append('error_type', type))
     if (params?.error_statuses) params.error_statuses.forEach(status => urlParams.append('error_status', status))
+    if (params?.category_id) urlParams.set('category_id', params.category_id)
 
     const res = await fetch(`/api/errors?${urlParams.toString()}`)
     const data = await res.json()
@@ -413,6 +476,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     params?: {
       subject_id?: string
       only_flagged?: boolean
+      category_id?: string | null
     }
   ): Promise<AnalysisData> => {
     const cacheKey = getCacheKey(userId, params)
@@ -427,6 +491,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     const urlParams = new URLSearchParams({ user_id: userId })
     if (params?.subject_id) urlParams.set('subject_id', params.subject_id)
     if (params?.only_flagged) urlParams.set('only_flagged', 'true')
+    if (params?.category_id) urlParams.set('category_id', params.category_id)
 
     const res = await fetch(`/api/analysis?${urlParams.toString()}`)
     const data = await res.json()
@@ -478,9 +543,10 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     invalidateSubjects(userId)
     invalidateErrorTypes(userId)
     invalidateErrorStatuses(userId)
+    invalidateErrorCategories(userId)
     invalidateErrors(userId)
     invalidateAnalysis(userId)
-  }, [invalidateSubjects, invalidateErrorTypes, invalidateErrorStatuses, invalidateErrors, invalidateAnalysis])
+  }, [invalidateSubjects, invalidateErrorTypes, invalidateErrorStatuses, invalidateErrorCategories, invalidateErrors, invalidateAnalysis])
 
   return (
     <DataCacheContext.Provider
@@ -491,6 +557,8 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
         invalidateErrorTypes,
         getErrorStatuses,
         invalidateErrorStatuses,
+        getErrorCategories,
+        invalidateErrorCategories,
         getErrors,
         invalidateErrors,
         getAnalysis,
