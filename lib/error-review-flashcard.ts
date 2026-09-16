@@ -133,6 +133,23 @@ export async function createErrorReviewFlashcard(params: {
     .select("id")
     .single()
 
+  if (error && /source_error_id|column/i.test(error.message)) {
+    const retry = await supabaseServer
+      .from("flashcards")
+      .insert({
+        user_id: params.userId,
+        deck_id: deckId,
+        type: "basic",
+        front_text: params.statement.trim(),
+        back_text: back,
+      })
+      .select("id")
+      .single()
+    if (retry.error) throw new Error(retry.error.message)
+    await ensureCardState(params.userId, retry.data.id)
+    return retry.data.id as string
+  }
+
   if (error) throw new Error(error.message)
 
   await ensureCardState(params.userId, card.id)

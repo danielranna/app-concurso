@@ -1,5 +1,8 @@
 import { supabaseServer } from "../supabase-server"
-import { generateErrorReviewQuestion } from "./agents/error-review-question"
+import {
+  buildFallbackErrorReviewQuestion,
+  generateErrorReviewQuestion,
+} from "./agents/error-review-question"
 import {
   createErrorReviewFlashcard,
   findActiveCardForKnowledgeKey,
@@ -32,7 +35,6 @@ export async function processErrorReviewQuestionGenerate(
     return { skipped: true, reason: "error_not_found" }
   }
 
-  // Já tem card ativo neste erro → não gerar de novo
   if (errorRow.active_flashcard_id) {
     const { data: card } = await supabaseServer
       .from("flashcards")
@@ -48,7 +50,6 @@ export async function processErrorReviewQuestionGenerate(
     }
   }
 
-  // Já conhece o knowledge_key e existe card do conhecimento → só vincula
   if (errorRow.knowledge_key) {
     const existingByKey = await findActiveCardForKnowledgeKey(
       userId,
@@ -106,7 +107,7 @@ export async function processErrorReviewQuestionGenerate(
     ? topics[0]?.subject_id
     : topics?.subject_id
 
-  const generated = await generateErrorReviewQuestion({
+  let generated = await generateErrorReviewQuestion({
     userId,
     subjectId: subjectId ?? null,
     originalStatement: String(question.statement ?? ""),
@@ -119,6 +120,20 @@ export async function processErrorReviewQuestionGenerate(
     })),
     errorDetail,
   })
+
+  if (!generated.ok || !generated.knowledge_key || !generated.statement) {
+    generated = buildFallbackErrorReviewQuestion({
+      originalStatement: String(question.statement ?? ""),
+      originalType: String(question.type ?? ""),
+      correctAnswer: String(question.correct_answer ?? ""),
+      options: (options ?? []).map((o) => ({
+        label: o.label,
+        text: o.text,
+      })),
+      errorDetail,
+      tecTopic: question.tec_topic,
+    })
+  }
 
   if (!generated.ok || !generated.knowledge_key || !generated.statement) {
     return {
@@ -141,7 +156,6 @@ export async function processErrorReviewQuestionGenerate(
     })
     .eq("id", errorId)
 
-  // Regra central: 1 card ativo por conhecimento
   const existing = await findActiveCardForKnowledgeKey(userId, knowledgeKey)
   if (existing) {
     await linkErrorsToFlashcard({
@@ -173,7 +187,6 @@ export async function processErrorReviewQuestionGenerate(
     errorIds: [errorId],
   })
 
-  // Propagar card a outros erros já com a mesma key sem card
   const { data: siblings } = await supabaseServer
     .from("errors")
     .select("id")

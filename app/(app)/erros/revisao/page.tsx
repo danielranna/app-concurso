@@ -62,13 +62,24 @@ export default function ErrosRevisaoPage() {
     })
   }, [router, loadQueue])
 
-  // Poll while generating
+  // Poll while generating — e tenta processar jobs pendentes
   useEffect(() => {
     if (!userId || !generating || card) return
+    let cancelled = false
+    void fetch("/api/erros/revisao/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    }).then(() => {
+      if (!cancelled) loadQueue(userId)
+    })
     const t = setInterval(() => {
       loadQueue(userId)
     }, 4000)
-    return () => clearInterval(t)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
   }, [userId, generating, card, loadQueue])
 
   async function answer(selected: "Certo" | "Errado") {

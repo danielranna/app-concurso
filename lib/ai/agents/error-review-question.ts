@@ -127,21 +127,75 @@ export async function generateErrorReviewQuestion(params: {
     return { ok: false, reason: "Campos obrigatórios ausentes na geração." }
   }
 
-  // Evitar cópia óbvia do enunciado original
-  const origNorm = params.originalStatement.slice(0, 80).toLowerCase()
-  if (
-    statement.toLowerCase().includes(origNorm) &&
-    origNorm.length > 40
-  ) {
-    return {
-      ok: false,
-      reason: "Assertiva muito similar à original — não persistida.",
-    }
-  }
-
   const knowledge_key = normalizeKnowledgeKey(summary)
   if (!knowledge_key) {
     return { ok: false, reason: "knowledge_key vazia após normalização." }
+  }
+
+  return {
+    ok: true,
+    knowledge_summary: summary,
+    knowledge_key,
+    statement,
+    answer,
+    explanation,
+  }
+}
+
+/** Fallback sem LLM: monta C/E a partir da questão original para não travar a revisão. */
+export function buildFallbackErrorReviewQuestion(params: {
+  originalStatement: string
+  originalType: string
+  correctAnswer: string
+  options?: { label: string; text: string }[]
+  errorDetail?: Record<string, unknown> | null
+  tecTopic?: string | null
+}): ErrorReviewQuestionResult {
+  const correct = String(params.correctAnswer ?? "").trim()
+  const statementRaw = String(params.originalStatement ?? "").trim()
+  if (!statementRaw || !correct) {
+    return { ok: false, reason: "Sem enunciado/gabarito para fallback." }
+  }
+
+  let answer: "Certo" | "Errado" = "Certo"
+  let statement = statementRaw
+
+  if (params.originalType === "certo_errado") {
+    const c = correct.toLowerCase()
+    answer = c.startsWith("e") || c === "errado" ? "Errado" : "Certo"
+    // Remove prefácio típico CESPE e mantém a assertiva
+    statement = statementRaw
+      .replace(
+        /^.*?julgue\s+(o\s+)?(próximo\s+)?(item|assertiva|texto)[^.]*\.\s*/i,
+        ""
+      )
+      .trim()
+    if (!statement || statement.length < 20) statement = statementRaw
+  } else {
+    const opt = params.options?.find(
+      (o) =>
+        o.label.toUpperCase() === correct.toUpperCase() ||
+        o.text.trim().toLowerCase() === correct.toLowerCase()
+    )
+    const optText = opt?.text?.trim() || correct
+    statement = `Julgue a seguinte afirmação: ${optText}`
+    answer = "Certo"
+  }
+
+  const fromDetail =
+    (params.errorDetail?.feedback_detailed as string) ||
+    (params.errorDetail?.misconception as string) ||
+    ""
+  const explanation =
+    String(fromDetail).trim() ||
+    `Gabarito: ${answer}. Revise o conceito cobrado na questão original.`
+
+  const summary =
+    (params.tecTopic && String(params.tecTopic).trim()) ||
+    statement.slice(0, 80)
+  const knowledge_key = normalizeKnowledgeKey(summary)
+  if (!knowledge_key) {
+    return { ok: false, reason: "knowledge_key vazia no fallback." }
   }
 
   return {
