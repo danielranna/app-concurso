@@ -7,6 +7,7 @@ export type JobType =
   | "brain_ingest_report"
   | "subject_dossier_generate"
   | "error_notebook_ingest"
+  | "error_review_question_generate"
   | "strategy_recompute"
   | "strategy_recompute_all"
   | "execution_plan_today"

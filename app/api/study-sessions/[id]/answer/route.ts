@@ -11,6 +11,7 @@ import {
 } from "@/lib/question-study"
 import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
 import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+import { onWrongAttemptForErrorReview } from "@/lib/error-from-attempt"
 
 export const maxDuration = 120
 
@@ -105,6 +106,20 @@ export async function POST(
     confidence_level: confidence,
     attempt_tags: Array.isArray(tags) ? tags : undefined,
   })
+
+  if (!is_correct) {
+    try {
+      await onWrongAttemptForErrorReview({
+        userId: user_id,
+        questionId: question_id,
+        attemptId,
+        selectedAnswer: selected_answer,
+        notebookId: notebook_id ?? null,
+      })
+    } catch (e) {
+      console.error("[error-review] onWrongAttempt", e)
+    }
+  }
 
   await enqueueQuestionResolveAi({
     userId: user_id,

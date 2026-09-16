@@ -982,6 +982,21 @@ export async function ingestWhatsappAnswer(input: {
     if (!/attempt_tags/i.test(msg)) throw e
   }
 
+  if (!isCorrect && inboundAttemptId) {
+    try {
+      const { onWrongAttemptForErrorReview } = await import("./error-from-attempt")
+      await onWrongAttemptForErrorReview({
+        userId,
+        questionId,
+        attemptId: inboundAttemptId,
+        selectedAnswer: selected,
+        notebookId,
+      })
+    } catch (e) {
+      console.error("[error-review] onWrongAttempt whatsapp", e)
+    }
+  }
+
   if (input.tags?.length) {
     const { data: last } = await supabaseServer
       .from("question_attempts")

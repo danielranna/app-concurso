@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import AddErrorModal from "@/components/AddErrorModal"
@@ -154,6 +155,12 @@ export default function ErrosPage() {
           Painel de Análise de Erros
         </h1>
         <div className="flex shrink-0 gap-2 sm:gap-3">
+          <Link
+            href="/erros/revisao"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+          >
+            Revisar erros (C/E)
+          </Link>
           <button
             onClick={() => setIsAddErrorOpen(true)}
             className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-white transition hover:bg-slate-800"

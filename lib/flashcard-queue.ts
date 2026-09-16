@@ -87,6 +87,7 @@ export async function fetchDueStates(
         image_url,
         image_occluded_url,
         image_masks,
+        source_error_id,
         flashcard_decks ( name, fsrs_parameters )
       )
     `

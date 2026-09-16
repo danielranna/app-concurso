@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import ErrorCard from "@/components/ErrorCard"
 import AddErrorModal from "@/components/AddErrorModal"
@@ -17,6 +18,13 @@ type ErrorItem = {
   error_status: string
   error_type?: string
   created_at: string
+  motivo?: string | null
+  explanation?: string | null
+  knowledge_summary?: string | null
+  recurrence_count?: number | null
+  learning_status?: string | null
+  last_reviewed_at?: string | null
+  next_review_at?: string | null
   topics: {
     id: string
     name: string
@@ -124,28 +132,38 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-600">Mapa de erros manual desta matéria.</p>
-        <button
-          type="button"
-          onClick={() => {
-            setEditingError({
-              id: "",
-              topic_id: "",
-              subject_id: subjectId,
-              error_text: "",
-              correction_text: "",
-              description: "",
-              reference_link: "",
-              error_type: "",
-              error_status: "",
-            })
-            setOpenModal(true)
-          }}
-          className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          <Plus className="h-4 w-4" />
-          Adicionar erro
-        </button>
+        <p className="text-sm text-slate-600">
+          Caderno permanente de erros desta matéria (inclui erros automáticos de questões).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/erros/revisao"
+            className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Revisar erros (C/E)
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingError({
+                id: "",
+                topic_id: "",
+                subject_id: subjectId,
+                error_text: "",
+                correction_text: "",
+                description: "",
+                reference_link: "",
+                error_type: "",
+                error_status: "",
+              })
+              setOpenModal(true)
+            }}
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar erro
+          </button>
+        </div>
       </div>
 
       <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -296,6 +314,18 @@ export default function SubjectErrorsView({ subjectId, embedded = false }: Props
                     )
                   )
                 }
+              }}
+              onMotivoSave={async (errorId, motivo) => {
+                const res = await fetch(`/api/errors/${errorId}/motivo`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ motivo }),
+                })
+                if (!res.ok) throw new Error("Falha ao salvar motivo")
+                setErrors((prev) =>
+                  prev.map((e) => (e.id === errorId ? { ...e, motivo } : e))
+                )
+                if (userId) cache.invalidateErrors(userId, subjectId)
               }}
             />
           ))}

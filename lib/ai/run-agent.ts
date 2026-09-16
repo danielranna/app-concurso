@@ -11,6 +11,7 @@ export type AgentType =
   | "execution"
   | "error_notebook_canvas"
   | "question_explain"
+  | "error_review_question"
 
 export type RunAgentParams = {
   agentType: AgentType

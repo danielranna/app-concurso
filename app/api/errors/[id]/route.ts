@@ -111,7 +111,8 @@ export async function PUT(
     description,
     reference_link,
     error_type,
-    error_status
+    error_status,
+    motivo,
   } = body
 
   if (!topic_id || !error_text || !correction_text) {
@@ -135,17 +136,22 @@ export async function PUT(
     .eq("id", topic_id)
     .single()
 
+  const patch: Record<string, unknown> = {
+    topic_id,
+    error_text,
+    correction_text,
+    description: description || null,
+    reference_link: reference_link || null,
+    error_type,
+    error_status,
+  }
+  if (motivo !== undefined) {
+    patch.motivo = typeof motivo === "string" && motivo.trim() ? motivo.trim() : null
+  }
+
   const { error } = await supabaseServer
     .from("errors")
-    .update({
-      topic_id,
-      error_text,
-      correction_text,
-      description: description || null,
-      reference_link: reference_link || null,
-      error_type,
-      error_status
-    })
+    .update(patch)
     .eq("id", id)
 
   if (error) {

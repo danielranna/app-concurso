@@ -47,6 +47,17 @@ export async function GET(req: Request) {
           created_at,
           review_count,
           needs_intervention,
+          source_question_id,
+          selected_answer,
+          correct_answer,
+          explanation,
+          motivo,
+          recurrence_count,
+          learning_status,
+          knowledge_summary,
+          knowledge_key,
+          active_flashcard_id,
+          last_reviewed_at,
           topics!inner (
             id,
             name,
@@ -83,7 +94,31 @@ export async function GET(req: Request) {
         throw new Error(error.message)
       }
 
-      return data ?? []
+      const rows = data ?? []
+      const cardIds = rows
+        .map((r) => (r as { active_flashcard_id?: string | null }).active_flashcard_id)
+        .filter((id): id is string => Boolean(id))
+
+      let dueByCard = new Map<string, string>()
+      if (cardIds.length > 0) {
+        const { data: states } = await supabaseServer
+          .from("flashcard_states")
+          .select("card_id, due_at")
+          .eq("user_id", userId)
+          .in("card_id", cardIds)
+        dueByCard = new Map(
+          (states ?? []).map((s) => [s.card_id as string, s.due_at as string])
+        )
+      }
+
+      return rows.map((r) => {
+        const cardId = (r as { active_flashcard_id?: string | null })
+          .active_flashcard_id
+        return {
+          ...r,
+          next_review_at: cardId ? dueByCard.get(cardId) ?? null : null,
+        }
+      })
     },
     ["errors"],
     {

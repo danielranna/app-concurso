@@ -9,6 +9,7 @@ import {
 } from "@/lib/question-study"
 import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
 import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
+import { onWrongAttemptForErrorReview } from "@/lib/error-from-attempt"
 
 export const maxDuration = 120
 
@@ -60,6 +61,21 @@ export async function POST(
   })
 
   await refreshNotebookProgress(notebook_id, user_id)
+
+  if (!is_correct) {
+    try {
+      await onWrongAttemptForErrorReview({
+        userId: user_id,
+        questionId: question_id,
+        attemptId,
+        selectedAnswer: selected_answer,
+        notebookId: notebook_id,
+      })
+    } catch (e) {
+      console.error("[error-review] onWrongAttempt", e)
+    }
+  }
+
   await enqueueQuestionResolveAi({
     userId: user_id,
     questionId: question_id,

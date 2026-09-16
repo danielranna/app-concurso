@@ -20,6 +20,7 @@ export type FlashcardRow = {
   image_url: string | null
   image_occluded_url: string | null
   image_masks: ImageMask[] | null
+  source_error_id?: string | null
   created_at: string
   flashcard_decks?: { name: string }
 }
