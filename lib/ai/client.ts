@@ -1,4 +1,7 @@
-import { defaultModelForProvider } from "./models"
+import {
+  defaultModelForProvider,
+  isOpenAiReasoningModel,
+} from "./models"
 import type { UserAiCredentials } from "./user-credentials"
 
 export type AiMessage = { role: "system" | "user"; content: string }
@@ -41,6 +44,9 @@ async function completeOpenAI(
   credentials: UserAiCredentials
 ): Promise<AiCompleteResult> {
   const model = resolveModel(opts, credentials)
+  const maxTokens = opts.maxTokens ?? 2000
+  const reasoning = isOpenAiReasoningModel(model)
+
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -50,8 +56,13 @@ async function completeOpenAI(
     body: JSON.stringify({
       model,
       messages: opts.messages,
-      max_tokens: opts.maxTokens ?? 2000,
-      ...(opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
+      ...(reasoning
+        ? { max_completion_tokens: maxTokens }
+        : { max_tokens: maxTokens }),
+      // o-series: json_object nem sempre é aceito; pedimos JSON no prompt quando falhar no server
+      ...(!reasoning && opts.jsonMode
+        ? { response_format: { type: "json_object" } }
+        : {}),
     }),
   })
 

@@ -1,6 +1,6 @@
 -- Chave de IA por usuário (BYOK): cada um usa a própria conta OpenAI/Anthropic
 -- Execute no Supabase SQL Editor após sql-ai-coaching.sql
--- Depois: sql-user-ai-preferred-model.sql (coluna preferred_model)
+-- Depois: sql-user-ai-preferred-model.sql (coluna preferred_model em bases já criadas)
 
 CREATE TABLE IF NOT EXISTS user_ai_credentials (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS user_ai_credentials (
     CHECK (provider IN ('openai', 'anthropic')),
   encrypted_key TEXT NOT NULL,
   key_hint TEXT NOT NULL,
+  preferred_model TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
