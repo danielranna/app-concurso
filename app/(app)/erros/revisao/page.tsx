@@ -5,6 +5,14 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 
+type Origin = {
+  question_id: string | null
+  tec_id: number | null
+  tec_url: string | null
+  statement_preview: string | null
+  app_href: string | null
+}
+
 type QueueCard = {
   id: string
   statement: string | null
@@ -12,14 +20,70 @@ type QueueCard = {
   knowledge_summary: string | null
   recurrence_count: number | null
   error_id: string | null
+  origin: Origin | null
 }
 
-type AnswerResult = {
+type Preview = { again: string; hard: string; good: string; easy: string }
+
+type CheckResult = {
   is_correct: boolean
   correct_answer: string
   explanation: string
-  due_at: string
-  learning_status: string
+  selected: string
+  preview: Preview
+  suggested_rating: number
+}
+
+const RATING_HELP: Record<number, { label: string; title: string }> = {
+  1: {
+    label: "Again",
+    title: "Errei — o card volta aos passos de aprendizado e reaparece cedo.",
+  },
+  2: {
+    label: "Hard",
+    title: "Lembrei com dificuldade — intervalo menor que Good.",
+  },
+  3: {
+    label: "Good",
+    title: "Lembrei — intervalo padrão FSRS.",
+  },
+  4: {
+    label: "Easy",
+    title: "Muito fácil — intervalo bem maior; use só quando for trivial.",
+  },
+}
+
+function OriginLinks({ origin }: { origin: Origin | null }) {
+  if (!origin) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {origin.tec_id != null && (
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">
+          TEC #{origin.tec_id}
+        </span>
+      )}
+      {origin.app_href && (
+        <Link
+          href={origin.app_href}
+          className="text-blue-600 hover:underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Ver no app
+        </Link>
+      )}
+      {origin.tec_url && (
+        <a
+          href={origin.tec_url}
+          className="text-blue-600 hover:underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Abrir no TEC
+        </a>
+      )}
+    </div>
+  )
 }
 
 export default function ErrosRevisaoPage() {
@@ -30,18 +94,26 @@ export default function ErrosRevisaoPage() {
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [answering, setAnswering] = useState(false)
-  const [result, setResult] = useState<AnswerResult | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [grading, setGrading] = useState(false)
+  const [check, setCheck] = useState<CheckResult | null>(null)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [retention, setRetention] = useState(0.85)
+  const [savingRetention, setSavingRetention] = useState(false)
 
   const loadQueue = useCallback(async (uid: string) => {
     setLoading(true)
-    setResult(null)
+    setCheck(null)
     const res = await fetch(`/api/erros/revisao/queue?user_id=${uid}`)
     const data = await res.json()
     setLoading(false)
+    if (typeof data.request_retention === "number") {
+      setRetention(data.request_retention)
+    }
     if (!data.card) {
       setDone(true)
       setCard(null)
+      setPreview(null)
       setGenerating(Boolean(data.generating))
       return
     }
@@ -49,6 +121,7 @@ export default function ErrosRevisaoPage() {
     setGenerating(false)
     setCard(data.card)
     setRemaining(data.remaining ?? 0)
+    setPreview(data.preview ?? null)
   }, [])
 
   useEffect(() => {
@@ -62,7 +135,6 @@ export default function ErrosRevisaoPage() {
     })
   }, [router, loadQueue])
 
-  // Poll while generating — e tenta processar jobs pendentes
   useEffect(() => {
     if (!userId || !generating || card) return
     let cancelled = false
@@ -82,9 +154,9 @@ export default function ErrosRevisaoPage() {
     }
   }, [userId, generating, card, loadQueue])
 
-  async function answer(selected: "Certo" | "Errado") {
-    if (!userId || !card || answering) return
-    setAnswering(true)
+  async function answerCe(selected: "Certo" | "Errado") {
+    if (!userId || !card || checking) return
+    setChecking(true)
     try {
       const res = await fetch("/api/erros/revisao/answer", {
         method: "POST",
@@ -93,22 +165,71 @@ export default function ErrosRevisaoPage() {
           user_id: userId,
           card_id: card.id,
           selected_answer: selected,
+          check_only: true,
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Falha ao responder")
-      setResult(data)
+      if (!res.ok) throw new Error(data.error || "Falha ao conferir")
+      setCheck(data)
+      setPreview(data.preview ?? preview)
     } catch (e) {
       console.error(e)
-      alert(e instanceof Error ? e.message : "Erro ao responder")
+      alert(e instanceof Error ? e.message : "Erro ao conferir")
     } finally {
-      setAnswering(false)
+      setChecking(false)
     }
   }
 
-  function advance() {
+  async function grade(rating: number) {
+    if (!userId || !card || !check || grading) return
+    setGrading(true)
+    try {
+      const res = await fetch("/api/erros/revisao/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          card_id: card.id,
+          selected_answer: check.selected,
+          rating,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Falha ao agendar")
+      await loadQueue(userId)
+    } catch (e) {
+      console.error(e)
+      alert(e instanceof Error ? e.message : "Erro ao agendar")
+    } finally {
+      setGrading(false)
+    }
+  }
+
+  async function saveRetention(value: number) {
     if (!userId) return
-    loadQueue(userId)
+    setRetention(value)
+    setSavingRetention(true)
+    try {
+      const res = await fetch("/api/erros/revisao/fsrs-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          request_retention: value,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Falha ao salvar")
+      setRetention(data.request_retention)
+      // Recarrega preview com novos params se ainda no verso
+      if (card && !check) {
+        await loadQueue(userId)
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSavingRetention(false)
+    }
   }
 
   if (loading && !card) {
@@ -133,6 +254,11 @@ export default function ErrosRevisaoPage() {
             Não há assertivas de revisão pendentes agora. O FSRS define quando voltam.
           </p>
         )}
+        <RetentionSlider
+          value={retention}
+          saving={savingRetention}
+          onChange={saveRetention}
+        />
         <div className="flex gap-3 text-sm">
           <Link href="/erros" className="text-blue-600 hover:underline">
             Caderno de erros
@@ -154,13 +280,15 @@ export default function ErrosRevisaoPage() {
     )
   }
 
+  const suggested = check?.suggested_rating ?? (check && !check.is_correct ? 1 : 3)
+
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Revisão de erros</h1>
           <p className="mt-1 text-xs text-slate-500">
-            {remaining + 1} na fila · deck Revisão de Erros · FSRS
+            {remaining + 1} na fila · deck Revisão de Erros · FSRS próprio
           </p>
         </div>
         <Link href="/erros" className="text-sm text-slate-600 hover:underline">
@@ -168,13 +296,27 @@ export default function ErrosRevisaoPage() {
         </Link>
       </div>
 
+      <RetentionSlider
+        value={retention}
+        saving={savingRetention}
+        onChange={saveRetention}
+      />
+
       {card.from_error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          Veio de um erro anterior
-          {card.knowledge_summary ? ` · ${card.knowledge_summary}` : ""}
-          {card.recurrence_count && card.recurrence_count > 1
-            ? ` · ${card.recurrence_count}× no caderno`
-            : ""}
+          <div className="font-medium">Veio de um erro</div>
+          {card.knowledge_summary ? (
+            <p className="mt-0.5 opacity-90">{card.knowledge_summary}</p>
+          ) : null}
+          {card.recurrence_count && card.recurrence_count > 1 ? (
+            <p className="mt-0.5 opacity-80">{card.recurrence_count}× no caderno</p>
+          ) : null}
+          {card.origin?.statement_preview ? (
+            <p className="mt-1 line-clamp-2 text-amber-800/80">
+              Origem: {card.origin.statement_preview}
+            </p>
+          ) : null}
+          <OriginLinks origin={card.origin} />
         </div>
       )}
 
@@ -185,21 +327,22 @@ export default function ErrosRevisaoPage() {
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">
           {card.statement}
         </p>
+        {!check && <OriginLinks origin={card.origin} />}
 
-        {!result ? (
+        {!check ? (
           <div className="mt-6 flex gap-3">
             <button
               type="button"
-              disabled={answering}
-              onClick={() => answer("Certo")}
+              disabled={checking}
+              onClick={() => answerCe("Certo")}
               className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               Certo
             </button>
             <button
               type="button"
-              disabled={answering}
-              onClick={() => answer("Errado")}
+              disabled={checking}
+              onClick={() => answerCe("Errado")}
               className="flex-1 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
             >
               Errado
@@ -209,36 +352,106 @@ export default function ErrosRevisaoPage() {
           <div className="mt-6 space-y-4">
             <div
               className={`rounded-lg p-4 text-sm ${
-                result.is_correct
+                check.is_correct
                   ? "bg-emerald-50 text-emerald-900"
                   : "bg-rose-50 text-rose-900"
               }`}
             >
-              {result.is_correct ? "Você acertou." : "Você errou."} Gabarito:{" "}
-              <strong>{result.correct_answer}</strong>
+              {check.is_correct ? "Você acertou." : "Você errou."} Gabarito:{" "}
+              <strong>{check.correct_answer}</strong>
             </div>
-            {result.explanation && (
+            {check.explanation && (
               <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-800">
                 <p className="mb-1 text-xs font-semibold text-slate-600">Explicação</p>
-                <p className="whitespace-pre-wrap leading-relaxed">{result.explanation}</p>
+                <p className="whitespace-pre-wrap leading-relaxed">{check.explanation}</p>
               </div>
             )}
-            <p className="text-xs text-slate-500">
-              Próxima revisão (FSRS):{" "}
-              {result.due_at
-                ? new Date(result.due_at).toLocaleString("pt-BR")
-                : "—"}
-            </p>
-            <button
-              type="button"
-              onClick={advance}
-              className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              Avançar
-            </button>
+            <OriginLinks origin={card.origin} />
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Quão bem você lembrou? (FSRS)
+              </p>
+              {!check.is_correct && (
+                <p className="mb-2 text-xs text-amber-800">
+                  Como errou o C/E, sugerimos <strong>Again</strong> — ainda pode escolher
+                  outra nota.
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(
+                  [
+                    ["again", 1, preview?.again],
+                    ["hard", 2, preview?.hard],
+                    ["good", 3, preview?.good],
+                    ["easy", 4, preview?.easy],
+                  ] as const
+                ).map(([, rating, interval]) => {
+                  const highlight = rating === suggested
+                  return (
+                    <button
+                      key={rating}
+                      type="button"
+                      disabled={grading}
+                      title={RATING_HELP[rating].title}
+                      onClick={() => grade(rating)}
+                      className={`rounded-lg border py-3 text-sm disabled:opacity-50 ${
+                        highlight
+                          ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300"
+                          : "border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="block font-medium">
+                        {RATING_HELP[rating].label}
+                      </span>
+                      {interval && (
+                        <span className="text-xs text-slate-500">{interval}</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+function RetentionSlider({
+  value,
+  saving,
+  onChange,
+}: {
+  value: number
+  saving: boolean
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-600">
+        <span className="font-medium text-slate-800">Retenção FSRS (erros)</span>
+        <span>
+          {Math.round(value * 100)}%
+          {saving ? " · salvando…" : ""}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={80}
+        max={90}
+        step={1}
+        value={Math.round(value * 100)}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        className="mt-2 w-full accent-slate-800"
+        aria-label="Retenção FSRS do deck de erros"
+      />
+      <div className="mt-0.5 flex justify-between text-[10px] text-slate-400">
+        <span>80%</span>
+        <span>Só este deck · não altera flashcards</span>
+        <span>90%</span>
+      </div>
     </div>
   )
 }

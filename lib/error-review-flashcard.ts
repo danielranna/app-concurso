@@ -1,30 +1,122 @@
 import { supabaseServer } from "./supabase-server"
 import { ensureCardState } from "./flashcard-review"
+import { mergeFsrsParams } from "./fsrs-params-merge"
+import type { FSRSParameters } from "ts-fsrs"
 
 export const ERROR_REVIEW_DECK_NAME = "Revisão de Erros"
+export const ERROR_REVIEW_RETENTION_DEFAULT = 0.85
+export const ERROR_REVIEW_RETENTION_MIN = 0.8
+export const ERROR_REVIEW_RETENTION_MAX = 0.9
+
+export function clampErrorReviewRetention(value: number): number {
+  return Math.min(
+    ERROR_REVIEW_RETENTION_MAX,
+    Math.max(ERROR_REVIEW_RETENTION_MIN, value)
+  )
+}
 
 export async function ensureErrorReviewDeck(userId: string): Promise<string> {
   const { data: existing } = await supabaseServer
     .from("flashcard_decks")
-    .select("id")
+    .select("id, fsrs_parameters")
     .eq("user_id", userId)
     .eq("name", ERROR_REVIEW_DECK_NAME)
     .maybeSingle()
 
-  if (existing?.id) return existing.id
+  if (existing?.id) {
+    const params = (existing.fsrs_parameters ?? {}) as Record<string, unknown>
+    if (params.request_retention == null) {
+      await supabaseServer
+        .from("flashcard_decks")
+        .update({
+          fsrs_parameters: {
+            ...params,
+            request_retention: ERROR_REVIEW_RETENTION_DEFAULT,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id)
+    }
+    return existing.id
+  }
 
   const { data, error } = await supabaseServer
     .from("flashcard_decks")
     .insert({
       user_id: userId,
       name: ERROR_REVIEW_DECK_NAME,
-      fsrs_parameters: {},
+      fsrs_parameters: {
+        request_retention: ERROR_REVIEW_RETENTION_DEFAULT,
+      },
     })
     .select("id")
     .single()
 
   if (error) throw new Error(error.message)
   return data.id as string
+}
+
+/** Params FSRS só do deck de erros (não herda retenção global dos flashcards). */
+export async function resolveErrorReviewFsrsParams(
+  userId: string
+): Promise<Partial<FSRSParameters>> {
+  const deckId = await ensureErrorReviewDeck(userId)
+  const { data } = await supabaseServer
+    .from("flashcard_decks")
+    .select("fsrs_parameters")
+    .eq("id", deckId)
+    .maybeSingle()
+
+  const deck = (data?.fsrs_parameters ?? {}) as Record<string, unknown>
+  const retention = clampErrorReviewRetention(
+    Number(deck.request_retention ?? ERROR_REVIEW_RETENTION_DEFAULT)
+  )
+  return mergeFsrsParams({
+    ...deck,
+    request_retention: retention,
+  })
+}
+
+export async function getErrorReviewRetention(userId: string): Promise<{
+  deck_id: string
+  request_retention: number
+}> {
+  const deckId = await ensureErrorReviewDeck(userId)
+  const { data } = await supabaseServer
+    .from("flashcard_decks")
+    .select("fsrs_parameters")
+    .eq("id", deckId)
+    .maybeSingle()
+  const params = (data?.fsrs_parameters ?? {}) as { request_retention?: number }
+  return {
+    deck_id: deckId,
+    request_retention: clampErrorReviewRetention(
+      Number(params.request_retention ?? ERROR_REVIEW_RETENTION_DEFAULT)
+    ),
+  }
+}
+
+export async function setErrorReviewRetention(
+  userId: string,
+  retention: number
+): Promise<{ deck_id: string; request_retention: number }> {
+  const deckId = await ensureErrorReviewDeck(userId)
+  const next = clampErrorReviewRetention(retention)
+  const { data } = await supabaseServer
+    .from("flashcard_decks")
+    .select("fsrs_parameters")
+    .eq("id", deckId)
+    .maybeSingle()
+  const prev = (data?.fsrs_parameters ?? {}) as Record<string, unknown>
+  await supabaseServer
+    .from("flashcard_decks")
+    .update({
+      fsrs_parameters: { ...prev, request_retention: next },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", deckId)
+    .eq("user_id", userId)
+  return { deck_id: deckId, request_retention: next }
 }
 
 export function encodeErrorReviewBack(params: {
