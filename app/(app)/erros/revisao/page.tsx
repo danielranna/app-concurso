@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Trash2 } from "lucide-react"
+import { CalendarDays, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 type Origin = {
@@ -37,6 +37,15 @@ type CheckResult = {
   is_first_review?: boolean
 }
 
+type ScheduleSource = {
+  question_id: string
+  tec_id: number | null
+  tec_url: string | null
+  app_href: string
+  error_id: string
+  created_at: string
+}
+
 type ScheduleRow = {
   card_id: string
   error_id: string | null
@@ -45,7 +54,7 @@ type ScheduleRow = {
   subject_name: string | null
   created_at: string
   next_review_at: string | null
-  app_href: string | null
+  sources: ScheduleSource[]
 }
 
 const RATING_HELP: Record<number, { label: string; title: string }> = {
@@ -135,8 +144,9 @@ export default function ErrosRevisaoPage() {
   const [scheduleSubjects, setScheduleSubjects] = useState<
     { id: string; name: string }[]
   >([])
-  const [subjectFilter, setSubjectFilter] = useState<string>("")
+  const [subjectFilter, setSubjectFilter] = useState("")
   const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [agendaOpen, setAgendaOpen] = useState(false)
   const sessionSeeded = useRef(false)
 
   const loadSchedule = useCallback(async (uid: string, subjectId?: string) => {
@@ -155,42 +165,42 @@ export default function ErrosRevisaoPage() {
     }
   }, [])
 
-  const loadQueue = useCallback(
-    async (uid: string) => {
-      setLoading(true)
-      setCheck(null)
-      const res = await fetch(`/api/erros/revisao/queue?user_id=${uid}`)
-      const data = await res.json()
-      setLoading(false)
-      if (!data.card) {
-        setDone(true)
-        setCard(null)
-        setPreview(null)
-        setOpenCount(0)
-        setGenerating(Boolean(data.generating))
-        void loadSchedule(uid, subjectFilter || undefined)
-        return
-      }
-      const rem = Number(data.remaining ?? 0)
-      const due = Number(data.total_due ?? rem + 1)
-      const open = Math.max(1, rem + 1)
-      setDone(false)
-      setGenerating(false)
-      setCard(data.card)
-      setRemaining(rem)
-      setOpenCount(open)
-      setPreview(data.preview ?? null)
-      setIsFirstReview(Boolean(data.card.is_first_review))
-      if (!sessionSeeded.current) {
-        sessionSeeded.current = true
-        setSessionTotal(Math.max(due, open))
-      } else {
-        setSessionTotal((prev) => Math.max(prev, open))
-      }
-      void loadSchedule(uid, subjectFilter || undefined)
-    },
-    [loadSchedule, subjectFilter]
-  )
+  const openAgenda = useCallback(() => {
+    setAgendaOpen(true)
+    if (userId) void loadSchedule(userId, subjectFilter || undefined)
+  }, [userId, subjectFilter, loadSchedule])
+
+  const loadQueue = useCallback(async (uid: string) => {
+    setLoading(true)
+    setCheck(null)
+    const res = await fetch(`/api/erros/revisao/queue?user_id=${uid}`)
+    const data = await res.json()
+    setLoading(false)
+    if (!data.card) {
+      setDone(true)
+      setCard(null)
+      setPreview(null)
+      setOpenCount(0)
+      setGenerating(Boolean(data.generating))
+      return
+    }
+    const rem = Number(data.remaining ?? 0)
+    const due = Number(data.total_due ?? rem + 1)
+    const open = Math.max(1, rem + 1)
+    setDone(false)
+    setGenerating(false)
+    setCard(data.card)
+    setRemaining(rem)
+    setOpenCount(open)
+    setPreview(data.preview ?? null)
+    setIsFirstReview(Boolean(data.card.is_first_review))
+    if (!sessionSeeded.current) {
+      sessionSeeded.current = true
+      setSessionTotal(Math.max(due, open))
+    } else {
+      setSessionTotal((prev) => Math.max(prev, open))
+    }
+  }, [])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -204,9 +214,9 @@ export default function ErrosRevisaoPage() {
   }, [router, loadQueue])
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId || !agendaOpen) return
     void loadSchedule(userId, subjectFilter || undefined)
-  }, [userId, subjectFilter, loadSchedule])
+  }, [userId, subjectFilter, agendaOpen, loadSchedule])
 
   useEffect(() => {
     if (!userId || !generating || card) return
@@ -308,6 +318,7 @@ export default function ErrosRevisaoPage() {
         throw new Error(err.error || "Falha ao remover assertiva")
       }
       await loadQueue(userId)
+      if (agendaOpen) void loadSchedule(userId, subjectFilter || undefined)
     } catch (e) {
       console.error(e)
       alert(e instanceof Error ? e.message : "Erro ao excluir")
@@ -322,102 +333,177 @@ export default function ErrosRevisaoPage() {
   const progressPct = Math.min(100, Math.round((doneCount / total) * 100))
   const firstReview = isFirstReview || Boolean(card?.is_first_review)
 
-  const scheduleTable = (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Agenda de erros</h2>
-          <p className="text-xs text-slate-500">
-            Criação, próxima revisão e filtro por matéria.
-          </p>
-        </div>
-        <label className="text-xs text-slate-600">
-          Matéria
-          <select
-            className="ml-2 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
-            value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-          >
-            <option value="">Todas</option>
-            {scheduleSubjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {scheduleLoading ? (
-        <p className="text-xs text-slate-500">Carregando agenda…</p>
-      ) : scheduleRows.length === 0 ? (
-        <p className="text-xs text-slate-500">Nenhuma assertiva no deck ainda.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-500">
-                <th className="py-2 pr-2 font-medium">Assertiva</th>
-                <th className="py-2 pr-2 font-medium">Matéria</th>
-                <th className="py-2 pr-2 font-medium">Criado</th>
-                <th className="py-2 pr-2 font-medium">Próxima</th>
-                <th className="py-2 font-medium"> </th>
-              </tr>
-            </thead>
-            <tbody>
-              {scheduleRows.map((row) => (
-                <tr key={row.card_id} className="border-b border-slate-100">
-                  <td className="max-w-[240px] py-2 pr-2 text-slate-800">
-                    <p className="line-clamp-2">{row.statement_preview || "—"}</p>
-                    {row.app_href && (
-                      <Link
-                        href={row.app_href}
-                        className="mt-0.5 inline-block text-blue-600 hover:underline"
-                        target="_blank"
-                      >
-                        Questão
-                      </Link>
-                    )}
-                  </td>
-                  <td className="py-2 pr-2 text-slate-700">
-                    {row.subject_name ?? "—"}
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-2 text-slate-600">
-                    {formatDt(row.created_at)}
-                  </td>
-                  <td className="whitespace-nowrap py-2 pr-2 text-slate-600">
-                    {formatDt(row.next_review_at)}
-                  </td>
-                  <td className="py-2 text-right">
-                    <button
-                      type="button"
-                      disabled={deleting}
-                      onClick={() =>
-                        void deleteErrorAndCard({
-                          errorId: row.error_id,
-                          cardId: row.card_id,
-                        })
-                      }
-                      className="inline-flex items-center gap-1 rounded border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                      title="Excluir"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+  const agendaButton = (
+    <button
+      type="button"
+      onClick={openAgenda}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+    >
+      <CalendarDays className="h-4 w-4" />
+      Agenda
+    </button>
   )
+
+  const agendaModal = agendaOpen ? (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-900/40"
+        aria-label="Fechar agenda"
+        onClick={() => setAgendaOpen(false)}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agenda-title"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col rounded-t-2xl border border-slate-200 bg-white shadow-xl sm:rounded-2xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
+          <div>
+            <h2 id="agenda-title" className="text-base font-semibold text-slate-900">
+              Agenda de erros
+            </h2>
+            <p className="text-xs text-slate-500">
+              Questões de origem (podem ser várias por conhecimento), datas e filtro por
+              matéria.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAgendaOpen(false)}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+            aria-label="Fechar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-b border-slate-50 px-4 py-2 sm:px-5">
+          <label className="text-xs text-slate-600">
+            Matéria
+            <select
+              className="ml-2 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
+              value={subjectFilter}
+              onChange={(e) => setSubjectFilter(e.target.value)}
+            >
+              <option value="">Todas</option>
+              {scheduleSubjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="text-xs text-slate-400">
+            {scheduleRows.length} card{scheduleRows.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <div className="overflow-auto px-4 py-3 sm:px-5">
+          {scheduleLoading ? (
+            <p className="text-xs text-slate-500">Carregando agenda…</p>
+          ) : scheduleRows.length === 0 ? (
+            <p className="text-xs text-slate-500">Nenhuma assertiva no deck ainda.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="py-2 pr-2 font-medium">Assertiva</th>
+                    <th className="py-2 pr-2 font-medium">Questões de origem</th>
+                    <th className="py-2 pr-2 font-medium">Matéria</th>
+                    <th className="py-2 pr-2 font-medium">Criado</th>
+                    <th className="py-2 pr-2 font-medium">Próxima</th>
+                    <th className="py-2 font-medium"> </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scheduleRows.map((row) => (
+                    <tr key={row.card_id} className="border-b border-slate-100 align-top">
+                      <td className="max-w-[200px] py-2.5 pr-2 text-slate-800">
+                        <p className="line-clamp-3">{row.statement_preview || "—"}</p>
+                      </td>
+                      <td className="py-2.5 pr-2">
+                        {row.sources?.length ? (
+                          <ul className="space-y-1.5">
+                            {row.sources.map((src) => (
+                              <li key={`${row.card_id}-${src.question_id}-${src.error_id}`}>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                  {src.tec_id != null && (
+                                    <span className="rounded bg-slate-100 px-1 py-0.5 font-medium text-slate-700">
+                                      TEC #{src.tec_id}
+                                    </span>
+                                  )}
+                                  <Link
+                                    href={src.app_href}
+                                    className="text-blue-600 hover:underline"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Ver no app
+                                  </Link>
+                                  {src.tec_url && (
+                                    <a
+                                      href={src.tec_url}
+                                      className="text-blue-600 hover:underline"
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      TEC
+                                    </a>
+                                  )}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="text-slate-400">Sem vínculo</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-2 text-slate-700">
+                        {row.subject_name ?? "—"}
+                      </td>
+                      <td className="whitespace-nowrap py-2.5 pr-2 text-slate-600">
+                        {formatDt(row.created_at)}
+                      </td>
+                      <td className="whitespace-nowrap py-2.5 pr-2 text-slate-600">
+                        {formatDt(row.next_review_at)}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <button
+                          type="button"
+                          disabled={deleting}
+                          onClick={() =>
+                            void deleteErrorAndCard({
+                              errorId: row.error_id,
+                              cardId: row.card_id,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 rounded border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null
 
   if (loading && !card) {
     return (
       <div className="mx-auto max-w-3xl space-y-6 p-6">
-        <p className="text-sm text-slate-600">Carregando revisão de erros…</p>
-        {userId && scheduleTable}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-600">Carregando revisão de erros…</p>
+          {agendaButton}
+        </div>
+        {agendaModal}
       </div>
     )
   }
@@ -425,40 +511,43 @@ export default function ErrosRevisaoPage() {
   if (done || !card) {
     return (
       <div className="mx-auto max-w-3xl space-y-6 p-6">
-        <div className="space-y-4">
-          <h1 className="text-xl font-semibold text-slate-900">Revisão de erros</h1>
-          {generating ? (
-            <p className="text-sm text-slate-600">
-              Gerando assertiva C/E a partir dos seus erros recentes… Isso pode levar alguns
-              segundos. A página atualiza automaticamente.
-            </p>
-          ) : (
-            <p className="text-sm text-slate-600">
-              Não há assertivas pendentes agora. Veja a agenda abaixo.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-3 text-sm">
-            <Link href="/erros" className="text-blue-600 hover:underline">
-              Caderno de erros
-            </Link>
-            <Link
-              href="/configuracoes?tab=erros"
-              className="text-blue-600 hover:underline"
-            >
-              Configurar FSRS
-            </Link>
-            {generating && userId && (
-              <button
-                type="button"
-                className="text-blue-600 hover:underline"
-                onClick={() => loadQueue(userId)}
-              >
-                Atualizar agora
-              </button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-4">
+            <h1 className="text-xl font-semibold text-slate-900">Revisão de erros</h1>
+            {generating ? (
+              <p className="text-sm text-slate-600">
+                Gerando assertiva C/E a partir dos seus erros recentes… Isso pode levar alguns
+                segundos. A página atualiza automaticamente.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-600">
+                Não há assertivas pendentes agora. Abra a agenda para ver datas e origens.
+              </p>
             )}
+            <div className="flex flex-wrap gap-3 text-sm">
+              <Link href="/erros" className="text-blue-600 hover:underline">
+                Caderno de erros
+              </Link>
+              <Link
+                href="/configuracoes?tab=erros"
+                className="text-blue-600 hover:underline"
+              >
+                Configurar FSRS
+              </Link>
+              {generating && userId && (
+                <button
+                  type="button"
+                  className="text-blue-600 hover:underline"
+                  onClick={() => loadQueue(userId)}
+                >
+                  Atualizar agora
+                </button>
+              )}
+            </div>
           </div>
+          {agendaButton}
         </div>
-        {scheduleTable}
+        {agendaModal}
       </div>
     )
   }
@@ -473,7 +562,8 @@ export default function ErrosRevisaoPage() {
             {remaining > 0 ? ` · ${remaining} depois desta` : ""}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1 text-sm">
+        <div className="flex flex-col items-end gap-2 text-sm">
+          {agendaButton}
           <Link href="/erros" className="text-slate-600 hover:underline">
             Caderno
           </Link>
@@ -632,7 +722,7 @@ export default function ErrosRevisaoPage() {
         )}
       </section>
 
-      {scheduleTable}
+      {agendaModal}
     </div>
   )
 }

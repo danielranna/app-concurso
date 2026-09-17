@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { fetchAllPages } from "./supabase-pages"
 import { isSubjectLevelMapping, loadMappings } from "./tec-mapping"
 
 function normKey(s: string) {
@@ -168,25 +169,25 @@ export async function fetchQuestionStatistics(
     (notebooks ?? []).map((n) => [n.id, n.subject_id as string | null])
   )
 
-  let attemptQuery = supabaseServer
-    .from("question_attempts")
-    .select(
-      `
+  const attempts = (await fetchAllPages<AttemptRow>((from, to) => {
+    let q = supabaseServer
+      .from("question_attempts")
+      .select(
+        `
       question_id, notebook_id, is_correct, created_at,
       questions ( tec_subject, tec_topic )
     `
-    )
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true })
+      )
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .range(from, to)
 
-  if (since) {
-    attemptQuery = attemptQuery.gte("created_at", since)
-  }
+    if (since) {
+      q = q.gte("created_at", since)
+    }
 
-  const { data: attemptsRaw, error } = await attemptQuery
-  if (error) throw new Error(error.message)
-
-  const attempts = (attemptsRaw ?? []) as AttemptRow[]
+    return q
+  })) as AttemptRow[]
 
   const bySubjectTopics = new Map<string, Map<string, { correct: number; wrong: number }>>()
   const unassignedTopics = new Map<string, { correct: number; wrong: number }>()

@@ -2,8 +2,18 @@ import { NextResponse } from "next/server"
 import { ensureErrorReviewDeck } from "@/lib/error-review-flashcard"
 import { supabaseServer } from "@/lib/supabase-server"
 
+type SourceQuestion = {
+  question_id: string
+  tec_id: number | null
+  tec_url: string | null
+  app_href: string
+  error_id: string
+  created_at: string
+}
+
 /**
- * Lista cards do deck Revisão de Erros com datas e matéria (para tabela na UI).
+ * Lista cards do deck Revisão de Erros com datas, matéria e questões de origem
+ * (podem ser várias quando o mesmo conhecimento agrupa erros).
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -63,18 +73,75 @@ export async function GET(req: Request) {
         | null
     }
 
-    const errorByCard = new Map<string, ErrRow>()
+    const errorsByCard = new Map<string, ErrRow[]>()
     for (const e of (linkedErrors ?? []) as ErrRow[]) {
-      if (e.active_flashcard_id && !errorByCard.has(e.active_flashcard_id)) {
-        errorByCard.set(e.active_flashcard_id, e)
+      if (!e.active_flashcard_id) continue
+      const list = errorsByCard.get(e.active_flashcard_id) ?? []
+      list.push(e)
+      errorsByCard.set(e.active_flashcard_id, list)
+    }
+
+    const missingErrorIds: string[] = []
+    for (const c of cards ?? []) {
+      const sourceErrorId = (c as { source_error_id?: string }).source_error_id
+      if (!sourceErrorId) continue
+      const list = errorsByCard.get(c.id) ?? []
+      if (!list.some((e) => e.id === sourceErrorId)) {
+        missingErrorIds.push(sourceErrorId)
+      }
+    }
+
+    if (missingErrorIds.length) {
+      const { data: extraErrors } = await supabaseServer
+        .from("errors")
+        .select(
+          "id, created_at, active_flashcard_id, source_question_id, topics(subject_id, subjects(id, name))"
+        )
+        .in("id", [...new Set(missingErrorIds)])
+      for (const src of (extraErrors ?? []) as ErrRow[]) {
+        const card = (cards ?? []).find(
+          (c) => (c as { source_error_id?: string }).source_error_id === src.id
+        )
+        if (!card) continue
+        const list = errorsByCard.get(card.id) ?? []
+        if (!list.some((e) => e.id === src.id)) {
+          list.push(src)
+          errorsByCard.set(card.id, list)
+        }
+      }
+    }
+
+    const questionIds = new Set<string>()
+    for (const list of errorsByCard.values()) {
+      for (const e of list) {
+        if (e.source_question_id) questionIds.add(e.source_question_id)
+      }
+    }
+
+    const questionMeta = new Map<
+      string,
+      { tec_id: number | null; tec_url: string | null }
+    >()
+    if (questionIds.size) {
+      const { data: questions } = await supabaseServer
+        .from("questions")
+        .select("id, tec_id, tec_url")
+        .in("id", [...questionIds])
+      for (const q of questions ?? []) {
+        questionMeta.set(q.id, {
+          tec_id: q.tec_id != null ? Number(q.tec_id) : null,
+          tec_url: q.tec_url ? String(q.tec_url) : null,
+        })
       }
     }
 
     const subjectsMap = new Map<string, string>()
     const rows = []
+
     for (const c of cards ?? []) {
-      const err = errorByCard.get(c.id)
-      const topics = err?.topics
+      const errs = errorsByCard.get(c.id) ?? []
+      const primary = errs[0]
+      const topics = primary?.topics
       const t = Array.isArray(topics) ? topics[0] : topics
       const sub = t?.subjects
       const s = Array.isArray(sub) ? sub[0] : sub
@@ -84,20 +151,43 @@ export async function GET(req: Request) {
 
       if (subject_id && subjectId !== subject_id) continue
 
+      const sources: SourceQuestion[] = []
+      const seenQ = new Set<string>()
+      for (const e of errs) {
+        const qid = e.source_question_id
+        if (!qid || seenQ.has(qid)) continue
+        seenQ.add(qid)
+        const meta = questionMeta.get(qid)
+        sources.push({
+          question_id: qid,
+          tec_id: meta?.tec_id ?? null,
+          tec_url: meta?.tec_url ?? null,
+          app_href: `/questoes/questao/${qid}`,
+          error_id: e.id,
+          created_at: e.created_at,
+        })
+      }
+
       const statement = String(c.front_text ?? "").trim()
+      const earliest =
+        errs.length > 0
+          ? errs.reduce((min, e) =>
+              e.created_at < min ? e.created_at : min,
+              errs[0].created_at
+            )
+          : c.created_at
+
       rows.push({
         card_id: c.id,
-        error_id: err?.id ?? (c as { source_error_id?: string }).source_error_id ?? null,
+        error_id: primary?.id ?? (c as { source_error_id?: string }).source_error_id ?? null,
+        error_ids: errs.map((e) => e.id),
         statement_preview:
           statement.length > 120 ? `${statement.slice(0, 120)}…` : statement,
         subject_id: subjectId,
         subject_name: subjectName,
-        created_at: err?.created_at ?? c.created_at,
+        created_at: earliest,
         next_review_at: statesByCard.get(c.id) ?? null,
-        source_question_id: err?.source_question_id ?? null,
-        app_href: err?.source_question_id
-          ? `/questoes/questao/${err.source_question_id}`
-          : null,
+        sources,
       })
     }
 
