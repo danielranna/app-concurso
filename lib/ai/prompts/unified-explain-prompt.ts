@@ -1,6 +1,7 @@
 import {
   TUTOR_ANTI_HALLUCINATION,
   TUTOR_CALCULO_RULES,
+  TUTOR_CONCEPTUAL_RULES,
   TUTOR_JSON_ONLY,
 } from "./tutor-grounding"
 
@@ -13,13 +14,15 @@ ${TUTOR_ANTI_HALLUCINATION}
 
 ${TUTOR_CALCULO_RULES}
 
+${TUTOR_CONCEPTUAL_RULES}
+
 Estrutura obrigatória do campo feedback (prosa, sem bullets), teto ~120 palavras se NÃO for questão de cálculo; se for cálculo, teto ~180 palavras e a maior parte DEVE ser operações (ver CÁLCULO).
 Ordem:
 1) Abertura causal (abaixo)
-2) Âncora no enunciado (statement) OU nas options se o enunciado for insuficiente
-3) Por que a marcada falha (ou ramo em branco)
-4) Por que o gabarito cabe — com conta se aplicável
-5) Opcional: 1 distrator só se o texto em options for semanticamente próximo da marcada ou do equívoco em user_note/specific_mistake; senão omita
+2) Âncora: critério cobrado no enunciado (statement)
+3) Por que a marcada falha frente a esse critério (ou ramo em branco)
+4) Por que o gabarito cabe frente ao mesmo critério — com conta se CÁLCULO
+5) Se user_note citar outra letra OU options tiverem distrator semanticamente próximo da marcada/equívoco: 1 frase confrontando essa alternativa com o critério; senão omita
 
 Abertura:
 - Se is_correct=false: abra com "Você errou porque..."
@@ -29,7 +32,7 @@ Abertura:
 Se statement for curto demais (< 40 caracteres): cite o que houver e baseie-se prioritariamente em options + correct_option_text; NÃO complete o enunciado com conhecimento externo.
 Se statement terminar com "…[enunciado truncado]": NÃO invente as partes faltantes; calcule só com números presentes; se a conta exigir dado cortado, declare a lacuna.
 
-IMPORTANTE sobre user_note: se existir, mencione em no máximo 1 frase qual equívoco a nota sugere — NÃO responda em profundidade às dúvidas da nota aqui (há etapa dedicada de esclarecimento).
+IMPORTANTE sobre user_note: no máximo 1–2 frases — nomeie o equívoco residual (ex.: dúvida na letra A) e feche com o critério do enunciado + texto da option citada. NÃO transforme o feedback numa aula pedida na nota (há etapa NOTE_CLARIFICATION).
 
 REGRAS GERAIS:
 1. Foque no porquê do erro/acerto frágil na questão — não em definições pedidas na nota
@@ -39,6 +42,10 @@ REGRAS GERAIS:
 5. source deve ser sempre "ai_generated"
 6. misconception: 1 frase do equívoco mental; "" se em branco ou sem evidência concreta
 7. Português (BR), tom de tutor de concurso, didático e direto
+
+EXEMPLO red_yellow (erro conceitual — lei complementar / direito financeiro):
+Input: enunciado pede matéria cujas normas gerais exigem lei complementar; marcada C (operações de câmbio… atos do Bacen); gabarito E (condições e limites para incentivo/benefício tributário); nota "Fiquei com dúvida também na A"
+Feedback esperado: "Você errou porque o enunciado exige matéria de direito financeiro cuja norma geral depende de lei complementar, e a C trata de operações de câmbio reguladas por atos do Banco Central — não pelo tipo de lei cobrado. O gabarito E fala em condições e limites para concessão/ampliação/prorrogação de incentivo ou benefício de natureza tributária, que é precisamente o tipo de matéria geral apontada pelo pedido do enunciado. Sua dúvida na A: confronte o texto de A com o mesmo filtro (norma geral via lei complementar), sem misturar com a lógica da C."
 
 EXEMPLO red_yellow (erro conceitual — externalidade):
 Input resumido: marcada B "risco moral", gabarito E "externalidade"

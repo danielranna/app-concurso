@@ -12,6 +12,7 @@ import {
   STATEMENT_LLM_MAX_CHARS,
   STATEMENT_TRUNCATED_SUFFIX,
 } from "../prompts/statement-for-llm"
+import { isUmbrellaExplainFeedback } from "../prompts/tutor-grounding"
 import { resolveOptionText } from "../question-option-utils"
 
 function baseQuestion(
@@ -129,11 +130,43 @@ const options = [
 // --- buildFallbackFeedback ---
 {
   const fb = buildFallbackFeedback(baseQuestion(), options, "red_yellow", "falta_compreensao")
-  assert.match(fb, /Você errou/)
+  assert.match(fb, /Você errou porque/)
   assert.match(fb, /risco moral/)
   assert.match(fb, /externalidade/)
   assert.match(fb, /falha de mercado era só monopólio/)
-  assert.doesNotMatch(fb, /Revise o conceito no enunciado e confronte com o gabarito/)
+  assert.doesNotMatch(fb, /reflete o conceito cobrado/)
+  assert.doesNotMatch(fb, /não responde ao que o enunciado pede/)
+  assert.doesNotMatch(fb, /compare cada alternativa com o trecho-chave/)
+}
+
+{
+  const leiQ = baseQuestion({
+    statement:
+      "O direito financeiro brasileiro exige, frequentemente, regulação por leis complementares. Assinale a opção que apresenta matéria cujas normas gerais exigem lei complementar.",
+    statement_excerpt:
+      "O direito financeiro brasileiro exige, frequentemente, regulação por leis complementares.",
+    selected_answer: "C",
+    correct_answer: "E",
+    user_note: "Fiquei com dúvida também na A",
+  })
+  const leiOpts = [
+    { label: "A", text: "matéria hipotética A de teste." },
+    {
+      label: "C",
+      text: "operações de câmbio realizadas pelos entes públicos, à exceção da União, regulamentada por atos do Banco Central.",
+    },
+    {
+      label: "E",
+      text: "condições e limites para concessão, ampliação ou prorrogação de incentivo ou benefício de natureza tributária.",
+    },
+  ]
+  const fb = buildFallbackFeedback(leiQ, leiOpts, "red_yellow", "falta_compreensao")
+  assert.match(fb, /lei complementar/)
+  assert.match(fb, /câmbio/)
+  assert.match(fb, /incentivo ou benefício/)
+  assert.match(fb, /\bA\b/)
+  assert.doesNotMatch(fb, /reflete o conceito cobrado/)
+  assert.doesNotMatch(fb, /há confusão conceitual entre ideias parecidas/)
 }
 
 {
@@ -157,10 +190,12 @@ const options = [
 {
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /CÁLCULO/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /ANTI-ALUCINAÇÃO/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /EXPLICAÇÃO CONCEITUAL/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /APENAS com um único objeto JSON/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /bater EXATAMENTE/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /NÃO force/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /MESMA formatação/)
+  assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /reflete o conceito cobrado/)
   assert.match(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /red_yellow/)
   assert.doesNotMatch(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_only/)
   assert.doesNotMatch(UNIFIED_EXPLAIN_SYSTEM_PROMPT, /green_note_zone/)
@@ -171,6 +206,21 @@ const options = [
   assert.match(NOTE_CLARIFICATION_SYSTEM, /bater EXATAMENTE/)
   assert.match(NOTE_CLARIFICATION_SYSTEM, /NÃO force/)
   assert.match(NOTE_CLARIFICATION_SYSTEM, /MESMA formatação/)
+}
+
+{
+  assert.equal(
+    isUmbrellaExplainFeedback(
+      "O gabarito E encaixa porque reflete o conceito cobrado."
+    ),
+    true
+  )
+  assert.equal(
+    isUmbrellaExplainFeedback(
+      "Você errou porque a C fala de atos do Bacen e o enunciado pede lei complementar; E trata de incentivos tributários."
+    ),
+    false
+  )
 }
 
 console.log("behavioral-audit.test.ts: all assertions passed")

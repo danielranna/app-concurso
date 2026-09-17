@@ -29,3 +29,31 @@ OBRIGATÓRIO nesse caso:
 Fora desses casos, NÃO invente um exercício numérico.`
 
 export const TUTOR_JSON_ONLY = `Responda APENAS com um único objeto JSON válido (RFC 8259). Sem preâmbulo, sem markdown, sem \`\`\` , sem comentários.`
+
+/** Frases-guarda-chuva proibidas no feedback de explain (LLM e detecção pós-hoc). */
+export const EXPLAIN_UMBRELLA_PHRASES = [
+  "reflete o conceito cobrado",
+  "não responde ao que o enunciado pede",
+  "compare cada alternativa com o trecho-chave",
+  "indica onde revisar",
+  "há confusão conceitual entre ideias parecidas",
+  "após os devidos cálculos",
+  "considera todos os elementos",
+  "aplicando a fórmula correta",
+] as const
+
+export function isUmbrellaExplainFeedback(
+  text: string | null | undefined
+): boolean {
+  const t = (text ?? "").trim().toLowerCase()
+  if (!t) return true
+  return EXPLAIN_UMBRELLA_PHRASES.some((p) => t.includes(p))
+}
+
+export const TUTOR_CONCEPTUAL_RULES = `EXPLICAÇÃO CONCEITUAL / JURÍDICA (quando NÃO for caso de CÁLCULO):
+1) Extraia do statement o CRITÉRIO cobrado (o que a banca pede para escolher a certa — ex.: "matéria cujas normas gerais exigem lei complementar", "asserção INCORRETA", "exceção à regra"). Cite esse critério em palavras próximas ao enunciado.
+2) Para a alternativa marcada: diga POR QUE o texto dela NÃO satisfaz esse critério, usando trechos da própria marcada (marked_option_text) — não diga só que "não responde".
+3) Para o gabarito: diga POR QUE o texto dele SATISFAZ o critério, usando correct_option_text — PROIBIDO "encaixa porque reflete o conceito cobrado" ou equivalentes circulares.
+4) Se user_note citar outra letra (A–E) ou "dúvida na X": OBRIGATÓRIO confrontar essa alternativa (texto em options) com o mesmo critério em 1 frase. Isso não é "esclarecer a nota em profundidade"; é fechar o equívoco residual da auditoria.
+5) PROIBIDO no feedback: "reflete o conceito cobrado", "não responde ao que o enunciado pede" (sozinho), "compare cada alternativa com o trecho-chave", "indica onde revisar" + conselho genérico, "há confusão conceitual entre ideias parecidas" sem nomear as ideias.
+6) Sem inventar dispositivo legal fora do input (ver ANTI-ALUCINAÇÃO). Se o vínculo for só pelo texto das options vs critério do enunciado, explique por contraste textual.`

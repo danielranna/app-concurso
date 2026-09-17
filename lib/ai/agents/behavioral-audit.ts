@@ -15,6 +15,7 @@ import {
 import { supabaseServer } from "../../supabase-server"
 import { mergeUnifiedExplainIntoErrors } from "../merge-unified-errors"
 import { UNIFIED_EXPLAIN_SYSTEM_PROMPT } from "../prompts/unified-explain-prompt"
+import { isUmbrellaExplainFeedback } from "../prompts/tutor-grounding"
 import { loadOptionsByQuestion } from "../question-options"
 import {
   buildExplainLlmItem,
@@ -114,6 +115,9 @@ function workItemToAuditItem(
       note_body: noteBody || undefined,
     }
   }
+  const llmFeedback = llm.feedback?.trim() || ""
+  const useLlmFeedback =
+    llmFeedback.length > 0 && !isUmbrellaExplainFeedback(llmFeedback)
   return {
     question_index: q.question_index,
     question_id: q.question_id,
@@ -126,7 +130,7 @@ function workItemToAuditItem(
     user_note: noteBody || undefined,
     outcome_category: q.outcome_category,
     confidence_level: q.confidence_level,
-    feedback: llm.feedback?.trim() || fallback.feedback,
+    feedback: useLlmFeedback ? llmFeedback : fallback.feedback,
     misconception: llm.misconception,
     error_taxonomy:
       item.mode === "red_yellow"
