@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 
 type Origin = {
@@ -91,13 +92,17 @@ export default function ErrosRevisaoPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [card, setCard] = useState<QueueCard | null>(null)
   const [remaining, setRemaining] = useState(0)
+  const [openCount, setOpenCount] = useState(0)
+  const [sessionTotal, setSessionTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [checking, setChecking] = useState(false)
   const [grading, setGrading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [check, setCheck] = useState<CheckResult | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
+  const sessionSeeded = useRef(false)
 
   const loadQueue = useCallback(async (uid: string) => {
     setLoading(true)
@@ -109,14 +114,25 @@ export default function ErrosRevisaoPage() {
       setDone(true)
       setCard(null)
       setPreview(null)
+      setOpenCount(0)
       setGenerating(Boolean(data.generating))
       return
     }
+    const rem = Number(data.remaining ?? 0)
+    const due = Number(data.total_due ?? rem + 1)
+    const open = Math.max(1, rem + 1)
     setDone(false)
     setGenerating(false)
     setCard(data.card)
-    setRemaining(data.remaining ?? 0)
+    setRemaining(rem)
+    setOpenCount(open)
     setPreview(data.preview ?? null)
+    if (!sessionSeeded.current) {
+      sessionSeeded.current = true
+      setSessionTotal(Math.max(due, open))
+    } else {
+      setSessionTotal((prev) => Math.max(prev, open))
+    }
   }, [])
 
   useEffect(() => {
@@ -200,6 +216,38 @@ export default function ErrosRevisaoPage() {
     }
   }
 
+  async function deleteCurrentError() {
+    if (!userId || !card || deleting) return
+    const ok = confirm(
+      "Excluir este erro e remover a assertiva da revisão? Isso não pode ser desfeito."
+    )
+    if (!ok) return
+    setDeleting(true)
+    try {
+      if (card.error_id) {
+        const errRes = await fetch(`/api/errors/${card.error_id}`, {
+          method: "DELETE",
+        })
+        if (!errRes.ok) {
+          const err = await errRes.json().catch(() => ({}))
+          throw new Error(err.error || "Falha ao excluir erro")
+        }
+      }
+      const cardRes = await fetch(
+        `/api/flashcards/cards/${card.id}?user_id=${userId}`,
+        { method: "DELETE" }
+      )
+      if (!cardRes.ok) {
+        const err = await cardRes.json().catch(() => ({}))
+        throw new Error(err.error || "Falha ao remover assertiva")
+      }
+      await loadQueue(userId)
+    } catch (e) {
+      console.error(e)
+      alert(e instanceof Error ? e.message : "Erro ao excluir")
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (loading && !card) {
@@ -252,6 +300,9 @@ export default function ErrosRevisaoPage() {
   }
 
   const suggested = check?.suggested_rating ?? (check && !check.is_correct ? 1 : 3)
+  const total = Math.max(sessionTotal, openCount, 1)
+  const doneCount = Math.max(0, total - openCount)
+  const progressPct = Math.min(100, Math.round((doneCount / total) * 100))
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
@@ -259,7 +310,9 @@ export default function ErrosRevisaoPage() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Revisão de erros</h1>
           <p className="mt-1 text-xs text-slate-500">
-            {remaining + 1} na fila · deck Revisão de Erros · FSRS próprio
+            {openCount} em aberto
+            {remaining > 0 ? ` · ${remaining} depois desta` : ""} · FSRS (mesmos pesos dos
+            flashcards)
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 text-sm">
@@ -275,21 +328,64 @@ export default function ErrosRevisaoPage() {
         </div>
       </div>
 
+      <div>
+        <div className="mb-1.5 flex items-center justify-between text-xs text-slate-600">
+          <span>
+            Progresso da sessão · {doneCount}/{total}
+          </span>
+          <span className="tabular-nums">{progressPct}%</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+          <div
+            className="h-full rounded-full bg-slate-900 transition-all duration-300"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      </div>
+
       {card.from_error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <div className="font-medium">Veio de um erro</div>
-          {card.knowledge_summary ? (
-            <p className="mt-0.5 opacity-90">{card.knowledge_summary}</p>
-          ) : null}
-          {card.recurrence_count && card.recurrence_count > 1 ? (
-            <p className="mt-0.5 opacity-80">{card.recurrence_count}× no caderno</p>
-          ) : null}
-          {card.origin?.statement_preview ? (
-            <p className="mt-1 line-clamp-2 text-amber-800/80">
-              Origem: {card.origin.statement_preview}
-            </p>
-          ) : null}
-          <OriginLinks origin={card.origin} />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Veio de um erro</div>
+              {card.knowledge_summary ? (
+                <p className="mt-0.5 opacity-90">{card.knowledge_summary}</p>
+              ) : null}
+              {card.recurrence_count && card.recurrence_count > 1 ? (
+                <p className="mt-0.5 opacity-80">{card.recurrence_count}× no caderno</p>
+              ) : null}
+              {card.origin?.statement_preview ? (
+                <p className="mt-1 line-clamp-2 text-amber-800/80">
+                  Origem: {card.origin.statement_preview}
+                </p>
+              ) : null}
+              <OriginLinks origin={card.origin} />
+            </div>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => void deleteCurrentError()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              title="Excluir erro"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deleting ? "…" : "Excluir"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!card.from_error && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => void deleteCurrentError()}
+            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {deleting ? "…" : "Excluir assertiva"}
+          </button>
         </div>
       )}
 

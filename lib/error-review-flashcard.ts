@@ -1,6 +1,6 @@
 import { supabaseServer } from "./supabase-server"
 import { ensureCardState } from "./flashcard-review"
-import { mergeFsrsParams } from "./fsrs-params-merge"
+import { resolveFsrsParams } from "./flashcard-fsrs-params"
 import type { FSRSParameters } from "ts-fsrs"
 
 export const ERROR_REVIEW_DECK_NAME = "Revisão de Erros"
@@ -56,25 +56,19 @@ export async function ensureErrorReviewDeck(userId: string): Promise<string> {
   return data.id as string
 }
 
-/** Params FSRS só do deck de erros (não herda retenção global dos flashcards). */
+/**
+ * Mesmo FSRS dos flashcards (pesos/user settings), com retenção só do deck de erros.
+ * Assim o preview Again/Hard/Good/Easy fica alinhado ao estudo de flashcards.
+ */
 export async function resolveErrorReviewFsrsParams(
   userId: string
 ): Promise<Partial<FSRSParameters>> {
   const deckId = await ensureErrorReviewDeck(userId)
-  const { data } = await supabaseServer
-    .from("flashcard_decks")
-    .select("fsrs_parameters")
-    .eq("id", deckId)
-    .maybeSingle()
-
-  const deck = (data?.fsrs_parameters ?? {}) as Record<string, unknown>
+  const merged = await resolveFsrsParams(userId, deckId)
   const retention = clampErrorReviewRetention(
-    Number(deck.request_retention ?? ERROR_REVIEW_RETENTION_DEFAULT)
+    Number(merged.request_retention ?? ERROR_REVIEW_RETENTION_DEFAULT)
   )
-  return mergeFsrsParams({
-    ...deck,
-    request_retention: retention,
-  })
+  return { ...merged, request_retention: retention }
 }
 
 export async function getErrorReviewRetention(userId: string): Promise<{
