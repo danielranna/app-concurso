@@ -6,6 +6,10 @@ import {
   getErrorReviewRetention,
   resolveErrorReviewFsrsParams,
 } from "@/lib/error-review-flashcard"
+import {
+  firstReviewPreviewLabels,
+  isFirstErrorReview,
+} from "@/lib/error-review-answer"
 import { supabaseServer } from "@/lib/supabase-server"
 import {
   buildScheduler,
@@ -65,46 +69,78 @@ export async function GET(req: Request) {
 
     const row = rows[0]
     const fc = row.flashcards
-    const decoded = decodeErrorReviewBack(fc.back_text)
+    decodeErrorReviewBack(fc.back_text)
     const deckParams = await resolveErrorReviewFsrsParams(user_id)
     const fsrsCard = deserializeFsrsCard(row.state_data)
     const scheduler = buildScheduler(deckParams)
     const preview = scheduler.repeat(fsrsCard, new Date())
+    const labels = previewLabels(preview)
+    const first = isFirstErrorReview(fsrsCard)
 
     let fromError: {
       id: string
-      knowledge_summary: string | null
       recurrence_count: number | null
       source_question_id: string | null
+      subject_id: string | null
+      subject_name: string | null
     } | null = null
 
     const { data: linked } = await supabaseServer
       .from("errors")
-      .select("id, knowledge_summary, recurrence_count, source_question_id")
+      .select(
+        "id, recurrence_count, source_question_id, topics(subject_id, subjects(id, name))"
+      )
       .eq("user_id", user_id)
       .eq("active_flashcard_id", fc.id)
       .limit(1)
       .maybeSingle()
 
+    function parseSubject(row: {
+      topics?:
+        | {
+            subject_id?: string
+            subjects?: { id?: string; name?: string } | { id?: string; name?: string }[]
+          }
+        | {
+            subject_id?: string
+            subjects?: { id?: string; name?: string } | { id?: string; name?: string }[]
+          }[]
+        | null
+    }) {
+      const topics = row.topics
+      const t = Array.isArray(topics) ? topics[0] : topics
+      if (!t) return { subject_id: null as string | null, subject_name: null as string | null }
+      const sub = t.subjects
+      const s = Array.isArray(sub) ? sub[0] : sub
+      return {
+        subject_id: (s?.id as string) ?? (t.subject_id as string) ?? null,
+        subject_name: (s?.name as string) ?? null,
+      }
+    }
+
     if (linked) {
+      const sub = parseSubject(linked as never)
       fromError = {
         id: linked.id,
-        knowledge_summary: linked.knowledge_summary,
         recurrence_count: linked.recurrence_count,
         source_question_id: linked.source_question_id ?? null,
+        ...sub,
       }
     } else if ((fc as { source_error_id?: string }).source_error_id) {
       const { data: src } = await supabaseServer
         .from("errors")
-        .select("id, knowledge_summary, recurrence_count, source_question_id")
+        .select(
+          "id, recurrence_count, source_question_id, topics(subject_id, subjects(id, name))"
+        )
         .eq("id", (fc as { source_error_id: string }).source_error_id)
         .maybeSingle()
       if (src) {
+        const sub = parseSubject(src as never)
         fromError = {
           id: src.id,
-          knowledge_summary: src.knowledge_summary,
           recurrence_count: src.recurrence_count,
           source_question_id: src.source_question_id ?? null,
+          ...sub,
         }
       }
     }
@@ -113,7 +149,6 @@ export async function GET(req: Request) {
       question_id: string | null
       tec_id: number | null
       tec_url: string | null
-      statement_preview: string | null
       app_href: string | null
     } | null = null
 
@@ -121,19 +156,14 @@ export async function GET(req: Request) {
     if (sourceQuestionId) {
       const { data: q } = await supabaseServer
         .from("questions")
-        .select("id, tec_id, tec_url, statement")
+        .select("id, tec_id, tec_url")
         .eq("id", sourceQuestionId)
         .maybeSingle()
       if (q) {
-        const previewText = String(q.statement ?? "").trim()
         origin = {
           question_id: q.id,
           tec_id: q.tec_id != null ? Number(q.tec_id) : null,
           tec_url: q.tec_url ? String(q.tec_url) : null,
-          statement_preview:
-            previewText.length > 160
-              ? `${previewText.slice(0, 160)}…`
-              : previewText || null,
           app_href: `/questoes/questao/${q.id}`,
         }
       } else {
@@ -141,7 +171,6 @@ export async function GET(req: Request) {
           question_id: sourceQuestionId,
           tec_id: null,
           tec_url: null,
-          statement_preview: null,
           app_href: `/questoes/questao/${sourceQuestionId}`,
         }
       }
@@ -156,16 +185,17 @@ export async function GET(req: Request) {
       later_count: laterCount,
       next_due_at: nextDueAt,
       request_retention: retentionInfo.request_retention,
-      preview: previewLabels(preview),
+      preview: first ? firstReviewPreviewLabels(labels.again) : labels,
       card: {
         id: fc.id,
         statement: fc.front_text,
         type: "certo_errado",
         from_error: Boolean(fromError),
-        knowledge_summary:
-          fromError?.knowledge_summary ?? decoded?.knowledge_summary ?? null,
+        is_first_review: first,
         recurrence_count: fromError?.recurrence_count ?? null,
         error_id: fromError?.id ?? null,
+        subject_id: fromError?.subject_id ?? null,
+        subject_name: fromError?.subject_name ?? null,
         origin,
       },
     })

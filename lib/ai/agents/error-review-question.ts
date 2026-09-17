@@ -11,18 +11,22 @@ export type ErrorReviewQuestionResult = {
   explanation?: string
 }
 
-const SYSTEM_PROMPT = `Você é um elaborador de questões de concurso público (CERTO/ERRADO).
+const SYSTEM_PROMPT = `Você é um elaborador de questões de concurso público no formato CERTO/ERRADO (estilo CESPE/Cebraspe).
 
 Tarefa: a partir de uma questão que o aluno ERROU, identificar o CONHECIMENTO CENTRAL e criar UMA nova assertiva certo/errado que teste o MESMO conhecimento em OUTRO contexto.
 
 Regras obrigatórias:
-1. NÃO parafrasear a questão original. NÃO copiar frase, personagens, números, alternativas ou estrutura.
-2. Variar contexto, redação e forma de cobrança.
-3. Preservar rigorosamente o ponto jurídico/conceitual cobrado. NÃO inventar artigos, súmulas, exceções ou regras.
-4. Se não houver informação suficiente para uma assertiva confiável, responda JSON com ok=false e reason.
-5. Formato SEMPRE certo/errado (gabarito "Certo" ou "Errado").
-6. knowledge_summary: frase curta do conceito (ex.: "diferença entre anulação e revogação de atos administrativos").
-7. explanation: explicação jurídica do gabarito (NÃO é o motivo do erro do aluno).
+1. A assertiva (statement) DEVE ser uma FRASE COMPLETA, afirmativa, com sujeito + predicado, julgável como verdadeira ou falsa.
+   - BOM: "No âmbito da qualidade de dados, controles de qualidade devem ser incorporados aos processos de captura e transformação."
+   - RUIM: "incorporação de controles de qualidade nos processos de captura" (fragmento / só substantivo).
+   - RUIM: "Julgue a seguinte afirmação: X" quando X não for frase completa.
+2. NÃO use prefácios como "Julgue o item", "Julgue a seguinte afirmação". Vá direto à assertiva.
+3. NÃO parafrasear a questão original. NÃO copiar frase, personagens, números, alternativas ou estrutura.
+4. Variar contexto, redação e forma de cobrança.
+5. Preservar rigorosamente o ponto jurídico/conceitual cobrado. NÃO inventar artigos, súmulas, exceções ou regras.
+6. Se a base for fraca, responda ok=false — NÃO invente.
+7. knowledge_summary: conceito em 1 linha curta (sem nome de matéria/assunto do edital).
+8. explanation: justifica o gabarito com o conceito (não o motivo psicológico do erro do aluno).
 
 Responda APENAS JSON válido:
 {
@@ -48,6 +52,28 @@ function parseJson(text: string): Record<string, unknown> | null {
       return null
     }
   }
+}
+
+/** Rejeita fragmentos / só substantivos que não dão para julgar C/E. */
+export function isCompleteCeStatement(statement: string): boolean {
+  const s = statement
+    .replace(/^julgue\s+(a\s+seguinte\s+)?(afirmação|item|assertiva)\s*:\s*/i, "")
+    .trim()
+  if (s.length < 40) return false
+  // Precisa parecer frase (espaços + verbo comum em PT) ou terminar com ponto
+  const hasVerbLike =
+    /\b(é|são|está|estão|deve|devem|pode|podem|não|possui|possuem|constitui|configura|compete|cabe|inclui|exclui|trata|refere|aplica|aplica-se|ocorre|ocorrem|exige|exigem|veda|permite)\b/i.test(
+      s
+    )
+  const wordCount = s.split(/\s+/).filter(Boolean).length
+  return hasVerbLike && wordCount >= 8
+}
+
+function normalizeStatement(raw: string): string {
+  return raw
+    .replace(/^julgue\s+(o\s+)?(próximo\s+)?(item|assertiva|texto)[^.]*\.\s*/i, "")
+    .replace(/^julgue\s+(a\s+seguinte\s+)?(afirmação|item|assertiva)\s*:\s*/i, "")
+    .trim()
 }
 
 export async function generateErrorReviewQuestion(params: {
@@ -80,8 +106,10 @@ export async function generateErrorReviewQuestion(params: {
     optionsText ? `Alternativas:\n${optionsText}` : "",
     `Gabarito: ${params.correctAnswer}`,
     `Resposta do aluno: ${params.selectedAnswer}`,
-    detailBits.length ? `Contexto do erro (diagnóstico IA, se houver):\n${detailBits.join("\n")}` : "",
-    "Gere a assertiva C/E conforme as regras.",
+    detailBits.length
+      ? `Contexto do erro (diagnóstico IA, se houver):\n${detailBits.join("\n")}`
+      : "",
+    "Gere UMA assertiva C/E completa (frase com sujeito e predicado), sem prefácio 'Julgue…'.",
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -93,7 +121,7 @@ export async function generateErrorReviewQuestion(params: {
     systemPrompt: SYSTEM_PROMPT,
     userContent,
     jsonMode: true,
-    maxTokens: 1200,
+    maxTokens: 1400,
     metadata: { feature: "error_review_ce" },
   })
 
@@ -117,7 +145,7 @@ export async function generateErrorReviewQuestion(params: {
   }
 
   const summary = String(parsed.knowledge_summary ?? "").trim()
-  const statement = String(parsed.statement ?? "").trim()
+  const statement = normalizeStatement(String(parsed.statement ?? ""))
   const explanation = String(parsed.explanation ?? "").trim()
   const answerRaw = String(parsed.answer ?? "").trim().toLowerCase()
   const answer: "Certo" | "Errado" =
@@ -125,6 +153,13 @@ export async function generateErrorReviewQuestion(params: {
 
   if (!summary || !statement || !explanation) {
     return { ok: false, reason: "Campos obrigatórios ausentes na geração." }
+  }
+
+  if (!isCompleteCeStatement(statement)) {
+    return {
+      ok: false,
+      reason: "Assertiva gerada incompleta (não é frase julgável).",
+    }
   }
 
   const knowledge_key = normalizeKnowledgeKey(summary)
@@ -158,18 +193,12 @@ export function buildFallbackErrorReviewQuestion(params: {
   }
 
   let answer: "Certo" | "Errado" = "Certo"
-  let statement = statementRaw
+  let statement = ""
 
   if (params.originalType === "certo_errado") {
     const c = correct.toLowerCase()
     answer = c.startsWith("e") || c === "errado" ? "Errado" : "Certo"
-    // Remove prefácio típico CESPE e mantém a assertiva
-    statement = statementRaw
-      .replace(
-        /^.*?julgue\s+(o\s+)?(próximo\s+)?(item|assertiva|texto)[^.]*\.\s*/i,
-        ""
-      )
-      .trim()
+    statement = normalizeStatement(statementRaw)
     if (!statement || statement.length < 20) statement = statementRaw
   } else {
     const opt = params.options?.find(
@@ -177,9 +206,28 @@ export function buildFallbackErrorReviewQuestion(params: {
         o.label.toUpperCase() === correct.toUpperCase() ||
         o.text.trim().toLowerCase() === correct.toLowerCase()
     )
-    const optText = opt?.text?.trim() || correct
-    statement = `Julgue a seguinte afirmação: ${optText}`
-    answer = "Certo"
+    const optText = (opt?.text?.trim() || correct).replace(/^[A-Ea-e]\)\s*/, "")
+    // Transforma alternativa (muitas vezes fragmento) em frase julgável.
+    if (isCompleteCeStatement(optText)) {
+      statement = normalizeStatement(optText)
+      answer = "Certo"
+    } else {
+      statement = `É correto afirmar que ${optText.replace(/^que\s+/i, "").replace(/\.$/, "")}.`
+      answer = "Certo"
+    }
+  }
+
+  if (!isCompleteCeStatement(statement)) {
+    // Último recurso: recorta enunciado original se for C/E-like
+    const fromOriginal = normalizeStatement(statementRaw)
+    if (isCompleteCeStatement(fromOriginal)) {
+      statement = fromOriginal
+    } else {
+      return {
+        ok: false,
+        reason: "Fallback não conseguiu montar assertiva completa.",
+      }
+    }
   }
 
   const fromDetail =
@@ -190,9 +238,10 @@ export function buildFallbackErrorReviewQuestion(params: {
     String(fromDetail).trim() ||
     `Gabarito: ${answer}. Revise o conceito cobrado na questão original.`
 
+  // NÃO usar tecTopic como summary (vira dica de assunto na UI).
   const summary =
-    (params.tecTopic && String(params.tecTopic).trim()) ||
-    statement.slice(0, 80)
+    String(fromDetail).trim().slice(0, 100) ||
+    `Conceito revisado: ${statement.slice(0, 60)}…`
   const knowledge_key = normalizeKnowledgeKey(summary)
   if (!knowledge_key) {
     return { ok: false, reason: "knowledge_key vazia no fallback." }
