@@ -4,12 +4,23 @@ import { DEFAULT_WEEKDAY_LIMITS, type FlashcardRow, type WeekdayLimits } from ".
 import { isEligibleForStudy } from "./flashcard-due"
 import { applyDeferToQueue } from "./flashcard-study-order"
 import { deserializeFsrsCard } from "./fsrs-scheduler"
+import { ERROR_REVIEW_DECK_NAME } from "./error-review-flashcard"
 
 const STATE_PRIORITY: Record<number, number> = {
   [State.Learning]: 0,
   [State.Relearning]: 1,
   [State.Review]: 2,
   [State.New]: 3,
+}
+
+function deckNameOf(row: DueRow): string {
+  const d = row.flashcards?.flashcard_decks
+  const deck = Array.isArray(d) ? d[0] : d
+  return String(deck?.name ?? "")
+}
+
+function isErrorReviewDueRow(row: DueRow): boolean {
+  return deckNameOf(row) === ERROR_REVIEW_DECK_NAME
 }
 
 export async function getScheduleSettings(userId: string) {
@@ -64,6 +75,8 @@ export async function fetchDueStates(
     includeNew?: boolean
     before?: Date
     dueNowOnly?: boolean
+    /** Só true quando a fila é explicitamente a revisão de erros. */
+    includeErrorReviewDeck?: boolean
   }
 ) {
   const before = options?.before ?? endOfDay()
@@ -119,6 +132,11 @@ export async function fetchDueStates(
     rows = rows.filter((r) => subjectDeckIds!.includes(r.flashcards.deck_id))
   }
 
+  // Flashcards gerais ≠ assertivas de erro (mesmo storage, filas separadas).
+  if (!options?.includeErrorReviewDeck) {
+    rows = rows.filter((r) => !isErrorReviewDueRow(r))
+  }
+
   if (!options?.includeNew) {
     rows = rows.filter((r) => {
       const st = deserializeFsrsCard(r.state_data)
@@ -171,7 +189,12 @@ export function shuffleStudyQueue(rows: DueRow[]): DueRow[] {
 
 export async function getStudyQueue(
   userId: string,
-  options?: { deckId?: string; subjectId?: string; deferCardIds?: string[] }
+  options?: {
+    deckId?: string
+    subjectId?: string
+    deferCardIds?: string[]
+    includeErrorReviewDeck?: boolean
+  }
 ): Promise<{
   rows: DueRow[]
   limit: number | null
@@ -188,6 +211,7 @@ export async function getStudyQueue(
     subjectId: options?.subjectId,
     includeNew: true,
     before: endOfDay(),
+    includeErrorReviewDeck: options?.includeErrorReviewDeck,
   })
   const studyDue = allToday.filter((r) =>
     isEligibleForStudy(r.due_at, r.state_data, now)
@@ -214,13 +238,23 @@ export async function getStudyQueue(
 }
 
 export async function getPendingForBot(userId: string) {
-  const yesterdayStart = startOfYesterday()
   const yesterdayEnd = endOfYesterday()
   const todayEnd = endOfDay()
 
   const { data: states } = await supabaseServer
     .from("flashcard_states")
-    .select("id, card_id, due_at, state_data")
+    .select(
+      `
+      id,
+      card_id,
+      due_at,
+      state_data,
+      flashcards!inner (
+        id,
+        flashcard_decks ( name )
+      )
+    `
+    )
     .eq("user_id", userId)
     .lte("due_at", todayEnd.toISOString())
 
@@ -228,6 +262,15 @@ export async function getPendingForBot(userId: string) {
   const dueToday: string[] = []
 
   for (const s of states ?? []) {
+    const fc = s.flashcards as
+      | { flashcard_decks?: { name?: string } | { name?: string }[] }
+      | { flashcard_decks?: { name?: string } | { name?: string }[] }[]
+      | null
+    const card = Array.isArray(fc) ? fc[0] : fc
+    const deck = card?.flashcard_decks
+    const deckName = Array.isArray(deck) ? deck[0]?.name : deck?.name
+    if (deckName === ERROR_REVIEW_DECK_NAME) continue
+
     const due = new Date(s.due_at)
     if (due <= yesterdayEnd) {
       overdueYesterday.push(s.card_id)

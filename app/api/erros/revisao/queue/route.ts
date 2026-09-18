@@ -29,7 +29,7 @@ export async function GET(req: Request) {
     const retentionInfo = await getErrorReviewRetention(user_id)
     const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(
       user_id,
-      { deckId }
+      { deckId, includeErrorReviewDeck: true }
     )
 
     if (rows.length === 0) {

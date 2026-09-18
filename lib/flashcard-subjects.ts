@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { ERROR_REVIEW_DECK_NAME } from "./error-review-flashcard"
 
 export type SubjectDeck = {
   subject_id: string
@@ -79,6 +80,7 @@ export async function ensureSubjectDecks(userId: string): Promise<{
   )
 
   for (const d of decks.filter((x) => !x.subject_id)) {
+    if (d.name === ERROR_REVIEW_DECK_NAME) continue
     const matchId = subjectNames.get(d.name.trim().toLowerCase())
     if (matchId && !bySubject.has(matchId)) {
       await supabaseServer
@@ -93,7 +95,9 @@ export async function ensureSubjectDecks(userId: string): Promise<{
 
   const linkedDeckIds = new Set(subjects.map((s) => s.deck_id))
   const orphan_deck_ids = decks
-    .filter((d) => !linkedDeckIds.has(d.id))
+    .filter(
+      (d) => !linkedDeckIds.has(d.id) && d.name !== ERROR_REVIEW_DECK_NAME
+    )
     .map((d) => d.id)
 
   return { subjects, orphan_deck_ids }

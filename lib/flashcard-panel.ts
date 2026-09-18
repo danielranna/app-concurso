@@ -1,6 +1,7 @@
 import { supabaseServer } from "./supabase-server"
 import { isDueForToday, isOverdue } from "./flashcard-due"
 import { ensureSubjectDecks } from "./flashcard-subjects"
+import { ERROR_REVIEW_DECK_NAME } from "./error-review-flashcard"
 
 export type PanelFilter = "due_today" | "overdue" | "all"
 
@@ -64,7 +65,10 @@ export async function fetchPanelData(
 
   if (cardsErr) throw cardsErr
 
-  const allCards = (cards ?? []) as unknown as CardRow[]
+  const allCards = ((cards ?? []) as unknown as CardRow[]).filter((c) => {
+    const d = deckOf(c)
+    return d?.name !== ERROR_REVIEW_DECK_NAME
+  })
 
   const statsForDeck = (deckId: string) => {
     const deckCards = allCards.filter((c) => c.deck_id === deckId)

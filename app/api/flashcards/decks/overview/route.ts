@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import { endOfDay } from "@/lib/flashcard-queue"
+import { ERROR_REVIEW_DECK_NAME } from "@/lib/error-review-flashcard"
 
 export async function GET(req: Request) {
   const user_id = new URL(req.url).searchParams.get("user_id")
@@ -19,6 +20,8 @@ export async function GET(req: Request) {
   if (decksErr) {
     return NextResponse.json({ error: decksErr.message }, { status: 500 })
   }
+
+  const studyDecks = (decks ?? []).filter((d) => d.name !== ERROR_REVIEW_DECK_NAME)
 
   const { data: rows, error: cardsErr } = await supabaseServer
     .from("flashcards")
@@ -40,7 +43,7 @@ export async function GET(req: Request) {
 
   const now = new Date()
 
-  const overview = (decks ?? []).map((deck) => {
+  const overview = studyDecks.map((deck) => {
     const deckCards = (rows ?? []).filter((c) => c.deck_id === deck.id)
     const withDue = deckCards
       .map((c) => {
