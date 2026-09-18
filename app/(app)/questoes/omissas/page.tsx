@@ -181,35 +181,65 @@ function OmissasAppPage() {
   }, [queue, answered, attempts])
 
   const fetchQueue = useCallback(
-    async (opts?: { nav?: NavMode }) => {
+    async (opts?: { nav?: NavMode; question_id?: string; peek?: boolean }) => {
+      const queueIds = queue.map((q) => q.question_id)
+      const answeredIds = [...answered]
       if (!userId || queue.length === 0) {
         return {
           current: null,
           question: null,
           options: [],
           stats,
+          queue_ids: queueIds,
+          answered_ids: answeredIds,
         }
       }
       const pendingLeft = queue.some((q) => !answered.has(q.question_id))
       let next = index
-      if (opts?.nav === "next") next = Math.min(queue.length - 1, index + 1)
-      if (opts?.nav === "prev") next = Math.max(0, index - 1)
-      if (opts?.nav === "random") {
-        next = Math.floor(Math.random() * queue.length)
-      }
-      if (opts?.nav === "unsolved") {
-        const u = queue.findIndex((q, i) => i >= index && !answered.has(q.question_id))
-        next = u >= 0 ? u : queue.findIndex((q) => !answered.has(q.question_id))
-        if (next < 0) {
-          return { current: null, question: null, options: [], stats }
+      if (opts?.question_id) {
+        const i = queue.findIndex((q) => q.question_id === opts.question_id)
+        if (i >= 0) next = i
+      } else {
+        if (opts?.nav === "next") next = Math.min(queue.length - 1, index + 1)
+        if (opts?.nav === "prev") next = Math.max(0, index - 1)
+        if (opts?.nav === "random") {
+          next = Math.floor(Math.random() * queue.length)
         }
-      } else if (!pendingLeft && !opts?.nav) {
-        return { current: null, question: null, options: [], stats }
+        if (opts?.nav === "unsolved") {
+          const u = queue.findIndex((q, i) => i >= index && !answered.has(q.question_id))
+          next = u >= 0 ? u : queue.findIndex((q) => !answered.has(q.question_id))
+          if (next < 0) {
+            return {
+              current: null,
+              question: null,
+              options: [],
+              stats,
+              queue_ids: queueIds,
+              answered_ids: answeredIds,
+            }
+          }
+        } else if (!pendingLeft && !opts?.nav) {
+          return {
+            current: null,
+            question: null,
+            options: [],
+            stats,
+            queue_ids: queueIds,
+            answered_ids: answeredIds,
+          }
+        }
       }
-      if (next !== index) setIndex(next)
+      if (!opts?.peek && next !== index) setIndex(next)
       const item = queue[next] ?? queue[index]
       if (!item) {
-        return { current: null, question: null, options: [], stats }
+        return {
+          current: null,
+          question: null,
+          options: [],
+          stats,
+          queue_ids: queueIds,
+          answered_ids: answeredIds,
+        }
       }
       const res = await fetch(`/api/questions/${item.question_id}?user_id=${userId}`)
       const data = await res.json()
@@ -226,6 +256,8 @@ function OmissasAppPage() {
         stats,
         position: next + 1,
         attempt: attempts[item.question_id] ?? null,
+        queue_ids: queueIds,
+        answered_ids: answeredIds,
       }
     },
     [userId, queue, index, answered, stats, attempts]

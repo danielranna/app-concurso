@@ -116,7 +116,7 @@ export default function ResolverCadernoPage() {
   }, [searchParams, notebook?.library_saved])
 
   const fetchQueueSimple = useCallback(
-    async (opts?: { nav?: NavMode }) => {
+    async (opts?: { nav?: NavMode; question_id?: string; peek?: boolean }) => {
       if (!userId) {
         return {
           current: null,
@@ -127,6 +127,8 @@ export default function ResolverCadernoPage() {
       }
       const qParams = new URLSearchParams({ user_id: userId })
       if (opts?.nav) qParams.set("nav", opts.nav)
+      if (opts?.question_id) qParams.set("question_id", opts.question_id)
+      if (opts?.peek) qParams.set("peek", "1")
       const res = await fetch(`/api/notebooks/${notebookId}/queue?${qParams}`)
       const data = await res.json()
       if (!res.ok) {
@@ -136,7 +138,7 @@ export default function ResolverCadernoPage() {
         (o: { label: string; text: string }) => ({ label: o.label, text: o.text })
       )
       const question = data.question
-      if (data.stats) setLastStats(data.stats)
+      if (data.stats && !opts?.peek) setLastStats(data.stats)
       if (question && userId) {
         const mParams = new URLSearchParams({
           user_id: userId,
@@ -163,6 +165,8 @@ export default function ResolverCadernoPage() {
         study_elapsed_ms: data.study_elapsed_ms,
         report_id: data.report_id ?? null,
         report_pending: Boolean(data.report_pending),
+        queue_ids: data.queue_ids,
+        answered_ids: data.answered_ids,
       }
     },
     [notebookId, userId]

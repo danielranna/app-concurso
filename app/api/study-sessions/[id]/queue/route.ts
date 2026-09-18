@@ -23,6 +23,7 @@ export async function GET(
 
   const navParam = url.searchParams.get("nav")
   const questionIdParam = url.searchParams.get("question_id")
+  const peek = url.searchParams.get("peek") === "1"
 
   const { data: session, error } = await supabaseServer
     .from("study_sessions")
@@ -70,7 +71,7 @@ export async function GET(
     currentId = pending[0]?.question_id ?? currentId
   }
 
-  if (currentId) {
+  if (currentId && !peek) {
     await supabaseServer
       .from("study_sessions")
       .update({
@@ -112,6 +113,8 @@ export async function GET(
     question,
     options,
     position,
+    queue_ids: fullQueue.map((q) => q.question_id),
+    answered_ids: [...answeredQuestions],
     study_elapsed_ms: session.study_elapsed_ms ?? 0,
     stats: {
       total: fullQueue.length,

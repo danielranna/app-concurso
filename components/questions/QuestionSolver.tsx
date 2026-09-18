@@ -17,7 +17,7 @@ import {
   type QuestionContentBlocks,
 } from "@/lib/question-content-blocks"
 import type { ResolvedSharedBlock } from "@/lib/shared-assets"
-import type { NavMode } from "@/lib/study-navigation"
+import { pickTargetQuestionId, type NavMode } from "@/lib/study-navigation"
 import type { ConfidenceLevel, StudySessionNotebookBreakdown } from "@/lib/question-types"
 import CombinedSessionNotebookSummary from "@/components/questions/CombinedSessionNotebookSummary"
 import NotebookCompleteSummary from "@/components/questions/NotebookCompleteSummary"
@@ -60,7 +60,33 @@ type SubmitAnswerResult =
     }
   | { error: string; is_correct: null }
 
-type NavOpts = { nav?: NavMode }
+type NavOpts = { nav?: NavMode; question_id?: string; peek?: boolean }
+
+type QueueResult = {
+  current: {
+    question_id: string
+    tec_id: number
+    notebook_id: string
+    short_id?: string
+    caderno_id?: number | null
+  } | null
+  question: Question | null
+  options: Option[]
+  stats: { total: number; resolved: number; correct: number; wrong: number; pending: number }
+  position?: number
+  attempt?: {
+    selected_answer: string
+    is_correct: boolean
+    confidence_level?: string | null
+    outcome_category?: string | null
+    duration_ms?: number | null
+  } | null
+  study_elapsed_ms?: number
+  report_id?: string | null
+  report_pending?: boolean
+  queue_ids?: string[]
+  answered_ids?: string[]
+}
 
 type Props = {
   userId: string
@@ -70,29 +96,7 @@ type Props = {
   /** Obrigatório quando mode === "solo" */
   soloQuestionId?: string
   returnHref?: string
-  fetchQueue: (opts?: NavOpts) => Promise<{
-    current: {
-      question_id: string
-      tec_id: number
-      notebook_id: string
-      short_id?: string
-      caderno_id?: number | null
-    } | null
-    question: Question | null
-    options: Option[]
-    stats: { total: number; resolved: number; correct: number; wrong: number; pending: number }
-    position?: number
-    attempt?: {
-      selected_answer: string
-      is_correct: boolean
-      confidence_level?: string | null
-      outcome_category?: string | null
-      duration_ms?: number | null
-    } | null
-    study_elapsed_ms?: number
-    report_id?: string | null
-    report_pending?: boolean
-  }>
+  fetchQueue: (opts?: NavOpts) => Promise<QueueResult>
   submitAnswer: (payload: {
     question_id: string
     selected_answer: string
@@ -156,6 +160,33 @@ function matchSavedAnswer(
   }
   const byLetter = options.find((o) => o.label.toUpperCase() === raw.toUpperCase())
   return byLetter?.label ?? raw
+}
+
+function answersMatch(
+  questionType: string | undefined,
+  selected: string,
+  correct: string
+): boolean {
+  const s = selected.trim()
+  const c = correct.trim()
+  if (/^anulada$/i.test(c)) return false
+  if (questionType === "certo_errado") {
+    return s.toLowerCase() === c.toLowerCase()
+  }
+  return s.toUpperCase() === c.toUpperCase()
+}
+
+function outcomeFromConfidence(
+  confidence: ConfidenceLevel,
+  isCorrect: boolean
+): string {
+  if (confidence === "chute") {
+    return isCorrect ? "falso_positivo" : "conteudo_desconhecido"
+  }
+  if (confidence === "inseguro") {
+    return isCorrect ? "conhecimento_fragil" : "lacuna_consciente"
+  }
+  return isCorrect ? "conhecimento_solido" : "lacuna_critica"
 }
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -230,7 +261,6 @@ export default function QuestionSolver({
   const [reportId, setReportId] = useState<string | null>(null)
   const [reportPending, setReportPending] = useState(false)
   const [elapsedMs, setElapsedMs] = useState(elapsedMsProp ?? 0)
-  const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [batchResolving, setBatchResolving] = useState(false)
   const [showPerf, setShowPerf] = useState(false)
@@ -251,6 +281,25 @@ export default function QuestionSolver({
   const navigateRef = useRef<(nav: NavMode) => void>(() => {})
   const resolveRef = useRef<() => void>(() => {})
   const quickNoteRef = useRef<QuickNoteHandle>(null)
+  const loadGen = useRef(0)
+  const questionCache = useRef(new Map<string, QueueResult>())
+  const queueIdsRef = useRef<string[]>([])
+  const answeredIdsRef = useRef(new Set<string>())
+  const prefetchingRef = useRef(new Set<string>())
+  const resolvingIds = useRef(new Set<string>())
+  const questionRef = useRef<Question | null>(null)
+  const currentRef = useRef<typeof current>(null)
+  const uiStateRef = useRef<{
+    questionId: string | null
+    selected: string | null
+    eliminated: string[]
+    confidence: ConfidenceLevel
+  }>({
+    questionId: null,
+    selected: null,
+    eliminated: [],
+    confidence: "seguro",
+  })
 
   const flushQuestionTime = useCallback(
     (questionId: string) => {
@@ -268,6 +317,12 @@ export default function QuestionSolver({
   )
 
   const applyDraft = useCallback((questionId: string, draft: QuestionDraft) => {
+    uiStateRef.current = {
+      questionId,
+      selected: draft.selectedAnswer,
+      eliminated: draft.eliminated,
+      confidence: draft.confidence,
+    }
     setSelected(draft.selectedAnswer)
     setEliminated(new Set(draft.eliminated))
     setConfidence(draft.confidence)
@@ -288,17 +343,187 @@ export default function QuestionSolver({
     if (!currentQuestionId.current) return
     flushQuestionTime(currentQuestionId.current)
     const draft = getDraft(scopeKey, currentQuestionId.current)
+    const ui =
+      uiStateRef.current.questionId === currentQuestionId.current
+        ? uiStateRef.current
+        : null
     setDraft(scopeKey, currentQuestionId.current, {
       ...draft,
-      selectedAnswer: selected,
-      eliminated: [...eliminated],
-      confidence,
+      selectedAnswer: ui ? ui.selected : draft.selectedAnswer,
+      eliminated: ui ? ui.eliminated : draft.eliminated,
+      confidence: ui ? ui.confidence : draft.confidence,
       durationMsAccumulated:
         getDraft(scopeKey, currentQuestionId.current).durationMsAccumulated,
       resolved: draft.resolved,
       result: draft.result,
     })
-  }, [scopeKey, selected, eliminated, confidence, flushQuestionTime])
+  }, [scopeKey, flushQuestionTime])
+
+  const showQueueResult = useCallback(
+    (
+      data: QueueResult,
+      opts?: { nav?: NavMode; fromCache?: boolean; resetTimer?: boolean }
+    ) => {
+      if (data.queue_ids?.length) {
+        queueIdsRef.current = data.queue_ids
+      }
+      if (data.answered_ids) {
+        for (const id of data.answered_ids) answeredIdsRef.current.add(id)
+      }
+
+      const statsNext = data.stats ?? {
+        total: 0,
+        resolved: 0,
+        correct: 0,
+        wrong: 0,
+        pending: 0,
+      }
+      if (!opts?.fromCache) {
+        setStats((prev) =>
+          statsNext.resolved >= prev.resolved ? statsNext : prev
+        )
+      }
+      setCurrent(data.current)
+      setQuestion(data.question)
+      currentRef.current = data.current
+      questionRef.current = data.question
+      setOptions(
+        (data.options ?? []).map((o: { label: string; text: string }) => ({
+          label: o.label,
+          text: o.text,
+        }))
+      )
+      const qid = data.current?.question_id
+      const fromQueue =
+        qid && queueIdsRef.current.length
+          ? queueIdsRef.current.indexOf(qid) + 1
+          : 0
+      setPosition(fromQueue > 0 ? fromQueue : data.position ?? 1)
+      if (!opts?.fromCache && typeof data.study_elapsed_ms === "number") {
+        setElapsedMs(data.study_elapsed_ms)
+      }
+      if (data.report_id) setReportId(data.report_id)
+      if (!opts?.fromCache) {
+        setReportPending(Boolean(data.report_pending) && !data.report_id)
+      }
+      const pendingForDone = opts?.fromCache ? undefined : statsNext.pending
+      const notebookDone =
+        mode === "notebook" &&
+        pendingForDone === 0 &&
+        statsNext.total > 0
+      if (notebookDone && (!opts?.nav || opts.nav === "unsolved")) {
+        setShowNotebookSummary(true)
+      } else if (opts?.nav) {
+        setShowNotebookSummary(false)
+      }
+
+      if (qid && data.current) {
+        currentQuestionId.current = qid
+        const draft = getDraft(scopeKey, qid)
+        setDraft(scopeKey, qid, {
+          ...draft,
+          tec_id: data.current.tec_id,
+          notebook_id: data.current.notebook_id,
+          short_id: data.current.short_id,
+          caderno_id: data.current.caderno_id ?? null,
+        })
+        let nextDraft = getDraft(scopeKey, qid)
+        const attempt = data.attempt
+        if (
+          attempt?.selected_answer &&
+          data.question &&
+          !nextDraft.resolved
+        ) {
+          const conf = attempt.confidence_level
+          const confidence: ConfidenceLevel =
+            conf === "inseguro" || conf === "chute" ? conf : "seguro"
+          const optsList = (data.options ?? []).map(
+            (o: { label: string; text: string }) => ({
+              label: o.label,
+              text: o.text,
+            })
+          )
+          const selectedAnswer = matchSavedAnswer(
+            attempt.selected_answer,
+            optsList,
+            data.question.type
+          )
+          const storedMs = Math.max(0, Number(attempt.duration_ms) || 0)
+          nextDraft = {
+            ...nextDraft,
+            selectedAnswer,
+            confidence,
+            durationMsAccumulated: Math.max(
+              nextDraft.durationMsAccumulated || 0,
+              storedMs
+            ),
+            resolved: true,
+            result: {
+              is_correct: attempt.is_correct,
+              correct_answer: data.question.correct_answer,
+              tec_url: data.question.tec_url ?? "",
+              outcome_category: attempt.outcome_category ?? undefined,
+            },
+          }
+          setDraft(scopeKey, qid, nextDraft)
+        }
+        if (nextDraft.resolved) answeredIdsRef.current.add(qid)
+        applyDraft(qid, nextDraft)
+        if (opts?.resetTimer !== false) {
+          questionStartedAt.current = Date.now()
+        }
+        setWaTags([])
+        questionCache.current.set(qid, data)
+      } else {
+        currentQuestionId.current = null
+        currentRef.current = null
+        questionRef.current = null
+        setSelected(null)
+        setEliminated(new Set())
+        setConfidence("seguro")
+        setQuestionMs(0)
+        setResult(null)
+        if (mode === "notebook" && statsNext.pending === 0 && statsNext.total > 0) {
+          onNotebookComplete?.()
+        }
+      }
+    },
+    [scopeKey, applyDraft, mode, onNotebookComplete]
+  )
+
+  const prefetchNeighbors = useCallback(
+    (questionId: string) => {
+      const ids = queueIdsRef.current
+      const idx = ids.indexOf(questionId)
+      if (idx < 0) return
+      const targets = [ids[idx - 1], ids[idx + 1], ids[idx + 2]].filter(
+        (id): id is string => Boolean(id) && id !== questionId
+      )
+      for (const id of targets) {
+        if (questionCache.current.has(id) || prefetchingRef.current.has(id)) {
+          continue
+        }
+        prefetchingRef.current.add(id)
+        void fetchQueue({ question_id: id, peek: true })
+          .then((data) => {
+            if (data.current?.question_id && data.question) {
+              questionCache.current.set(data.current.question_id, data)
+            }
+            if (data.queue_ids?.length) queueIdsRef.current = data.queue_ids
+            if (data.answered_ids) {
+              for (const answeredId of data.answered_ids) {
+                answeredIdsRef.current.add(answeredId)
+              }
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            prefetchingRef.current.delete(id)
+          })
+      }
+    },
+    [fetchQueue]
+  )
 
   const load = useCallback(
     async (opts?: NavOpts) => {
@@ -306,126 +531,100 @@ export default function QuestionSolver({
         saveCurrentDraft()
       }
 
-      setLoading(true)
+      const requestId = ++loadGen.current
+      if (!currentQuestionId.current) setLoading(true)
       setLoadError(null)
       try {
-        const data = await fetchQueue(opts)
-        const statsNext = data.stats ?? {
-          total: 0,
-          resolved: 0,
-          correct: 0,
-          wrong: 0,
-          pending: 0,
-        }
-        setCurrent(data.current)
-        setQuestion(data.question)
-        setOptions(
-          (data.options ?? []).map((o: { label: string; text: string }) => ({
-            label: o.label,
-            text: o.text,
-          }))
+        const data = await fetchQueue(
+          opts?.question_id
+            ? { question_id: opts.question_id, peek: opts?.peek }
+            : { nav: opts?.nav, peek: opts?.peek }
         )
-        setStats(statsNext)
-        setPosition(data.position ?? 1)
-        if (typeof data.study_elapsed_ms === "number") {
-          setElapsedMs(data.study_elapsed_ms)
-        }
-        if (data.report_id) setReportId(data.report_id)
-        setReportPending(Boolean(data.report_pending) && !data.report_id)
-        const notebookDone =
-          mode === "notebook" && statsNext.pending === 0 && statsNext.total > 0
-        if (notebookDone && (!opts?.nav || opts.nav === "unsolved")) {
-          setShowNotebookSummary(true)
-        } else if (opts?.nav) {
-          setShowNotebookSummary(false)
-        }
-
+        if (requestId !== loadGen.current) return
+        showQueueResult(data, { nav: opts?.nav })
         const qid = data.current?.question_id
-        if (qid && data.current) {
-          currentQuestionId.current = qid
-          const draft = getDraft(scopeKey, qid)
-          setDraft(scopeKey, qid, {
-            ...draft,
-            tec_id: data.current.tec_id,
-            notebook_id: data.current.notebook_id,
-            short_id: data.current.short_id,
-            caderno_id: data.current.caderno_id ?? null,
-          })
-          let nextDraft = getDraft(scopeKey, qid)
-          const attempt = data.attempt
-          if (attempt?.selected_answer && data.question) {
-            const conf = attempt.confidence_level
-            const confidence: ConfidenceLevel =
-              conf === "inseguro" || conf === "chute" ? conf : "seguro"
-            const optsList = (data.options ?? []).map(
-              (o: { label: string; text: string }) => ({
-                label: o.label,
-                text: o.text,
-              })
-            )
-            const selectedAnswer = matchSavedAnswer(
-              attempt.selected_answer,
-              optsList,
-              data.question.type
-            )
-            const storedMs = Math.max(0, Number(attempt.duration_ms) || 0)
-            nextDraft = {
-              ...nextDraft,
-              selectedAnswer,
-              confidence,
-              durationMsAccumulated: Math.max(
-                nextDraft.durationMsAccumulated || 0,
-                storedMs
-              ),
-              resolved: true,
-              result: {
-                is_correct: attempt.is_correct,
-                correct_answer: data.question.correct_answer,
-                tec_url: data.question.tec_url ?? "",
-                outcome_category: attempt.outcome_category ?? undefined,
-              },
-            }
-            setDraft(scopeKey, qid, nextDraft)
-          }
-          applyDraft(qid, nextDraft)
-          questionStartedAt.current = Date.now()
-          setWaTags([])
-        } else {
-          currentQuestionId.current = null
-          setSelected(null)
-          setEliminated(new Set())
-          setConfidence("seguro")
-          setQuestionMs(0)
-          setResult(null)
-          if (mode === "notebook" && statsNext.pending === 0 && statsNext.total > 0) {
-            onNotebookComplete?.()
-          }
-        }
+        if (qid) prefetchNeighbors(qid)
       } catch (e) {
+        if (requestId !== loadGen.current) return
         setLoadError(e instanceof Error ? e.message : "Erro ao carregar a questão")
       } finally {
-        setLoading(false)
+        if (requestId === loadGen.current) setLoading(false)
       }
     },
-    [
-      fetchQueue,
-      scopeKey,
-      applyDraft,
-      saveCurrentDraft,
-      refreshKey,
-      mode,
-      onNotebookComplete,
-    ]
+    [fetchQueue, saveCurrentDraft, showQueueResult, prefetchNeighbors]
+  )
+
+  const persistActiveQuestion = useCallback(
+    (questionId: string, requestId: number) => {
+      void fetchQueue({ question_id: questionId })
+        .then((data) => {
+          if (requestId !== loadGen.current) return
+          if (data.queue_ids?.length) queueIdsRef.current = data.queue_ids
+          if (data.answered_ids) {
+            for (const id of data.answered_ids) answeredIdsRef.current.add(id)
+          }
+          if (data.stats) {
+            const incoming = data.stats
+            setStats((prev) =>
+              incoming.resolved >= prev.resolved ? incoming : prev
+            )
+          }
+          if (typeof data.study_elapsed_ms === "number") {
+            setElapsedMs(data.study_elapsed_ms)
+          }
+          if (data.report_id) setReportId(data.report_id)
+          if (data.current?.question_id === questionId && data.question) {
+            questionCache.current.set(questionId, data)
+          }
+        })
+        .catch(() => {})
+    },
+    [fetchQueue]
   )
 
   const navigate = useCallback(
     (nav: NavMode) => {
-      load({ nav })
+      if (currentQuestionId.current) saveCurrentDraft()
+
+      const currentId = currentQuestionId.current
+      const targetId = pickTargetQuestionId(
+        queueIdsRef.current,
+        currentId,
+        answeredIdsRef.current,
+        nav
+      )
+
+      if (targetId && targetId === currentId) {
+        return
+      }
+
+      if (targetId) {
+        const cached = questionCache.current.get(targetId)
+        if (cached?.question && cached.current) {
+          const requestId = ++loadGen.current
+          showQueueResult(cached, { nav, fromCache: true })
+          prefetchNeighbors(targetId)
+          persistActiveQuestion(targetId, requestId)
+          return
+        }
+        void load({ question_id: targetId, nav })
+        return
+      }
+
+      void load({ nav })
     },
-    [load]
+    [
+      saveCurrentDraft,
+      showQueueResult,
+      prefetchNeighbors,
+      persistActiveQuestion,
+      load,
+    ]
   )
 
   navigateRef.current = navigate
+  questionRef.current = question
+  currentRef.current = current
 
   useEffect(() => {
     load()
@@ -433,13 +632,19 @@ export default function QuestionSolver({
   }, [])
 
   useEffect(() => {
-    if (refreshKey != null && refreshKey > 0) load()
+    if (refreshKey != null && refreshKey > 0) {
+      questionCache.current.clear()
+      answeredIdsRef.current.clear()
+      queueIdsRef.current = []
+      load()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
 
   useEffect(() => {
     setConfirmDelete(false)
     setDeleteError(null)
+    setResolveError(null)
   }, [question?.id])
 
   const removeCurrentQuestion = useCallback(
@@ -463,6 +668,9 @@ export default function QuestionSolver({
           return
         }
         removeDraft(scopeKey, qid)
+        questionCache.current.delete(qid)
+        answeredIdsRef.current.delete(qid)
+        queueIdsRef.current = queueIdsRef.current.filter((id) => id !== qid)
         currentQuestionId.current = null
         setConfirmDelete(false)
         onQuestionRemoved?.()
@@ -550,18 +758,35 @@ export default function QuestionSolver({
       } else if (e.key === "n" || e.key === "N") {
         e.preventDefault()
         navigateRef.current("unsolved")
-      } else if (e.key === "Enter" && selected && !result) {
+      } else if (e.key === "Enter") {
         e.preventDefault()
         resolveRef.current()
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selected, result])
+  }, [])
 
   const persistDraftState = useCallback(
     (patch: Partial<QuestionDraft>) => {
       if (!currentQuestionId.current) return
+      if (uiStateRef.current.questionId !== currentQuestionId.current) {
+        uiStateRef.current = {
+          questionId: currentQuestionId.current,
+          selected: null,
+          eliminated: [],
+          confidence: "seguro",
+        }
+      }
+      if (patch.selectedAnswer !== undefined) {
+        uiStateRef.current.selected = patch.selectedAnswer
+      }
+      if (patch.eliminated) {
+        uiStateRef.current.eliminated = patch.eliminated
+      }
+      if (patch.confidence) {
+        uiStateRef.current.confidence = patch.confidence
+      }
       const draft = getDraft(scopeKey, currentQuestionId.current)
       setDraft(scopeKey, currentQuestionId.current, { ...draft, ...patch })
     },
@@ -570,12 +795,24 @@ export default function QuestionSolver({
 
   function handleSelect(label: string) {
     if (result || eliminated.has(label)) return
+    if (
+      currentQuestionId.current &&
+      getDraft(scopeKey, currentQuestionId.current).resolved
+    ) {
+      return
+    }
     setSelected(label)
     persistDraftState({ selectedAnswer: label })
   }
 
   function handleToggleEliminated(label: string) {
     if (result) return
+    if (
+      currentQuestionId.current &&
+      getDraft(scopeKey, currentQuestionId.current).resolved
+    ) {
+      return
+    }
     const next = new Set(eliminated)
     if (next.has(label)) next.delete(label)
     else next.add(label)
@@ -592,72 +829,173 @@ export default function QuestionSolver({
   }
 
   const handleResolve = useCallback(async () => {
-    if (!question || !current || !selected || result || resolving) return
-    setResolving(true)
+    const questionNow = questionRef.current
+    const currentNow = currentRef.current
+    const selectedAnswer = uiStateRef.current.selected
+    if (!questionNow || !currentNow || !selectedAnswer) return
+    if (currentNow.question_id !== currentQuestionId.current) return
+    if (uiStateRef.current.questionId !== currentNow.question_id) return
+    if (getDraft(scopeKey, currentNow.question_id).resolved) return
+    const questionId = currentNow.question_id
+    if (resolvingIds.current.has(questionId)) return
+
+    const eliminatedNow = uiStateRef.current.eliminated
+    const confidenceNow = uiStateRef.current.confidence
+    const tagsNow = waTags
+    const noteDraft = quickNoteRef.current?.consumeDraft() || null
+    const notebookIdNow = currentNow.notebook_id
+    const tecId = currentNow.tec_id
+    const shortId = currentNow.short_id ?? null
+    const cadernoId = currentNow.caderno_id ?? null
+    const tecUrl = questionNow.tec_url ?? ""
+    const correctAnswer = questionNow.correct_answer
+    const isCorrect = answersMatch(questionNow.type, selectedAnswer, correctAnswer)
+    const outcome = outcomeFromConfidence(confidenceNow, isCorrect)
+
+    resolvingIds.current.add(questionId)
     setResolveError(null)
-    flushQuestionTime(current.question_id)
-    const draft = getDraft(scopeKey, current.question_id)
+    flushQuestionTime(questionId)
+    const draft = getDraft(scopeKey, questionId)
     const duration_ms = draft.durationMsAccumulated
+    const localResult = {
+      is_correct: isCorrect,
+      correct_answer: correctAnswer,
+      tec_url: tecUrl,
+      outcome_category: outcome,
+    }
+
+    answeredIdsRef.current.add(questionId)
+    setDraft(scopeKey, questionId, {
+      ...draft,
+      selectedAnswer,
+      eliminated: eliminatedNow,
+      confidence: confidenceNow,
+      durationMsAccumulated: duration_ms,
+      resolved: true,
+      result: localResult,
+    })
+    const cached = questionCache.current.get(questionId)
+    if (cached) {
+      questionCache.current.set(questionId, {
+        ...cached,
+        attempt: {
+          selected_answer: selectedAnswer,
+          is_correct: isCorrect,
+          confidence_level: confidenceNow,
+          outcome_category: outcome,
+          duration_ms,
+        },
+      })
+    }
+
+    if (currentQuestionId.current === questionId) {
+      setResult(localResult)
+      setNotesEpoch((n) => n + 1)
+    }
+
+    setStats((s) => {
+      const next = {
+        ...s,
+        resolved: s.resolved + 1,
+        correct: s.correct + (isCorrect ? 1 : 0),
+        wrong: s.wrong + (isCorrect ? 0 : 1),
+        pending: Math.max(0, s.pending - 1),
+      }
+      if (mode === "notebook" && next.pending === 0 && next.total > 0) {
+        onNotebookComplete?.()
+        if (currentQuestionId.current === questionId) {
+          setShowNotebookSummary(true)
+        }
+      }
+      return next
+    })
 
     try {
       const res = await submitAnswer({
-        question_id: question.id,
-        selected_answer: selected,
+        question_id: questionId,
+        selected_answer: selectedAnswer,
         duration_ms,
-        tec_id: current.tec_id,
-        notebook_id: current.notebook_id,
-        confidence_level: confidence,
-        tags: waTags,
-        note_draft: quickNoteRef.current?.consumeDraft() || null,
-        short_id: current.short_id ?? null,
-        caderno_id: current.caderno_id ?? null,
+        tec_id: tecId,
+        notebook_id: notebookIdNow,
+        confidence_level: confidenceNow,
+        tags: tagsNow,
+        note_draft: noteDraft,
+        short_id: shortId,
+        caderno_id: cadernoId,
       })
       if ("error" in res) {
-        setResolveError(res.error)
+        answeredIdsRef.current.delete(questionId)
+        const latest = getDraft(scopeKey, questionId)
+        setDraft(scopeKey, questionId, {
+          ...latest,
+          resolved: false,
+          result: undefined,
+        })
+        setStats((s) => ({
+          ...s,
+          resolved: Math.max(0, s.resolved - 1),
+          correct: Math.max(0, s.correct - (isCorrect ? 1 : 0)),
+          wrong: Math.max(0, s.wrong - (isCorrect ? 0 : 1)),
+          pending: s.pending + 1,
+        }))
+        if (currentQuestionId.current === questionId) {
+          setResult(null)
+          setResolveError(res.error)
+        }
         return
       }
-      setResult(res)
-      setNotesEpoch((n) => n + 1)
-      setDraft(scopeKey, current.question_id, {
-        ...draft,
-        selectedAnswer: selected,
-        eliminated: [...eliminated],
-        confidence,
-        durationMsAccumulated: duration_ms,
+      const serverResult = {
+        is_correct: res.is_correct,
+        correct_answer: res.correct_answer,
+        tec_url: res.tec_url,
+        outcome_category: res.outcome_category,
+      }
+      const latest = getDraft(scopeKey, questionId)
+      setDraft(scopeKey, questionId, {
+        ...latest,
         resolved: true,
-        result: {
-          is_correct: res.is_correct,
-          correct_answer: res.correct_answer,
-          tec_url: res.tec_url,
-          outcome_category: res.outcome_category,
-        },
+        result: serverResult,
       })
-      setStats((s) => {
-        const next = {
-          ...s,
-          resolved: s.resolved + 1,
-          correct: s.correct + (res.is_correct ? 1 : 0),
-          wrong: s.wrong + (res.is_correct ? 0 : 1),
-          pending: Math.max(0, s.pending - 1),
-        }
-        if (mode === "notebook" && next.pending === 0 && next.total > 0) {
-          onNotebookComplete?.()
-          setShowNotebookSummary(true)
-        }
-        return next
+      const cachedNow = questionCache.current.get(questionId)
+      if (cachedNow) {
+        questionCache.current.set(questionId, {
+          ...cachedNow,
+          attempt: {
+            selected_answer: selectedAnswer,
+            is_correct: res.is_correct,
+            confidence_level: confidenceNow,
+            outcome_category: res.outcome_category ?? null,
+            duration_ms,
+          },
+        })
+      }
+      if (currentQuestionId.current === questionId) {
+        setResult(serverResult)
+      }
+    } catch {
+      answeredIdsRef.current.delete(questionId)
+      const latest = getDraft(scopeKey, questionId)
+      setDraft(scopeKey, questionId, {
+        ...latest,
+        resolved: false,
+        result: undefined,
       })
+      setStats((s) => ({
+        ...s,
+        resolved: Math.max(0, s.resolved - 1),
+        correct: Math.max(0, s.correct - (isCorrect ? 1 : 0)),
+        wrong: Math.max(0, s.wrong - (isCorrect ? 0 : 1)),
+        pending: s.pending + 1,
+      }))
+      if (currentQuestionId.current === questionId) {
+        setResult(null)
+        setResolveError("Não foi possível salvar. Tente novamente.")
+      }
     } finally {
-      setResolving(false)
+      resolvingIds.current.delete(questionId)
     }
   }, [
-    question,
-    current,
-    selected,
-    result,
-    resolving,
     scopeKey,
-    eliminated,
-    confidence,
     flushQuestionTime,
     submitAnswer,
     mode,
@@ -690,6 +1028,7 @@ export default function QuestionSolver({
         caderno_id: draft.caderno_id ?? current.caderno_id ?? null,
       })
       if ("error" in res) continue
+      answeredIdsRef.current.add(qid)
       setDraft(scopeKey, qid, {
         ...draft,
         resolved: true,
@@ -869,9 +1208,7 @@ export default function QuestionSolver({
     .join(" - ")
 
   return (
-    <div
-      className={`mx-auto w-full max-w-6xl space-y-4 ${loading ? "pointer-events-none opacity-60" : ""}`}
-    >
+    <div className="mx-auto w-full max-w-6xl space-y-4">
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-slate-700">
@@ -1087,10 +1424,10 @@ export default function QuestionSolver({
               <button
                 type="button"
                 onClick={handleResolve}
-                disabled={!selected || locked || resolving}
+                disabled={!selected || locked}
                 className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
               >
-                {resolving ? "Resolvendo..." : "Resolver questão"}
+                Resolver questão
               </button>
               {resolvableCount >= 2 && !locked && (
                 <button

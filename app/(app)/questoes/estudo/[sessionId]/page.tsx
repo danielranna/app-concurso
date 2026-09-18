@@ -56,7 +56,7 @@ export default function EstudoCombinadoPage() {
   }, [sessionId, router])
 
   const fetchQueue = useCallback(
-    async (opts?: { nav?: NavMode }) => {
+    async (opts?: { nav?: NavMode; question_id?: string; peek?: boolean }) => {
       if (!userId) {
         return {
           current: null,
@@ -67,13 +67,17 @@ export default function EstudoCombinadoPage() {
       }
       const qParams = new URLSearchParams({ user_id: userId })
       if (opts?.nav) qParams.set("nav", opts.nav)
+      if (opts?.question_id) qParams.set("question_id", opts.question_id)
+      if (opts?.peek) qParams.set("peek", "1")
       const res = await fetch(`/api/study-sessions/${sessionId}/queue?${qParams}`)
       const data = await res.json()
       if (!res.ok) {
         throw new Error(data.error ?? "Erro ao carregar a sessão")
       }
-      setSessionName(data.session?.name ?? "")
-      setChildProgress(data.child_progress ?? [])
+      if (!opts?.peek) {
+        setSessionName(data.session?.name ?? "")
+        setChildProgress(data.child_progress ?? [])
+      }
       const options = data.options ?? []
       if (data.question && userId) {
         const mParams = new URLSearchParams({
@@ -97,6 +101,8 @@ export default function EstudoCombinadoPage() {
         options,
         stats: data.stats,
         position: data.position,
+        queue_ids: data.queue_ids,
+        answered_ids: data.answered_ids,
       }
     },
     [sessionId, userId]

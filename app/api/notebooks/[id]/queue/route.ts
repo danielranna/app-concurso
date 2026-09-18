@@ -29,6 +29,7 @@ export async function GET(
 
   const navParam = url.searchParams.get("nav")
   const questionIdParam = url.searchParams.get("question_id")
+  const peek = url.searchParams.get("peek") === "1"
 
   try {
     const [fullQueue, attemptRows, nbRes] = await Promise.all([
@@ -85,13 +86,15 @@ export async function GET(
       current
         ? getLatestNotebookAttempt(id, user_id, current.question_id)
         : Promise.resolve(null),
-      supabaseServer
-        .from("notebooks")
-        .update({
-          last_accessed_at: new Date().toISOString(),
-          ...(current ? { active_question_id: current.question_id } : {}),
-        })
-        .eq("id", id),
+      peek
+        ? Promise.resolve(null)
+        : supabaseServer
+            .from("notebooks")
+            .update({
+              last_accessed_at: new Date().toISOString(),
+              ...(current ? { active_question_id: current.question_id } : {}),
+            })
+            .eq("id", id),
     ])
 
     const position =
@@ -116,6 +119,8 @@ export async function GET(
 
     return NextResponse.json({
       full_queue_length: fullQueue.length,
+      queue_ids: fullQueue.map((q) => q.question_id),
+      answered_ids: [...answeredIds],
       current,
       question,
       options,
