@@ -25,7 +25,7 @@ export async function processErrorReviewQuestionGenerate(
   const { data: errorRow } = await supabaseServer
     .from("errors")
     .select(
-      "id, user_id, active_flashcard_id, knowledge_key, knowledge_summary, topic_id, topics(subject_id)"
+      "id, user_id, active_flashcard_id, knowledge_key, knowledge_summary, topic_id, motivo, error_text, explanation, topics(subject_id)"
     )
     .eq("id", errorId)
     .eq("user_id", userId)
@@ -119,6 +119,9 @@ export async function processErrorReviewQuestionGenerate(
       text: o.text,
     })),
     errorDetail,
+    motivo: (errorRow.motivo as string | null) ?? null,
+    errorText: (errorRow.error_text as string | null) ?? null,
+    explanation: (errorRow.explanation as string | null) ?? null,
   })
 
   if (!generated.ok || !generated.knowledge_key || !generated.statement) {
@@ -132,6 +135,7 @@ export async function processErrorReviewQuestionGenerate(
       })),
       errorDetail,
       tecTopic: question.tec_topic,
+      motivo: (errorRow.motivo as string | null) ?? null,
     })
   }
 

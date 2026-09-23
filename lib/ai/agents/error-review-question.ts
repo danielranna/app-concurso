@@ -11,24 +11,43 @@ export type ErrorReviewQuestionResult = {
   explanation?: string
 }
 
-const SYSTEM_PROMPT = `Você é um elaborador de questões de concurso público no formato CERTO/ERRADO (estilo CESPE/Cebraspe).
+const SYSTEM_PROMPT = `Você é um elaborador de questões CERTO/ERRADO (estilo CESPE) cujo objetivo é CONFRONTAR o erro do aluno.
 
-Tarefa: a partir de uma questão que o aluno ERROU, identificar o CONHECIMENTO CENTRAL e criar UMA nova assertiva certo/errado que teste o MESMO conhecimento em OUTRO contexto.
+Entrada: questão original + o que o aluno marcou + (quando houver) o motivo/diagnóstico do erro.
+Saída: UMA assertiva nova, autocontida, que cobre o ponto que o aluno errou.
 
-Regras obrigatórias:
-1. A assertiva (statement) DEVE ser uma FRASE COMPLETA, afirmativa, com sujeito + predicado, julgável como verdadeira ou falsa.
-   - BOM: "No âmbito da qualidade de dados, controles de qualidade devem ser incorporados aos processos de captura e transformação."
-   - RUIM: "incorporação de controles de qualidade nos processos de captura" (fragmento / só substantivo).
-   - RUIM: "Julgue a seguinte afirmação: X" quando X não for frase completa.
-2. NÃO use prefácios como "Julgue o item", "Julgue a seguinte afirmação". Vá direto à assertiva.
-3. NÃO parafrasear a questão original. NÃO copiar frase, personagens, números, alternativas ou estrutura.
-4. Variar contexto, redação e forma de cobrança.
-5. Preservar rigorosamente o ponto jurídico/conceitual cobrado. NÃO inventar artigos, súmulas, exceções ou regras.
-6. Se a base for fraca, responda ok=false — NÃO invente.
-7. knowledge_summary: conceito em 1 linha curta (sem nome de matéria/assunto do edital).
-8. explanation: justifica o gabarito com o conceito (não o motivo psicológico do erro do aluno).
+Objetivo pedagógico:
+- Extrair o CONCEITO que o aluno confundiu (ex.: ISS não integra a própria base de cálculo; política de governança é colaborativa; etc.).
+- Montar uma frase C/E que force o aluno a decidir se aquele conceito está certo ou errado — sem precisar abrir a questão original.
 
-Responda APENAS JSON válido:
+Regras OBRIGATÓRIAS da assertiva (statement):
+1. FRASE COMPLETA e AUTOCONTIDA: sujeito explícito + predicado. Quem lê só a assertiva (sem enunciado original) consegue julgar.
+2. Nomeie o instituto/tributo/órgão/conceito no próprio texto. NUNCA use só pronome ("sua", "ele", "isso") sem antecedente na mesma frase.
+3. PROIBIDO:
+   - Fragmentos / só substantivos.
+   - Prefácios ("Julgue…", "É correto afirmar que…").
+   - Remeter a "itens I e II", "alternativas", "acima", "abaixo", "o enunciado", "a questão".
+   - Copiar a questão original (personagens, números, estrutura de múltipla escolha).
+   - Enunciados de cálculo/múltipla escolha cortados no meio ("…será igual a", "…é igual a", "…corresponde a") SEM afirmar o valor/resultado.
+   - Perguntas abertas ou frases que pedem preenchimento (não são C/E).
+4. Em questões de cálculo: NÃO cole o enunciado. Extraia o ponto (conceito OU um resultado completo).
+   - RUIM: "…se o governo impuser imposto de 250… a quantidade consumida… será igual a"
+   - BOM: "Com Qd = 1.000 − 3Pd, Qs = 2Ps e imposto específico de 250 por unidade, a quantidade de equilíbrio após o imposto é 200."
+   - BOM (conceitual): "A incidência de imposto específico sobre cada unidade vendida reduz a quantidade de equilíbrio do mercado."
+5. Pode (e deve) usar o motivo do erro do aluno para mirar a confusão — mas a assertiva testa o CONCEITO/resultado, não pergunta "por que você errou".
+6. NÃO invente artigos, súmulas, percentuais ou regras que não estejam na base fornecida. Se a base for fraca → ok=false.
+7. knowledge_summary: 1 linha do conceito (sem nome de matéria do edital).
+8. explanation: justifica o gabarito com o conceito correto (pode mencionar a confusão típica).
+
+Exemplos:
+- RUIM: "É correto afirmar que não integrará sua própria base de cálculo."
+- BOM: "O ISS não integra a sua própria base de cálculo."
+- RUIM: "É correto afirmar que Apenas os itens I e II estão certos."
+- BOM: "A definição de políticas de governança de dados deve ser exclusiva da alta administração, sem participação das equipes técnicas."
+- RUIM: enunciado longo de oferta/demanda terminando em "será igual a".
+- BOM: assertiva com o resultado numérico completo ou o conceito de incidência tributária no equilíbrio.
+
+Responda APENAS JSON:
 {
   "ok": true,
   "knowledge_summary": string,
@@ -54,26 +73,131 @@ function parseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-/** Rejeita fragmentos / só substantivos que não dão para julgar C/E. */
-export function isCompleteCeStatement(statement: string): boolean {
-  const s = statement
-    .replace(/^julgue\s+(a\s+seguinte\s+)?(afirmação|item|assertiva)\s*:\s*/i, "")
-    .trim()
-  if (s.length < 40) return false
-  // Precisa parecer frase (espaços + verbo comum em PT) ou terminar com ponto
-  const hasVerbLike =
-    /\b(é|são|está|estão|deve|devem|pode|podem|não|possui|possuem|constitui|configura|compete|cabe|inclui|exclui|trata|refere|aplica|aplica-se|ocorre|ocorrem|exige|exigem|veda|permite)\b/i.test(
-      s
-    )
-  const wordCount = s.split(/\s+/).filter(Boolean).length
-  return hasVerbLike && wordCount >= 8
-}
-
 function normalizeStatement(raw: string): string {
   return raw
     .replace(/^julgue\s+(o\s+)?(próximo\s+)?(item|assertiva|texto)[^.]*\.\s*/i, "")
     .replace(/^julgue\s+(a\s+seguinte\s+)?(afirmação|item|assertiva)\s*:\s*/i, "")
+    .replace(/^é\s+correto\s+afirmar\s+que\s+/i, "")
     .trim()
+}
+
+/** Rejeita fragmentos e frases que dependem de contexto externo. */
+export function isCompleteCeStatement(statement: string): boolean {
+  const s = normalizeStatement(statement)
+  if (s.length < 45) return false
+
+  // Pergunta aberta / incompleta
+  if (/\?\s*$/.test(s)) return false
+
+  // Enunciado de múltipla escolha cortado (pede valor sem afirmar)
+  if (
+    /\b(será|é|fica|resulta|corresponde|equivale|vale)\s+igual\s+a\s*\.?$/i.test(s) ||
+    /\b(igual|igualada)\s+a\s*\.?$/i.test(s) ||
+    /\b(corresponde|equivale|resulta)\s+a\s*\.?$/i.test(s) ||
+    /\b(quantidade|valor|preço|resultado)\s+(consumida|ofertada|de equilíbrio)?\s*(desse bem)?,?\s*(considerad[oa].*)?(será|é)\s+igual\s+a\s*\.?$/i.test(
+      s
+    ) ||
+    /:\s*$/.test(s) ||
+    /\ba\s*$/i.test(s)
+  ) {
+    return false
+  }
+
+  // Remissões a itens/alternativas/enunciado — injulgáveis sozinhas
+  if (
+    /\b(itens?|alternativas?)\s+[IVXLC0-9]/i.test(s) ||
+    /\b(apenas|somente)\s+(os\s+)?itens?\b/i.test(s) ||
+    /\b(acima|abaixo|seguinte|anterior|mencionad[oa]s?|referid[oa]s?|enunciado|questão)\b/i.test(
+      s
+    )
+  ) {
+    return false
+  }
+
+  // Pronome / sujeito oculto no início
+  if (
+    /^(não\s+)?(integrará|será|deve|devem|pode|podem|possui|possuem)\b/i.test(s) ||
+    /^(sua|seu|suas|seus|ele|ela|eles|elas|isso|isto|aquilo)\b/i.test(s)
+  ) {
+    return false
+  }
+
+  // Stem típico de MCQ colado ("Nessa situação hipotética… será igual a")
+  if (
+    /\bnessa situação hipotética\b/i.test(s) &&
+    /\bserá igual a\b/i.test(s) &&
+    !/\bserá igual a\s+\d/i.test(s)
+  ) {
+    return false
+  }
+
+  const hasVerbLike =
+    /\b(é|são|está|estão|deve|devem|pode|podem|não|possui|possuem|constitui|configura|compete|cabe|inclui|exclui|trata|refere|aplica|aplica-se|ocorre|ocorrem|exige|exigem|veda|permite|integra|integram|integrará|compõe|compõem|reduz|aumenta)\b/i.test(
+      s
+    )
+  const wordCount = s.split(/\s+/).filter(Boolean).length
+  const hasConcreteNoun =
+    /\b[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]{2,}\b/.test(s) ||
+    /\b(iss|icms|ipi|ir|csll|pis|cofins|cf\/|lei|decreto|súmula|stf|stj|administração|tributo|base de cálculo|governança|dados|ato|contrato|servidor|imposto|oferta|demanda|equilíbrio|mercado|quantidade)\b/i.test(
+      s
+    )
+
+  return hasVerbLike && wordCount >= 10 && hasConcreteNoun
+}
+
+/** Detecta cópia/cola do enunciado (ex.: stem de cálculo terminando em "será igual a"). */
+function isNearCopyOfOriginal(statement: string, original: string): boolean {
+  const a = normalizeStatement(statement).toLowerCase().replace(/\s+/g, " ")
+  const b = String(original ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+  if (a.length < 60 || b.length < 60) return false
+  if (b.includes(a) || a.includes(b.slice(0, Math.min(b.length, a.length)))) {
+    return true
+  }
+  // Overlap de prefixo longo
+  const prefixLen = Math.min(120, a.length, b.length)
+  if (prefixLen >= 80 && a.slice(0, prefixLen) === b.slice(0, prefixLen)) {
+    return true
+  }
+  return false
+}
+
+function collectErrorContext(params: {
+  errorDetail?: Record<string, unknown> | null
+  motivo?: string | null
+  errorText?: string | null
+  explanation?: string | null
+}): string[] {
+  const bits: string[] = []
+  const d = params.errorDetail ?? {}
+
+  if (params.motivo?.trim()) {
+    bits.push(`Motivo informado pelo aluno: ${params.motivo.trim()}`)
+  }
+  if (params.errorText?.trim()) {
+    bits.push(`Registro do erro: ${params.errorText.trim()}`)
+  }
+  if (params.explanation?.trim()) {
+    bits.push(`Explicação já salva no erro: ${params.explanation.trim()}`)
+  }
+
+  for (const key of [
+    "misconception",
+    "specific_mistake",
+    "feedback_detailed",
+    "feedback",
+    "root_cause",
+    "why_wrong",
+  ] as const) {
+    const v = d[key]
+    if (typeof v === "string" && v.trim()) {
+      bits.push(`${key}: ${v.trim()}`)
+    }
+  }
+
+  return bits
 }
 
 export async function generateErrorReviewQuestion(params: {
@@ -85,31 +209,32 @@ export async function generateErrorReviewQuestion(params: {
   selectedAnswer: string
   options?: { label: string; text: string }[]
   errorDetail?: Record<string, unknown> | null
+  motivo?: string | null
+  errorText?: string | null
+  explanation?: string | null
 }): Promise<ErrorReviewQuestionResult> {
   const optionsText =
     params.options?.map((o) => `${o.label}) ${o.text}`).join("\n") ?? ""
 
-  const detailBits: string[] = []
-  if (params.errorDetail?.misconception) {
-    detailBits.push(`Misconception: ${String(params.errorDetail.misconception)}`)
-  }
-  if (params.errorDetail?.specific_mistake) {
-    detailBits.push(`Erro específico: ${String(params.errorDetail.specific_mistake)}`)
-  }
-  if (params.errorDetail?.feedback_detailed) {
-    detailBits.push(`Feedback: ${String(params.errorDetail.feedback_detailed)}`)
-  }
+  const detailBits = collectErrorContext({
+    errorDetail: params.errorDetail,
+    motivo: params.motivo,
+    errorText: params.errorText,
+    explanation: params.explanation,
+  })
 
   const userContent = [
+    "Monte UMA assertiva C/E que CONFRONTE o erro do aluno.",
+    "A assertiva deve ser autocontida (sujeito + conceito/resultado nomeados).",
+    "NÃO copie o enunciado. NÃO termine em 'será igual a' sem o valor. Sem 'É correto afirmar que…' e sem itens I/II.",
     `Tipo original: ${params.originalType}`,
     `Enunciado original:\n${params.originalStatement}`,
     optionsText ? `Alternativas:\n${optionsText}` : "",
     `Gabarito: ${params.correctAnswer}`,
-    `Resposta do aluno: ${params.selectedAnswer}`,
+    `Resposta do aluno: ${params.selectedAnswer || "(não informada)"}`,
     detailBits.length
-      ? `Contexto do erro (diagnóstico IA, se houver):\n${detailBits.join("\n")}`
-      : "",
-    "Gere UMA assertiva C/E completa (frase com sujeito e predicado), sem prefácio 'Julgue…'.",
+      ? `Por que o aluno errou / diagnóstico:\n${detailBits.join("\n")}`
+      : "Não há motivo/diagnóstico explícito — extraia o conceito central da questão e do gabarito.",
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -158,7 +283,16 @@ export async function generateErrorReviewQuestion(params: {
   if (!isCompleteCeStatement(statement)) {
     return {
       ok: false,
-      reason: "Assertiva gerada incompleta (não é frase julgável).",
+      reason:
+        "Assertiva gerada incompleta ou dependente de contexto (itens/pronomes/fragmento/enunciado cortado).",
+    }
+  }
+
+  // Bloqueia cópia quase literal do enunciado original (comum em cálculo/MCQ)
+  if (isNearCopyOfOriginal(statement, params.originalStatement)) {
+    return {
+      ok: false,
+      reason: "Assertiva parece cópia do enunciado original; precisa ser C/E nova.",
     }
   }
 
@@ -177,7 +311,11 @@ export async function generateErrorReviewQuestion(params: {
   }
 }
 
-/** Fallback sem LLM: monta C/E a partir da questão original para não travar a revisão. */
+/**
+ * Fallback sem LLM — só para questões já C/E com enunciado autocontido.
+ * NÃO embrulha alternativas de múltipla escolha em "É correto afirmar que…"
+ * (isso gerava slop tipo "itens I e II" / "não integrará sua própria…").
+ */
 export function buildFallbackErrorReviewQuestion(params: {
   originalStatement: string
   originalType: string
@@ -185,6 +323,7 @@ export function buildFallbackErrorReviewQuestion(params: {
   options?: { label: string; text: string }[]
   errorDetail?: Record<string, unknown> | null
   tecTopic?: string | null
+  motivo?: string | null
 }): ErrorReviewQuestionResult {
   const correct = String(params.correctAnswer ?? "").trim()
   const statementRaw = String(params.originalStatement ?? "").trim()
@@ -192,67 +331,51 @@ export function buildFallbackErrorReviewQuestion(params: {
     return { ok: false, reason: "Sem enunciado/gabarito para fallback." }
   }
 
-  let answer: "Certo" | "Errado" = "Certo"
-  let statement = ""
-
+  // Só reaproveita enunciado C/E original se já for julgável sozinho
   if (params.originalType === "certo_errado") {
     const c = correct.toLowerCase()
-    answer = c.startsWith("e") || c === "errado" ? "Errado" : "Certo"
-    statement = normalizeStatement(statementRaw)
-    if (!statement || statement.length < 20) statement = statementRaw
-  } else {
-    const opt = params.options?.find(
-      (o) =>
-        o.label.toUpperCase() === correct.toUpperCase() ||
-        o.text.trim().toLowerCase() === correct.toLowerCase()
-    )
-    const optText = (opt?.text?.trim() || correct).replace(/^[A-Ea-e]\)\s*/, "")
-    // Transforma alternativa (muitas vezes fragmento) em frase julgável.
-    if (isCompleteCeStatement(optText)) {
-      statement = normalizeStatement(optText)
-      answer = "Certo"
-    } else {
-      statement = `É correto afirmar que ${optText.replace(/^que\s+/i, "").replace(/\.$/, "")}.`
-      answer = "Certo"
-    }
-  }
-
-  if (!isCompleteCeStatement(statement)) {
-    // Último recurso: recorta enunciado original se for C/E-like
-    const fromOriginal = normalizeStatement(statementRaw)
-    if (isCompleteCeStatement(fromOriginal)) {
-      statement = fromOriginal
-    } else {
+    const answer: "Certo" | "Errado" =
+      c.startsWith("e") || c === "errado" ? "Errado" : "Certo"
+    const statement = normalizeStatement(statementRaw)
+    if (!isCompleteCeStatement(statement)) {
       return {
         ok: false,
-        reason: "Fallback não conseguiu montar assertiva completa.",
+        reason: "Enunciado original não é assertiva autocontida para fallback.",
       }
+    }
+
+    const fromDetail =
+      (params.errorDetail?.feedback_detailed as string) ||
+      (params.errorDetail?.misconception as string) ||
+      params.motivo ||
+      ""
+    const explanation =
+      String(fromDetail).trim() ||
+      `Gabarito: ${answer}. Revise o conceito cobrado na questão original.`
+    const summary =
+      String(
+        params.errorDetail?.misconception ||
+          params.errorDetail?.specific_mistake ||
+          ""
+      ).trim().slice(0, 100) || `Conceito revisado: ${statement.slice(0, 60)}…`
+    const knowledge_key = normalizeKnowledgeKey(summary)
+    if (!knowledge_key) {
+      return { ok: false, reason: "knowledge_key vazia no fallback." }
+    }
+    return {
+      ok: true,
+      knowledge_summary: summary,
+      knowledge_key,
+      statement,
+      answer,
+      explanation,
     }
   }
 
-  const fromDetail =
-    (params.errorDetail?.feedback_detailed as string) ||
-    (params.errorDetail?.misconception as string) ||
-    ""
-  const explanation =
-    String(fromDetail).trim() ||
-    `Gabarito: ${answer}. Revise o conceito cobrado na questão original.`
-
-  // NÃO usar tecTopic como summary (vira dica de assunto na UI).
-  const summary =
-    String(fromDetail).trim().slice(0, 100) ||
-    `Conceito revisado: ${statement.slice(0, 60)}…`
-  const knowledge_key = normalizeKnowledgeKey(summary)
-  if (!knowledge_key) {
-    return { ok: false, reason: "knowledge_key vazia no fallback." }
-  }
-
+  // Múltipla escolha: sem LLM não inventamos C/E a partir de alternativa solta
   return {
-    ok: true,
-    knowledge_summary: summary,
-    knowledge_key,
-    statement,
-    answer,
-    explanation,
+    ok: false,
+    reason:
+      "Fallback recusou múltipla escolha sem IA (evita assertivas sem sujeito/itens I-II).",
   }
 }
