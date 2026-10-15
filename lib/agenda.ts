@@ -840,6 +840,23 @@ async function listEventsByIds(userId: string, ids: string[]): Promise<AgendaEve
   )
 }
 
+export async function getOwnedEvent(userId: string, eventId: string): Promise<AgendaEvent | null> {
+  const events = await listEventsByIds(userId, [eventId])
+  return events[0] ?? null
+}
+
+export async function listEventsOfKind(userId: string, kindId: string): Promise<AgendaEvent[]> {
+  await assertOwnsKind(kindId, userId)
+  const { data, error } = await supabaseServer
+    .from("agenda_events")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("kind_id", kindId)
+  if (error) throw new Error(error.message)
+  const ids = ((data ?? []) as { id: string }[]).map((row) => row.id)
+  return listEventsByIds(userId, ids)
+}
+
 export async function createEventKind(input: {
   user_id: string
   name: string

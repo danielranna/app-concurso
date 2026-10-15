@@ -5,6 +5,8 @@ import {
   eventCoversDate,
   focusWindow,
   isAllDayEvent,
+  sheetIsPast,
+  sheetsForKindReport,
   layoutDayLanes,
   markersInRange,
   pickUpcomingEvents,
@@ -181,6 +183,46 @@ assert.deepEqual(
 assert.deepEqual(
   pickUpcomingMarkers(markers, "2026-10-21").map((marker) => marker.event_date),
   ["2026-11-08"]
+)
+
+const dateFields = [
+  { id: "abre", field_type: "date" },
+  { id: "prova", field_type: "date" },
+]
+assert.equal(
+  sheetIsPast(
+    [
+      { field_id: "abre", value_text: "2026-10-01" },
+      { field_id: "prova", value_text: "2026-10-10" },
+    ],
+    dateFields,
+    "2026-10-15"
+  ),
+  true
+)
+assert.equal(
+  sheetIsPast(
+    [
+      { field_id: "abre", value_text: "2026-10-01" },
+      { field_id: "prova", value_text: "2026-11-08" },
+    ],
+    dateFields,
+    "2026-10-15"
+  ),
+  false
+)
+assert.equal(sheetIsPast([{ field_id: "abre", value_text: "2026-10-15" }], dateFields, "2026-10-15"), false)
+assert.equal(sheetIsPast([{ field_id: "banca", value_text: "FGV" }], dateFields, "2026-10-15"), false)
+
+const openSheet = { title: "SEFAZ", values: [{ field_id: "prova", value_text: "2026-11-08" }] }
+const pastSheet = { title: "Antigo", values: [{ field_id: "prova", value_text: "2026-09-01" }] }
+assert.deepEqual(
+  sheetsForKindReport([pastSheet, openSheet], dateFields, "2026-10-15", false).map((item) => item.title),
+  ["SEFAZ"]
+)
+assert.deepEqual(
+  sheetsForKindReport([pastSheet, openSheet], dateFields, "2026-10-15", true).map((item) => item.title),
+  ["SEFAZ", "Antigo"]
 )
 
 assert.deepEqual(focusWindow(10, 4), { start: 3, end: 6 })

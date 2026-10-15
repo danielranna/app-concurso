@@ -103,6 +103,54 @@ export function eventCoversDate(
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
+export function filledSheetDates(
+  values: { field_id: string; value_text: string | null }[],
+  fields: { id: string; field_type: string }[]
+): string[] {
+  const dateIds = new Set(fields.filter((field) => field.field_type === "date").map((field) => field.id))
+  const dates: string[] = []
+  for (const value of values) {
+    if (!dateIds.has(value.field_id)) continue
+    const raw = value.value_text?.trim().slice(0, 10) ?? ""
+    if (ISO_DATE.test(raw)) dates.push(raw)
+  }
+  return dates
+}
+
+/** Passou só quando toda data preenchida é anterior a hoje. Sem data, continua em aberto. */
+export function sheetIsPast(
+  values: { field_id: string; value_text: string | null }[],
+  fields: { id: string; field_type: string }[],
+  today: string
+): boolean {
+  const dates = filledSheetDates(values, fields)
+  if (!dates.length) return false
+  return dates.every((date) => date < today)
+}
+
+export function sheetsForKindReport<T extends { title: string; values: { field_id: string; value_text: string | null }[] }>(
+  events: T[],
+  fields: { id: string; field_type: string }[],
+  today: string,
+  includePast: boolean
+): T[] {
+  const open: T[] = []
+  const past: T[] = []
+  for (const event of events) {
+    if (sheetIsPast(event.values, fields, today)) past.push(event)
+    else open.push(event)
+  }
+  const nextOpen = (event: T) =>
+    filledSheetDates(event.values, fields)
+      .filter((date) => date >= today)
+      .sort()[0] ?? "9999-12-31"
+  open.sort((a, b) => nextOpen(a).localeCompare(nextOpen(b)) || a.title.localeCompare(b.title, "pt"))
+  if (!includePast) return open
+  const latest = (event: T) => filledSheetDates(event.values, fields).sort().at(-1) ?? ""
+  past.sort((a, b) => latest(b).localeCompare(latest(a)) || a.title.localeCompare(b.title, "pt"))
+  return [...open, ...past]
+}
+
 export function projectEventMarkers(input: {
   punctual: AgendaEvent[]
   sheets: AgendaEvent[]

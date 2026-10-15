@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Calendar, ChevronLeft, ChevronRight, Maximize2, Plus, Settings2, X } from "lucide-react"
+import { Calendar, ChevronLeft, ChevronRight, Download, Maximize2, Plus, Settings2, X } from "lucide-react"
 import type { AgendaMarker, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
 import AgendaKindEditor from "@/components/home/AgendaKindEditor"
 import AgendaEventForm, {
@@ -14,6 +14,7 @@ import AgendaMonthGrid from "@/components/home/AgendaMonthGrid"
 import AgendaUpcoming from "@/components/home/AgendaUpcoming"
 import AgendaWeekGrid from "@/components/home/AgendaWeekGrid"
 import HomeAgendaDay from "@/components/home/HomeAgendaDay"
+import { downloadAgendaEventPdf } from "@/lib/agenda-pdf-download"
 import { eventCoversDate } from "@/lib/agenda-project"
 import {
   endOfWeek,
@@ -71,6 +72,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     blankEventDraft(toDateInputValue(new Date()))
   )
   const [savingEvent, setSavingEvent] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [eventModal, setEventModal] = useState<"create" | "edit" | "kinds" | null>(null)
   const requestId = useRef(0)
 
@@ -230,6 +232,19 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     }
     closeEventModal()
     await reload()
+  }
+
+  async function downloadCurrentEvent() {
+    if (!draft.id) return
+    setDownloadingPdf(true)
+    setError(null)
+    try {
+      await downloadAgendaEventPdf(userId, draft.id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao baixar PDF")
+    } finally {
+      setDownloadingPdf(false)
+    }
   }
 
   async function removeEvent() {
@@ -438,6 +453,19 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
         <AgendaDialog title={modalTitle} onClose={closeEventModal}>
           {shownError && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{shownError}</p>
+          )}
+          {eventModal === "edit" && draft.id && (
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => void downloadCurrentEvent()}
+                disabled={downloadingPdf}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                <Download className="h-4 w-4" />
+                Baixar PDF
+              </button>
+            </div>
           )}
           {eventModal === "kinds" ? (
             <AgendaKindEditor userId={userId} kinds={kinds} onSaved={reload} onError={setError} />

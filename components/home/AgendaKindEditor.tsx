@@ -1,8 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, Download, Plus, Trash2 } from "lucide-react"
 import { AgendaColorPicker } from "@/components/home/AgendaEventForm"
+import { downloadAgendaKindPdf } from "@/lib/agenda-pdf-download"
 import { NOVO_EDITAL_FIELDS, type AgendaEventKind, type AgendaFieldType } from "@/lib/agenda-types"
 
 type FieldDraft = {
@@ -61,6 +62,8 @@ type Props = {
 export default function AgendaKindEditor({ userId, kinds, onSaved, onError }: Props) {
   const [draft, setDraft] = useState<KindDraft>({ id: null, name: "", fields: [] })
   const [saving, setSaving] = useState(false)
+  const [includePast, setIncludePast] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   function selectKind(kind: AgendaEventKind | null) {
     setDraft(kind ? kindToDraft(kind) : { id: null, name: "", fields: [blankField()] })
@@ -142,6 +145,18 @@ export default function AgendaKindEditor({ userId, kinds, onSaved, onError }: Pr
     await onSaved()
   }
 
+  async function downloadCompiled() {
+    if (!draft.id) return
+    setDownloading(true)
+    try {
+      await downloadAgendaKindPdf(userId, draft.id, includePast)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Erro ao baixar PDF")
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="space-y-3 border-t border-slate-100 pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -176,6 +191,30 @@ export default function AgendaKindEditor({ userId, kinds, onSaved, onError }: Pr
           </button>
         ))}
       </div>
+      {draft.id && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 px-3 py-2">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={includePast}
+              onChange={(e) => setIncludePast(e.target.checked)}
+            />
+            Incluir passados?
+          </label>
+          <button
+            type="button"
+            onClick={() => void downloadCompiled()}
+            disabled={downloading}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <Download className="h-4 w-4" />
+            Baixar compilado
+          </button>
+          <p className="text-xs text-slate-500">
+            Passou quando todas as datas preenchidas são anteriores a hoje.
+          </p>
+        </div>
+      )}
       <label className="flex flex-col gap-1 text-xs text-slate-600">
         Nome do tipo
         <input
