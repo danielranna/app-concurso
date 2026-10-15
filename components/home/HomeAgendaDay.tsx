@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Plus, Settings2, Trash2 } from "lucide-react"
-import { DEFAULT_BLOCK_COLOR, type AgendaDayBlockView, type AgendaEvent, type AgendaWeeklyBlock, type IsoWeekday } from "@/lib/agenda-types"
+import { DEFAULT_BLOCK_COLOR, type AgendaDayBlockView, type AgendaMarker, type AgendaWeeklyBlock, type IsoWeekday } from "@/lib/agenda-types"
 import { AgendaColorPicker } from "@/components/home/AgendaEventForm"
 import { getAgendaNowStatus, isBlockActive, timeToMinutes } from "@/lib/agenda-now"
 import { isAllDayEvent, visibleBlocks } from "@/lib/agenda-project"
@@ -22,10 +22,10 @@ type Props = {
   anchor: Date
   onAnchorChange: (date: Date) => void
   blocks: AgendaDayBlockView[]
-  events: AgendaEvent[]
+  events: AgendaMarker[]
   revision: number
   onReload: () => Promise<void>
-  onEditEvent: (event: AgendaEvent) => void
+  onEditEvent: (event: AgendaMarker) => void
 }
 
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as IsoWeekday[]
@@ -319,14 +319,14 @@ function DaySchedule({
   dayStr: string
   blocks: AgendaDayBlockView[]
   skipped: AgendaDayBlockView[]
-  allDay: AgendaEvent[]
-  timed: AgendaEvent[]
+  allDay: AgendaMarker[]
+  timed: AgendaMarker[]
   onPlanChange: (blockId: string, text: string) => void
   onSkip: (blockId: string) => void
   onReschedule: (blockId: string, start: string, end: string, title: string) => void
   onUndo: (exceptionId: string) => void
   onEditRoutine: () => void
-  onEditEvent: (event: AgendaEvent) => void
+  onEditEvent: (event: AgendaMarker) => void
 }) {
   const isToday = isTodayDate(dayStr)
   const now = useNowTick(isToday)
@@ -334,7 +334,7 @@ function DaySchedule({
   const [rescheduleId, setRescheduleId] = useState<string | null>(null)
 
   const rows = useMemo(() => {
-    const merged: { at: number; kind: "block" | "event"; block?: AgendaDayBlockView; event?: AgendaEvent }[] = [
+    const merged: { at: number; kind: "block" | "event"; block?: AgendaDayBlockView; event?: AgendaMarker }[] = [
       ...blocks.map((block) => ({
         at: timeToMinutes(block.start_time),
         kind: "block" as const,

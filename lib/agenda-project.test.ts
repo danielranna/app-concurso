@@ -5,8 +5,11 @@ import {
   eventCoversDate,
   isAllDayEvent,
   layoutDayLanes,
+  markersInRange,
   pickUpcomingEvents,
+  pickUpcomingMarkers,
   projectAgendaDays,
+  projectEventMarkers,
   visibleBlocks,
 } from "./agenda-project"
 
@@ -117,6 +120,8 @@ function event(partial: Partial<AgendaEvent> & Pick<AgendaEvent, "id" | "event_d
     end_time: null,
     notes: null,
     color: "#3b82f6",
+    kind_id: null,
+    values: [],
     ...partial,
   }
 }
@@ -139,6 +144,42 @@ const upcoming = pickUpcomingEvents([passado, prova, inscricao], "2026-10-15")
 assert.deepEqual(
   upcoming.map((item) => item.id),
   ["inscricao", "prova"]
+)
+
+const edital = event({
+  id: "sefaz",
+  title: "SEFAZ DF",
+  event_date: null,
+  kind_id: "kind-1",
+  values: [
+    { field_id: "banca", value_text: "FGV" },
+    { field_id: "abre", value_text: "2026-10-20" },
+    { field_id: "fecha", value_text: "" },
+    { field_id: "prova-field", value_text: "2026-11-08" },
+  ],
+})
+const markers = projectEventMarkers({
+  punctual: [prova],
+  sheets: [edital],
+  fields: [
+    { id: "banca", kind_id: "kind-1", label: "Banca", field_type: "text", color: null, sort_order: 0 },
+    { id: "abre", kind_id: "kind-1", label: "Início da inscrição", field_type: "date", color: "#22c55e", sort_order: 1 },
+    { id: "fecha", kind_id: "kind-1", label: "Fim da inscrição", field_type: "date", color: "#ef4444", sort_order: 2 },
+    { id: "prova-field", kind_id: "kind-1", label: "Data da realização", field_type: "date", color: "#8b5cf6", sort_order: 3 },
+  ],
+})
+assert.deepEqual(
+  markers.map((marker) => marker.title),
+  ["Prova", "SEFAZ DF · Início da inscrição", "SEFAZ DF · Data da realização"]
+)
+assert.equal(markers[1]!.color, "#22c55e")
+assert.deepEqual(
+  markersInRange(markers, "2026-11-01", "2026-11-30").map((marker) => marker.event_date),
+  ["2026-11-08"]
+)
+assert.deepEqual(
+  pickUpcomingMarkers(markers, "2026-10-21").map((marker) => marker.event_date),
+  ["2026-11-08"]
 )
 
 assert.deepEqual(agendaGridBounds([], []), { startHour: 7, endHour: 22 })

@@ -25,9 +25,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, title, event_date, end_date, start_time, end_time, notes, color } = body
+  const { user_id, title, event_date, end_date, start_time, end_time, notes, color, kind_id, values } = body
 
-  if (!user_id || !title || !event_date) {
+  if (!user_id || !title || (!kind_id && !event_date)) {
     return NextResponse.json(
       { error: "user_id, title e event_date obrigatórios" },
       { status: 400 }
@@ -44,6 +44,8 @@ export async function POST(req: Request) {
       end_time,
       notes,
       color,
+      kind_id,
+      values,
     })
     return NextResponse.json({ event })
   } catch (e) {
@@ -54,9 +56,9 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   const body = await req.json()
-  const { user_id, id, title, event_date, end_date, start_time, end_time, notes, color } = body
+  const { user_id, id, title, event_date, end_date, start_time, end_time, notes, color, kind_id, values } = body
 
-  if (!user_id || !id || !title || !event_date) {
+  if (!user_id || !id || !title || (!kind_id && !event_date)) {
     return NextResponse.json(
       { error: "user_id, id, title e event_date obrigatórios" },
       { status: 400 }
@@ -74,6 +76,8 @@ export async function PATCH(req: Request) {
       end_time,
       notes,
       color,
+      kind_id,
+      values,
     })
     return NextResponse.json({ event })
   } catch (e) {

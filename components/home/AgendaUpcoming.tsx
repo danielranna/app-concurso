@@ -1,11 +1,11 @@
 "use client"
 
-import type { AgendaEvent } from "@/lib/agenda-types"
+import type { AgendaMarker } from "@/lib/agenda-types"
 import { formatDayMonth, formatTimeShort, parseDateInput } from "@/lib/home-date"
 
 type Props = {
-  events: AgendaEvent[]
-  onOpen: (event: AgendaEvent) => void
+  events: AgendaMarker[]
+  onOpen: (event: AgendaMarker) => void
 }
 
 export default function AgendaUpcoming({ events, onOpen }: Props) {

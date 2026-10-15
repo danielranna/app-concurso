@@ -40,9 +40,47 @@ export type AgendaProjectedDay = {
   blocks: AgendaDayBlockView[]
 }
 
+export type AgendaFieldType = "text" | "date" | "money" | "number"
+
+export type AgendaEventKindField = {
+  id: string
+  kind_id: string
+  label: string
+  field_type: AgendaFieldType
+  color: string | null
+  sort_order: number
+}
+
+export type AgendaEventKind = {
+  id: string
+  user_id: string
+  name: string
+  fields: AgendaEventKindField[]
+}
+
+export type AgendaEventValue = {
+  field_id: string
+  value_text: string | null
+}
+
 export type AgendaEvent = {
   id: string
   user_id: string
+  title: string
+  event_date: string | null
+  end_date: string | null
+  start_time: string | null
+  end_time: string | null
+  notes: string | null
+  color: string
+  kind_id: string | null
+  values: AgendaEventValue[]
+}
+
+/** O que a grade, o mês, o dia e Próximos desenham. */
+export type AgendaMarker = {
+  id: string
+  event_id: string
   title: string
   event_date: string
   end_date: string | null
@@ -57,8 +95,24 @@ export type AgendaRange = {
   to: string
   days: AgendaProjectedDay[]
   events: AgendaEvent[]
-  upcoming: AgendaEvent[]
+  markers: AgendaMarker[]
+  upcoming: AgendaMarker[]
+  kinds: AgendaEventKind[]
 }
+
+export const NOVO_EDITAL_FIELDS: {
+  label: string
+  field_type: AgendaFieldType
+  color?: string
+}[] = [
+  { label: "Banca", field_type: "text" },
+  { label: "Remuneração", field_type: "money" },
+  { label: "Vagas", field_type: "number" },
+  { label: "Início da inscrição", field_type: "date", color: "#22c55e" },
+  { label: "Fim da inscrição", field_type: "date", color: "#ef4444" },
+  { label: "Valor da inscrição", field_type: "money" },
+  { label: "Data da realização", field_type: "date", color: "#8b5cf6" },
+]
 
 /** @deprecated use AgendaWeeklyBlock */
 export type AgendaDailyBlock = {

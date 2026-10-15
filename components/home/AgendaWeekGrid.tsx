@@ -1,6 +1,6 @@
 "use client"
 
-import type { AgendaEvent, AgendaProjectedDay } from "@/lib/agenda-types"
+import type { AgendaMarker, AgendaProjectedDay } from "@/lib/agenda-types"
 import { timeToMinutes } from "@/lib/agenda-now"
 import {
   agendaGridBounds,
@@ -19,9 +19,9 @@ const BLOCK_GAP_X = 5
 type Props = {
   weekDays: Date[]
   days: AgendaProjectedDay[]
-  events: AgendaEvent[]
+  events: AgendaMarker[]
   onOpenDay: (date: Date) => void
-  onEditEvent: (event: AgendaEvent) => void
+  onEditEvent: (event: AgendaMarker) => void
 }
 
 type GridItem = {
@@ -32,7 +32,7 @@ type GridItem = {
   subtitle: string | null
   color: string | null
   kind: "block" | "event"
-  event?: AgendaEvent
+  event?: AgendaMarker
 }
 
 export default function AgendaWeekGrid({

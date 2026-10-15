@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Calendar, ChevronLeft, ChevronRight, Maximize2 } from "lucide-react"
-import type { AgendaEvent, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
+import type { AgendaMarker, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
+import AgendaKindEditor from "@/components/home/AgendaKindEditor"
 import AgendaEventForm, {
   blankEventDraft,
   eventToDraft,
@@ -46,6 +47,13 @@ function agendaErrorText(error: string | null) {
   if (error.includes("agenda_block_exceptions") || error.includes("start_time")) {
     return "Execute sql-agenda-schedule.sql no Supabase."
   }
+  if (
+    error.includes("agenda_event_kind") ||
+    error.includes("agenda_event_values") ||
+    error.includes("kind_id")
+  ) {
+    return "Execute sql-agenda-event-kinds.sql no Supabase."
+  }
   if (error.includes("agenda_weekly")) {
     return "Execute sql-agenda-block-weekdays.sql no Supabase."
   }
@@ -62,6 +70,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     blankEventDraft(toDateInputValue(new Date()))
   )
   const [savingEvent, setSavingEvent] = useState(false)
+  const [editingKinds, setEditingKinds] = useState(false)
   const requestId = useRef(0)
 
   const dayStr = toDateInputValue(anchor)
@@ -121,7 +130,9 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
         to: bounds.to,
         days: [],
         events: [],
+        markers: [],
         upcoming: [],
+        kinds: [],
       })
       return
     }
@@ -154,29 +165,47 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     setTab("day")
   }
 
-  function openEvent(event: AgendaEvent) {
+  function openMarker(marker: AgendaMarker) {
+    const event = (range?.events ?? []).find((item) => item.id === marker.event_id)
+    if (!event) return
+    setEditingKinds(false)
     setDraft(eventToDraft(event))
   }
 
-  function openUpcoming(event: AgendaEvent) {
-    openDay(parseDateInput(event.event_date.slice(0, 10)))
+  function openUpcoming(marker: AgendaMarker) {
+    setAnchor(parseDateInput(marker.event_date.slice(0, 10)))
+    openMarker(marker)
   }
 
   async function saveEvent() {
     const title = draft.title.trim()
-    if (!title || !draft.event_date) return
+    if (!title || (!draft.kind_id && !draft.event_date)) return
     setSavingEvent(true)
     setError(null)
-    const payload = {
-      user_id: userId,
-      title,
-      event_date: draft.event_date,
-      end_date: draft.end_date || null,
-      start_time: draft.start_time || null,
-      end_time: draft.end_time || null,
-      notes: draft.notes.trim() || null,
-      color: draft.color,
-    }
+    const values = Object.entries(draft.values).map(([field_id, value_text]) => ({
+      field_id,
+      value_text: value_text.trim() || null,
+    }))
+    const payload = draft.kind_id
+      ? {
+          user_id: userId,
+          title,
+          kind_id: draft.kind_id,
+          notes: draft.notes.trim() || null,
+          values,
+        }
+      : {
+          user_id: userId,
+          title,
+          event_date: draft.event_date,
+          end_date: draft.end_date || null,
+          start_time: draft.start_time || null,
+          end_time: draft.end_time || null,
+          notes: draft.notes.trim() || null,
+          color: draft.color,
+          kind_id: null,
+          values: [],
+        }
     const res = await fetch("/api/agenda/events", {
       method: draft.id ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -210,9 +239,10 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
 
   const rangeReady = range?.from === bounds.from && range?.to === bounds.to
   const days: AgendaProjectedDay[] = rangeReady ? (range?.days ?? []) : []
-  const events = rangeReady ? (range?.events ?? []) : []
+  const markers = rangeReady ? (range?.markers ?? []) : []
+  const kinds = range?.kinds ?? []
   const selected = days.find((day) => day.date === dayStr)
-  const dayEvents = events.filter((event) => eventCoversDate(event, dayStr))
+  const dayMarkers = markers.filter((marker) => eventCoversDate(marker, dayStr))
 
   const headerLabel =
     tab === "day"
@@ -303,37 +333,57 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               anchor={anchor}
               onAnchorChange={setAnchor}
               blocks={selected?.blocks ?? []}
-              events={dayEvents}
+              events={dayMarkers}
               revision={revision}
               onReload={reload}
-              onEditEvent={openEvent}
+              onEditEvent={openMarker}
             />
           ) : tab === "week" ? (
             <AgendaWeekGrid
               weekDays={weekDays}
               days={days}
-              events={events}
+              events={markers}
               onOpenDay={openDay}
-              onEditEvent={openEvent}
+              onEditEvent={openMarker}
             />
           ) : (
             <AgendaMonthGrid
               cells={monthGrid}
               month={anchor.getMonth()}
               days={days}
-              events={events}
+              events={markers}
               onOpenDay={openDay}
+              onEditEvent={openMarker}
             />
           )}
 
-          <AgendaEventForm
-            draft={draft}
-            saving={savingEvent}
-            onChange={setDraft}
-            onSubmit={saveEvent}
-            onDelete={removeEvent}
-            onCancel={() => setDraft(blankEventDraft(dayStr))}
-          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setEditingKinds((open) => !open)}
+              className="text-sm text-slate-600 underline-offset-2 hover:underline"
+            >
+              Tipos de evento
+            </button>
+          </div>
+          {editingKinds ? (
+            <AgendaKindEditor
+              userId={userId}
+              kinds={kinds}
+              onSaved={reload}
+              onError={setError}
+            />
+          ) : (
+            <AgendaEventForm
+              draft={draft}
+              kinds={kinds}
+              saving={savingEvent}
+              onChange={setDraft}
+              onSubmit={saveEvent}
+              onDelete={removeEvent}
+              onCancel={() => setDraft(blankEventDraft(dayStr))}
+            />
+          )}
         </div>
       </div>
     </section>

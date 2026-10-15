@@ -3,6 +3,8 @@ import type {
   AgendaBlockException,
   AgendaDayBlockView,
   AgendaEvent,
+  AgendaEventKindField,
+  AgendaMarker,
   AgendaProjectedDay,
   AgendaWeeklyBlock,
   IsoWeekday,
@@ -90,12 +92,80 @@ export function visibleBlocks(blocks: AgendaDayBlockView[]): AgendaDayBlockView[
   return blocks.filter((block) => !block.skipped)
 }
 
-export function eventCoversDate(event: AgendaEvent, date: string): boolean {
+export function eventCoversDate(
+  event: { event_date: string | null; end_date: string | null },
+  date: string
+): boolean {
+  if (!event.event_date) return false
   const end = event.end_date ?? event.event_date
   return date >= event.event_date && date <= end
 }
 
-export function isAllDayEvent(event: AgendaEvent): boolean {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+export function projectEventMarkers(input: {
+  punctual: AgendaEvent[]
+  sheets: AgendaEvent[]
+  fields: AgendaEventKindField[]
+}): AgendaMarker[] {
+  const markers: AgendaMarker[] = []
+  for (const event of input.punctual) {
+    if (!event.event_date) continue
+    markers.push({
+      id: `event-${event.id}`,
+      event_id: event.id,
+      title: event.title,
+      event_date: dateOnly(event.event_date),
+      end_date: event.end_date ? dateOnly(event.end_date) : null,
+      start_time: event.start_time,
+      end_time: event.end_time,
+      notes: event.notes,
+      color: event.color,
+    })
+  }
+
+  const fieldsById = new Map(input.fields.map((field) => [field.id, field]))
+  for (const event of input.sheets) {
+    for (const value of event.values ?? []) {
+      const field = fieldsById.get(value.field_id)
+      if (!field || field.field_type !== "date") continue
+      const raw = value.value_text?.trim().slice(0, 10) ?? ""
+      if (!ISO_DATE.test(raw)) continue
+      markers.push({
+        id: `field-${event.id}-${field.id}`,
+        event_id: event.id,
+        title: `${event.title} · ${field.label}`,
+        event_date: raw,
+        end_date: null,
+        start_time: null,
+        end_time: null,
+        notes: null,
+        color: field.color || "#3b82f6",
+      })
+    }
+  }
+  return markers
+}
+
+export function markersInRange(markers: AgendaMarker[], from: string, to: string): AgendaMarker[] {
+  return markers.filter((marker) => {
+    const end = marker.end_date ?? marker.event_date
+    return marker.event_date <= to && end >= from
+  })
+}
+
+export function pickUpcomingMarkers(
+  markers: AgendaMarker[],
+  today: string,
+  limit = UPCOMING_LIMIT
+): AgendaMarker[] {
+  return markers
+    .filter((marker) => (marker.end_date ?? marker.event_date) >= today)
+    .sort((a, b) => a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title))
+    .slice(0, limit)
+}
+
+export function isAllDayEvent(event: { start_time: string | null }): boolean {
   return !event.start_time
 }
 
@@ -105,9 +175,9 @@ export function pickUpcomingEvents(
   limit = UPCOMING_LIMIT
 ): AgendaEvent[] {
   return events
-    .filter((event) => (event.end_date ?? event.event_date) >= today)
+    .filter((event) => event.event_date && (event.end_date ?? event.event_date)! >= today)
     .sort((a, b) => {
-      const byDate = a.event_date.localeCompare(b.event_date)
+      const byDate = (a.event_date ?? "").localeCompare(b.event_date ?? "")
       if (byDate !== 0) return byDate
       return (a.start_time ?? "99:99").localeCompare(b.start_time ?? "99:99")
     })

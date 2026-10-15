@@ -1,6 +1,6 @@
 "use client"
 
-import type { AgendaEvent, AgendaProjectedDay } from "@/lib/agenda-types"
+import type { AgendaMarker, AgendaProjectedDay } from "@/lib/agenda-types"
 import { eventCoversDate, visibleBlocks } from "@/lib/agenda-project"
 import { toDateInputValue } from "@/lib/home-date"
 
@@ -8,11 +8,12 @@ type Props = {
   cells: Date[]
   month: number
   days: AgendaProjectedDay[]
-  events: AgendaEvent[]
+  events: AgendaMarker[]
   onOpenDay: (date: Date) => void
+  onEditEvent: (event: AgendaMarker) => void
 }
 
-export default function AgendaMonthGrid({ cells, month, days, events, onOpenDay }: Props) {
+export default function AgendaMonthGrid({ cells, month, days, events, onOpenDay, onEditEvent }: Props) {
   const byDate = new Map(days.map((day) => [day.date, day]))
   const today = toDateInputValue(new Date())
 
@@ -64,6 +65,11 @@ export default function AgendaMonthGrid({ cells, month, days, events, onOpenDay 
               {dayEvents.slice(0, 2).map((event) => (
                 <span
                   key={event.id}
+                  role="presentation"
+                  onClick={(click) => {
+                    click.stopPropagation()
+                    onEditEvent(event)
+                  }}
                   className="mt-0.5 block truncate rounded px-0.5 text-[10px] font-medium text-white"
                   style={{ backgroundColor: event.color }}
                 >
