@@ -3,6 +3,7 @@ import type { AgendaBlockException, AgendaEvent, AgendaWeeklyBlock } from "./age
 import {
   agendaGridBounds,
   eventCoversDate,
+  focusWindow,
   isAllDayEvent,
   layoutDayLanes,
   markersInRange,
@@ -181,6 +182,11 @@ assert.deepEqual(
   pickUpcomingMarkers(markers, "2026-10-21").map((marker) => marker.event_date),
   ["2026-11-08"]
 )
+
+assert.deepEqual(focusWindow(10, 4), { start: 3, end: 6 })
+assert.deepEqual(focusWindow(10, 0), { start: 0, end: 3 })
+assert.deepEqual(focusWindow(10, 9), { start: 7, end: 10 })
+assert.deepEqual(focusWindow(2, 1), { start: 0, end: 2 })
 
 assert.deepEqual(agendaGridBounds([], []), { startHour: 7, endHour: 22 })
 assert.deepEqual(

@@ -165,6 +165,17 @@ export function pickUpcomingMarkers(
     .slice(0, limit)
 }
 
+/** Três itens em volta do foco: o de cima, o atual e o próximo. */
+export function focusWindow(count: number, focus: number, size = 3): { start: number; end: number } {
+  if (count <= 0) return { start: 0, end: 0 }
+  const safeFocus = Math.min(Math.max(focus, 0), count - 1)
+  if (count <= size) return { start: 0, end: count }
+  let start = Math.max(0, safeFocus - 1)
+  const end = Math.min(count, start + size)
+  start = Math.max(0, end - size)
+  return { start, end }
+}
+
 export function isAllDayEvent(event: { start_time: string | null }): boolean {
   return !event.start_time
 }

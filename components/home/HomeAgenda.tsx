@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Calendar, ChevronLeft, ChevronRight, Maximize2 } from "lucide-react"
+import { Calendar, ChevronLeft, ChevronRight, Maximize2, Plus, Settings2, X } from "lucide-react"
 import type { AgendaMarker, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
 import AgendaKindEditor from "@/components/home/AgendaKindEditor"
 import AgendaEventForm, {
@@ -18,6 +18,7 @@ import { eventCoversDate } from "@/lib/agenda-project"
 import {
   endOfWeek,
   formatDayMonth,
+  formatTimeShort,
   parseDateInput,
   startOfMonth,
   startOfWeek,
@@ -70,7 +71,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     blankEventDraft(toDateInputValue(new Date()))
   )
   const [savingEvent, setSavingEvent] = useState(false)
-  const [editingKinds, setEditingKinds] = useState(false)
+  const [eventModal, setEventModal] = useState<"create" | "edit" | "kinds" | null>(null)
   const requestId = useRef(0)
 
   const dayStr = toDateInputValue(anchor)
@@ -165,11 +166,21 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     setTab("day")
   }
 
+  function closeEventModal() {
+    setEventModal(null)
+    setDraft(blankEventDraft(dayStr))
+  }
+
+  function openCreate() {
+    setDraft(blankEventDraft(dayStr))
+    setEventModal("create")
+  }
+
   function openMarker(marker: AgendaMarker) {
     const event = (range?.events ?? []).find((item) => item.id === marker.event_id)
     if (!event) return
-    setEditingKinds(false)
     setDraft(eventToDraft(event))
+    setEventModal("edit")
   }
 
   function openUpcoming(marker: AgendaMarker) {
@@ -217,7 +228,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
       setError(data.error ?? "Erro ao salvar evento")
       return
     }
-    setDraft(blankEventDraft(dayStr))
+    closeEventModal()
     await reload()
   }
 
@@ -233,7 +244,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
       setError(data.error ?? "Erro ao excluir evento")
       return
     }
-    setDraft(blankEventDraft(dayStr))
+    closeEventModal()
     await reload()
   }
 
@@ -243,6 +254,15 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
   const kinds = range?.kinds ?? []
   const selected = days.find((day) => day.date === dayStr)
   const dayMarkers = markers.filter((marker) => eventCoversDate(marker, dayStr))
+  const listedMarkers = [...markers].sort(
+    (a, b) =>
+      a.event_date.localeCompare(b.event_date) ||
+      (a.start_time ?? "").localeCompare(b.start_time ?? "") ||
+      a.title.localeCompare(b.title)
+  )
+  const openKind = kinds.find((kind) => kind.id === draft.kind_id)
+  const modalTitle =
+    eventModal === "kinds" ? "Tipos de evento" : eventModal === "create" ? "Novo evento" : openKind?.name ?? "Evento"
 
   const headerLabel =
     tab === "day"
@@ -357,22 +377,70 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
             />
           )}
 
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setEditingKinds((open) => !open)}
-              className="text-sm text-slate-600 underline-offset-2 hover:underline"
-            >
-              Tipos de evento
-            </button>
-          </div>
-          {editingKinds ? (
-            <AgendaKindEditor
-              userId={userId}
-              kinds={kinds}
-              onSaved={reload}
-              onError={setError}
-            />
+          <section className="rounded-lg border border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+              <p className="text-sm font-medium text-slate-800">Eventos</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={openCreate}
+                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  <Plus className="h-4 w-4" />
+                  Novo evento
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEventModal("kinds")}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  Config
+                </button>
+              </div>
+            </div>
+            {listedMarkers.length === 0 ? (
+              <p className="px-3 py-4 text-sm text-slate-500">Nenhum evento neste período.</p>
+            ) : (
+              <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
+                {listedMarkers.map((marker) => {
+                  const when = formatDayMonth(parseDateInput(marker.event_date.slice(0, 10)))
+                  const time = marker.start_time ? formatTimeShort(marker.start_time) : "dia inteiro"
+                  return (
+                    <li key={marker.id}>
+                      <button
+                        type="button"
+                        onClick={() => openMarker(marker)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                      >
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: marker.color }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
+                          {marker.title}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-500">
+                          {when}
+                          {time ? ` · ${time}` : ""}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {eventModal && (
+        <AgendaDialog title={modalTitle} onClose={closeEventModal}>
+          {shownError && (
+            <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{shownError}</p>
+          )}
+          {eventModal === "kinds" ? (
+            <AgendaKindEditor userId={userId} kinds={kinds} onSaved={reload} onError={setError} />
           ) : (
             <AgendaEventForm
               draft={draft}
@@ -381,11 +449,57 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               onChange={setDraft}
               onSubmit={saveEvent}
               onDelete={removeEvent}
-              onCancel={() => setDraft(blankEventDraft(dayStr))}
+              onCancel={closeEventModal}
             />
           )}
-        </div>
-      </div>
+        </AgendaDialog>
+      )}
     </section>
+  )
+}
+
+function AgendaDialog({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="my-6 w-full max-w-lg rounded-xl bg-white p-5 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   )
 }

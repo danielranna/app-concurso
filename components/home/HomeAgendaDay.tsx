@@ -5,7 +5,7 @@ import { Plus, Settings2, Trash2 } from "lucide-react"
 import { DEFAULT_BLOCK_COLOR, type AgendaDayBlockView, type AgendaMarker, type AgendaWeeklyBlock, type IsoWeekday } from "@/lib/agenda-types"
 import { AgendaColorPicker } from "@/components/home/AgendaEventForm"
 import { getAgendaNowStatus, isBlockActive, timeToMinutes } from "@/lib/agenda-now"
-import { isAllDayEvent, visibleBlocks } from "@/lib/agenda-project"
+import { focusWindow, isAllDayEvent, visibleBlocks } from "@/lib/agenda-project"
 import {
   formatTimeShort,
   formatWeekdaysLabel,
@@ -283,6 +283,25 @@ export default function HomeAgendaDay({
   )
 }
 
+function focusRow(
+  rows: { at: number; kind: "block" | "event"; block?: AgendaDayBlockView; event?: AgendaMarker }[],
+  nowMinutes: number
+) {
+  const active = rows.findIndex((row) => {
+    if (row.kind === "block" && row.block) return isBlockActive(row.block, nowMinutes)
+    if (row.kind === "event" && row.event?.start_time) {
+      const start = timeToMinutes(row.event.start_time)
+      const end = row.event.end_time ? timeToMinutes(row.event.end_time) : start + 60
+      return nowMinutes >= start && nowMinutes < end
+    }
+    return false
+  })
+  if (active >= 0) return active
+  const upcoming = rows.findIndex((row) => row.at > nowMinutes)
+  if (upcoming >= 0) return upcoming
+  return Math.max(0, rows.length - 1)
+}
+
 function useNowTick(enabled: boolean) {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -329,9 +348,14 @@ function DaySchedule({
   onEditEvent: (event: AgendaMarker) => void
 }) {
   const isToday = isTodayDate(dayStr)
-  const now = useNowTick(isToday)
+  const now = useNowTick(true)
   const status = isToday ? getAgendaNowStatus(blocks, now) : null
   const [rescheduleId, setRescheduleId] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [dayStr])
 
   const rows = useMemo(() => {
     const merged: { at: number; kind: "block" | "event"; block?: AgendaDayBlockView; event?: AgendaMarker }[] = [
@@ -349,7 +373,12 @@ function DaySchedule({
     return merged.sort((a, b) => a.at - b.at)
   }, [blocks, timed])
 
-  if (blocks.length === 0 && skipped.length === 0 && allDay.length === 0 && timed.length === 0) {
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const focus = rows.length ? focusRow(rows, nowMinutes) : 0
+  const slice = focusWindow(rows.length, focus)
+  const visibleRows = expanded ? rows : rows.slice(slice.start, slice.end)
+
+  if (rows.length === 0 && skipped.length === 0 && allDay.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-sm text-slate-600">
         <p>Nenhum bloco para {isoWeekdayLabel(weekday)}.</p>
@@ -372,27 +401,16 @@ function DaySchedule({
   return (
     <div className="space-y-3">
       {statusText && <p className="text-sm text-slate-600">{statusText}</p>}
+      {!expanded && rows.length > 3 && (
+        <p className="text-xs text-slate-500">Agora, o de cima e o próximo.</p>
+      )}
 
-      {allDay.length > 0 && (
-        <ul className="space-y-1">
-          {allDay.map((event) => (
-            <li key={event.id}>
-              <button
-                type="button"
-                onClick={() => onEditEvent(event)}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-white"
-                style={{ backgroundColor: event.color }}
-              >
-                <span className="font-medium">{event.title}</span>
-                <span className="text-xs opacity-80">dia inteiro</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+      {rows.length === 0 && allDay.length > 0 && (
+        <p className="text-sm text-slate-500">Sem blocos de rotina neste dia. Os eventos ficam na lista abaixo.</p>
       )}
 
       <ul className="space-y-2">
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           if (row.kind === "event" && row.event) {
             const event = row.event
             return (
@@ -488,7 +506,17 @@ function DaySchedule({
         })}
       </ul>
 
-      {skipped.length > 0 && (
+      {rows.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          className="text-sm font-medium text-blue-700 hover:underline"
+        >
+          {expanded ? "Recolher" : "Ver o dia inteiro"}
+        </button>
+      )}
+
+      {(expanded || rows.length <= 3) && skipped.length > 0 && (
         <ul className="space-y-1">
           {skipped.map((block) => (
             <li
