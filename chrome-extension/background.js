@@ -103,6 +103,7 @@ async function handleApi(msg) {
         tec_id: msg.tec_id,
         confidence_level: msg.confidence_level || "seguro",
         note_draft: msg.note_draft ?? msg.comment ?? null,
+        ai_requested: Boolean(msg.ai_requested),
       });
     }
     case "loadOmissas": {
@@ -134,6 +135,7 @@ async function handleApi(msg) {
         duration_ms: asDurationMs(msg.duration_ms),
         confidence_level: msg.confidence_level || "seguro",
         note_draft: msg.note_draft ?? msg.comment ?? null,
+        ai_requested: Boolean(msg.ai_requested),
       });
     case "listNotes": {
       if (!msg.questionId) return { ok: false, error: "Questão ausente." };
@@ -147,6 +149,7 @@ async function handleApi(msg) {
       return jsonPost(appUrl, `/api/questions/${encodeURIComponent(msg.questionId)}/notes`, {
         user_id: userId,
         body: msg.body,
+        ai_requested: Boolean(msg.ai_requested),
       });
     }
     default:

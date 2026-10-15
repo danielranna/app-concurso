@@ -17,7 +17,7 @@ O atalho pode ser alterado em `chrome://extensions/shortcuts`.
 - Arraste pela faixa superior
 - `solto` some ~0,3s depois que o mouse sai; `fixo` permanece
 - Clique na alternativa; duplo clique risca
-- `1–5` seleciona, `Enter` envia (ou vai à seguinte), `I` inseguro, `C` chute, `N` nota, `Esc` fecha
+- `1–5` seleciona, `Enter` resolve (ou envia o comentário se já resolveu), `Shift+Enter` nova linha, `I` inseguro, `C` chute, `Esc` fecha. Marque **Pedir comentário da IA** só quando quiser intervenção.
 - Fonte: caderno (lista) ou omissas
 - Omissas: abra no site o link com `?t=` uma vez para a extensão guardar o token
 

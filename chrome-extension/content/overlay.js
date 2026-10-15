@@ -46,6 +46,7 @@
     error: "",
     notes: [],
     noteDraft: "",
+    aiRequested: false,
     startedAt: 0,
     elapsedMs: 0,
     timerRunning: false,
@@ -607,19 +608,30 @@
 
     const ta = el("textarea", {
       className: "note",
-      placeholder: "anotação… Ctrl+Enter salva. Enviar a resposta manda rascunho + IA ao Papa",
+      placeholder: "comentário… Enter resolve (ou envia). Shift+Enter = nova linha.",
     });
     ta.value = noteVal;
     ta.addEventListener("input", () => {
       state.noteDraft = ta.value;
     });
     ta.addEventListener("keydown", (ev) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
-        ev.preventDefault();
-        sendNote();
-      }
+      if (ev.key !== "Enter" || ev.shiftKey) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (state.result) sendNote();
+      else resolve();
     });
     body.appendChild(ta);
+    const aiRow = el("label", { className: "meta" });
+    const aiBox = el("input");
+    aiBox.type = "checkbox";
+    aiBox.checked = Boolean(state.aiRequested);
+    aiBox.addEventListener("change", () => {
+      state.aiRequested = aiBox.checked;
+    });
+    aiRow.appendChild(aiBox);
+    aiRow.appendChild(document.createTextNode(" Pedir comentário da IA"));
+    body.appendChild(aiRow);
     if (keepNote) {
       ta.focus();
       if (noteSel) {
@@ -756,6 +768,7 @@
     state.resolving = false;
     state.notes = [];
     state.noteDraft = "";
+    state.aiRequested = false;
   }
 
   function startTimerForQuestion(questionId, alreadyAnswered) {
@@ -923,6 +936,7 @@
       notebook_id: state.current.notebook_id || state.notebookId,
       confidence_level: state.confidence,
       note_draft: (state.noteDraft || "").trim() || null,
+      ai_requested: Boolean(state.aiRequested),
     };
     const res =
       state.source === "omissas"
@@ -943,6 +957,7 @@
       state.answered[state.question.id] = true;
     }
     state.noteDraft = "";
+    state.aiRequested = false;
     if (state.question?.id) await loadNotes(state.question.id);
     render();
   }
@@ -955,13 +970,18 @@
   async function sendNote() {
     const text = (state.noteDraft || "").trim();
     if (!text || !state.question) return;
-    const res = await api("addNote", { questionId: state.question.id, body: text });
+    const res = await api("addNote", {
+      questionId: state.question.id,
+      body: text,
+      ai_requested: Boolean(state.aiRequested),
+    });
     if (!res.ok) {
       state.error = res.error || "Nota não enviada.";
       render();
       return;
     }
     state.noteDraft = "";
+    state.aiRequested = false;
     if (res.data?.entry) state.notes = [...state.notes, res.data.entry];
     render();
   }
@@ -979,7 +999,14 @@
       hide();
       return;
     }
-    if (typing) return;
+    if (typing) {
+      if (t.tagName === "TEXTAREA" && e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (state.result) sendNote();
+        else resolve();
+      }
+      return;
+    }
     if (!state.hover && shadow.activeElement === body) {
       /* still allow when focused inside */
     }

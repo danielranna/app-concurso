@@ -158,7 +158,10 @@ export default function TutoriaisPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Tutoriais</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Biblioteca de vídeos para aprender a usar o sistema.
+            Biblioteca de vídeos para aprender a usar o sistema.{" "}
+            <Link href="/questoes/comentarios" className="font-medium text-violet-700 hover:underline">
+              Como funcionam os comentários nas questões
+            </Link>
           </p>
         </div>
         {canManage && (

@@ -30,6 +30,7 @@ export type EnqueueQuestionResolveAiInput = {
   attemptId: string
   notebookId?: string | null
   noteDraft?: string | null
+  aiRequested?: boolean
   selectedAnswer: string
   confidenceLevel?: string | null
   durationMs?: number | null
@@ -117,6 +118,24 @@ async function loadSubjectId(notebookId: string | null): Promise<string | null> 
 
 function hasRealNoteBody(body: string | null | undefined): boolean {
   return (body?.trim().length ?? 0) > 0
+}
+
+async function questionNotesRequestAi(
+  userId: string,
+  questionId: string,
+  noteEntryIds: string[]
+): Promise<boolean> {
+  const map = await loadNoteEntriesByQuestion(userId, [questionId])
+  const entries = map.get(questionId) ?? []
+  const pool = noteEntryIds.length
+    ? entries.filter((e) => noteEntryIds.includes(e.id))
+    : entries
+  const source = pool.length ? pool : entries
+  return source.some((e) => {
+    const hasFlag = typeof e.ai_requested === "boolean"
+    const want = hasFlag ? Boolean(e.ai_requested) : true
+    return want && hasRealNoteBody(e.body)
+  })
 }
 
 async function questionHasPublishableNotes(
@@ -311,6 +330,7 @@ export async function processQuestionResolveAi(
     questionId,
     noteEntryIds
   )
+  const wantAi = await questionNotesRequestAi(userId, questionId, noteEntryIds)
 
   const pushArgs = {
     userId,
@@ -343,14 +363,19 @@ export async function processQuestionResolveAi(
     null
   let auditSubjectId: string | null = null
   try {
-    const result = await withTimeout(
-      runNoteReplyPipeline({ userId, attemptId, notebookId }),
-      QUESTION_AI_TIMEOUT_MS
-    )
-    usedLlm = result.usedLlm
-    modelUsed = result.modelUsed
-    auditPayload = result.payload
-    auditSubjectId = result.subjectId
+    if (wantAi) {
+      const result = await withTimeout(
+        runNoteReplyPipeline({ userId, attemptId, notebookId }),
+        QUESTION_AI_TIMEOUT_MS
+      )
+      usedLlm = result.usedLlm
+      modelUsed = result.modelUsed
+      auditPayload = result.payload
+      auditSubjectId = result.subjectId
+    } else {
+      auditPayload = await buildAttemptAuditPayload(userId, attemptId)
+      auditSubjectId = await loadSubjectId(notebookId)
+    }
   } catch (e) {
     timedOut = e instanceof Error && e.message === "question_ai_timeout"
     if (!timedOut) {
@@ -365,7 +390,7 @@ export async function processQuestionResolveAi(
     ? await buildPublishParts(userId, questionId, noteEntryIds)
     : { comment: null, aiComment: null }
 
-  if (hasNotes && !parts.aiComment) {
+  if (wantAi && hasNotes && !parts.aiComment) {
     for (let i = 0; i < LATE_AI_POLL_TRIES; i++) {
       await sleep(LATE_AI_POLL_MS)
       parts = await buildPublishParts(userId, questionId, noteEntryIds)
@@ -373,7 +398,7 @@ export async function processQuestionResolveAi(
     }
   }
 
-  if (hasNotes && !alreadyAiPushed && parts.aiComment) {
+  if (wantAi && hasNotes && !alreadyAiPushed && parts.aiComment) {
     await pushAttemptToWhatsapp({
       ...pushArgs,
       comment: null,
@@ -416,7 +441,8 @@ export async function enqueueQuestionResolveAi(input: EnqueueQuestionResolveAiIn
       const entry = await insertQuestionNote(
         input.userId,
         input.questionId,
-        draft
+        draft,
+        { aiRequested: Boolean(input.aiRequested) }
       )
       noteEntryIds.push(entry.id)
     } catch (e) {

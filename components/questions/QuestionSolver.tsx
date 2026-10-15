@@ -106,6 +106,7 @@ type Props = {
     confidence_level: ConfidenceLevel
     tags?: string[]
     note_draft?: string | null
+    ai_requested?: boolean
     short_id?: string | null
     caderno_id?: number | null
   }) => Promise<SubmitAnswerResult>
@@ -842,7 +843,9 @@ export default function QuestionSolver({
     const eliminatedNow = uiStateRef.current.eliminated
     const confidenceNow = uiStateRef.current.confidence
     const tagsNow = waTags
-    const noteDraft = quickNoteRef.current?.consumeDraft() || null
+    const consumed = quickNoteRef.current?.consumeDraft()
+    const noteDraft = consumed?.body || null
+    const aiRequested = Boolean(consumed?.aiRequested)
     const notebookIdNow = currentNow.notebook_id
     const tecId = currentNow.tec_id
     const shortId = currentNow.short_id ?? null
@@ -920,6 +923,7 @@ export default function QuestionSolver({
         confidence_level: confidenceNow,
         tags: tagsNow,
         note_draft: noteDraft,
+        ai_requested: aiRequested,
         short_id: shortId,
         caderno_id: cadernoId,
       })
@@ -1378,6 +1382,8 @@ export default function QuestionSolver({
               questionId={question.id}
               userId={userId}
               layout="sidebar"
+              resolved={Boolean(result)}
+              onEnterResolve={() => resolveRef.current()}
             />
           </div>
           <WhatsAppStudyPanel

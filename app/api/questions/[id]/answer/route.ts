@@ -26,6 +26,7 @@ export async function POST(
     confidence_level,
     comment,
     note_draft,
+    ai_requested,
     tags,
   } = body as {
     user_id: string
@@ -34,6 +35,7 @@ export async function POST(
     confidence_level?: string
     comment?: string | null
     note_draft?: string | null
+    ai_requested?: boolean
     tags?: string[]
   }
 
@@ -88,6 +90,7 @@ export async function POST(
     attemptId,
     notebookId: null,
     noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    aiRequested: Boolean(ai_requested),
     selectedAnswer: selected_answer,
     confidenceLevel: confidence,
     durationMs: duration_ms ?? null,

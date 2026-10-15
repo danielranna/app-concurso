@@ -43,7 +43,7 @@ export default function StudyNavBar({ onNavigate }: Props) {
         <RefreshCw className="h-5 w-5" />
       </button>
       <span className="ml-1 text-xs text-slate-400">
-        ← → · L aleatória · N não resolvida
+        ← → · Enter resolve · Shift+Enter nova linha · L aleatória · N não resolvida
       </span>
     </div>
   )

@@ -1,6 +1,7 @@
 "use client"
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react"
+import Link from "next/link"
 import { Eye, EyeOff, Loader2, Send, Trash2 } from "lucide-react"
 
 export type NoteEntry = {
@@ -10,37 +11,51 @@ export type NoteEntry = {
   has_ai_response: boolean
   ai_feedback: string | null
   ai_pending: boolean
+  ai_requested?: boolean
+}
+
+export type ConsumedDraft = {
+  body: string
+  aiRequested: boolean
 }
 
 export type QuickNoteHandle = {
-  consumeDraft: () => string
+  consumeDraft: () => ConsumedDraft
 }
 
 type Props = {
   questionId: string
   userId: string
   layout?: "default" | "sidebar"
+  resolved?: boolean
+  onEnterResolve?: () => void
 }
 
 const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
-  { questionId, userId, layout = "default" },
+  { questionId, userId, layout = "default", resolved = false, onEnterResolve },
   ref
 ) {
   const sidebar = layout === "sidebar"
   const [entries, setEntries] = useState<NoteEntry[]>([])
   const [draft, setDraft] = useState("")
+  const [aiRequested, setAiRequested] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [justSentIds, setJustSentIds] = useState<Set<string>>(new Set())
+  const [helpOpen, setHelpOpen] = useState(false)
 
   useImperativeHandle(ref, () => ({
     consumeDraft() {
       const trimmed = draft.trim()
-      if (trimmed) setDraft("")
-      return trimmed
+      const requested = aiRequested
+      if (trimmed) {
+        setDraft("")
+        setAiRequested(false)
+      }
+      return { body: trimmed, aiRequested: trimmed ? requested : false }
     },
   }))
 
@@ -91,7 +106,11 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
     const res = await fetch(`/api/questions/${questionId}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, body: trimmed }),
+      body: JSON.stringify({
+        user_id: userId,
+        body: trimmed,
+        ai_requested: aiRequested,
+      }),
     })
     const data = await res.json()
     setSaving(false)
@@ -102,9 +121,10 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
     const entry = data.entry as NoteEntry
     setEntries((prev) => [...prev, entry])
     setDraft("")
+    setAiRequested(false)
     setJustSentIds((prev) => new Set(prev).add(entry.id))
     setExpandedIds((prev) => new Set(prev).add(entry.id))
-  }, [draft, questionId, userId])
+  }, [aiRequested, draft, questionId, userId])
 
   async function removeEntry(entryId: string) {
     const ok = window.confirm(
@@ -138,10 +158,14 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault()
+    if (e.key !== "Enter") return
+    if (e.shiftKey) return
+    e.preventDefault()
+    if (resolved) {
       void send()
+      return
     }
+    onEnterResolve?.()
   }
 
   function toggleExpanded(id: string) {
@@ -163,7 +187,36 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-slate-500">Anotações</p>
+        <button
+          type="button"
+          onClick={() => setHelpOpen((v) => !v)}
+          className="text-[11px] text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+        >
+          Como funciona
+        </button>
       </div>
+      {helpOpen && (
+        <div className="mb-2 space-y-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] leading-snug text-slate-600">
+          <p>
+            O comentário fica nesta questão. Ao resolver, o texto vai ao Papa
+            Vagas (grupo).{" "}
+            <strong>Enter</strong> resolve (ou envia, se já resolveu).{" "}
+            <strong>Shift+Enter</strong> quebra linha.
+          </p>
+          <p>
+            Inseguro/chute entram na correção do WhatsApp. A IA só comenta se
+            você ligar o botão abaixo.
+          </p>
+          <p>
+            <Link
+              href="/questoes/comentarios"
+              className="font-medium text-violet-700 hover:underline"
+            >
+              Ver o guia completo
+            </Link>
+          </p>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-xs text-slate-400">Carregando…</p>
@@ -261,9 +314,18 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
         }}
         onKeyDown={handleKeyDown}
         rows={sidebar ? 6 : 3}
-        placeholder="Dúvida ou comentário. Ao resolver, a IA responde e o texto vai ao Papa Vagas."
+        placeholder="Dúvida ou comentário. Enter resolve (Shift+Enter = nova linha). O texto vai ao Papa Vagas."
         className={`mt-2 w-full resize-y rounded border border-slate-200 bg-white px-2 py-1 text-sm ${sidebar ? "min-h-[100px] flex-1 lg:min-h-[140px]" : ""}`}
       />
+      <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+        <input
+          type="checkbox"
+          checked={aiRequested}
+          onChange={(e) => setAiRequested(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-slate-300"
+        />
+        Pedir comentário da IA
+      </label>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -278,7 +340,9 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
           )}
           Enviar
         </button>
-        <span className="text-xs text-slate-400">Ctrl+Enter</span>
+        <span className="text-xs text-slate-400">
+          {resolved ? "Enter envia · Shift+Enter nova linha" : "Enter resolve · Shift+Enter nova linha"}
+        </span>
       </div>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>

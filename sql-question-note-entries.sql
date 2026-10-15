@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS question_note_entries (
     ai_audit_zone IS NULL
     OR ai_audit_zone IN ('red', 'yellow', 'green_note')
   ),
-  ai_model_used TEXT
+  ai_model_used TEXT,
+  ai_requested boolean NOT NULL DEFAULT false
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_note_entries_user_question

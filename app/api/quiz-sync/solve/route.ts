@@ -24,6 +24,7 @@ export async function POST(req: Request) {
     tags,
     comment,
     note_draft,
+    ai_requested,
     short_id,
     caderno_id,
   } = body as {
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
     tags?: string[]
     comment?: string | null
     note_draft?: string | null
+    ai_requested?: boolean
     short_id?: string | null
     caderno_id?: number | null
   }
@@ -73,6 +75,7 @@ export async function POST(req: Request) {
     attemptId,
     notebookId: nb,
     noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    aiRequested: Boolean(ai_requested),
     selectedAnswer: selected_answer,
     confidenceLevel: confidence,
     durationMs: duration_ms ?? null,

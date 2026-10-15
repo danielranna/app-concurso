@@ -73,6 +73,7 @@ export default function ResolverQuestaoAvulsaPage() {
       confidence_level: ConfidenceLevel
       tags?: string[]
       note_draft?: string | null
+      ai_requested?: boolean
     }) => {
       if (!userId) return { error: "Não autenticado", is_correct: null }
       const res = await fetch(`/api/questions/${questionId}/answer`, {
@@ -85,6 +86,7 @@ export default function ResolverQuestaoAvulsaPage() {
           confidence_level: payload.confidence_level,
           tags: payload.tags,
           note_draft: payload.note_draft,
+          ai_requested: payload.ai_requested,
         }),
       })
       const data = await res.json()

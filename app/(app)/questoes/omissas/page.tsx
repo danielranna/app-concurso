@@ -273,6 +273,7 @@ function OmissasAppPage() {
       confidence_level: ConfidenceLevel
       tags?: string[]
       note_draft?: string | null
+      ai_requested?: boolean
       short_id?: string | null
       caderno_id?: number | null
     }) => {

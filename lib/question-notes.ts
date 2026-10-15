@@ -18,6 +18,11 @@ export type QuestionNoteEntryRow = {
   ai_feedback: string | null
   ai_audit_zone: string | null
   ai_model_used: string | null
+  ai_requested?: boolean
+}
+
+export function parseAiRequested(raw: unknown): boolean {
+  return raw === true || raw === "true" || raw === 1 || raw === "1"
 }
 
 export type QuestionNoteEntryPublic = {
@@ -27,6 +32,7 @@ export type QuestionNoteEntryPublic = {
   has_ai_response: boolean
   ai_feedback: string | null
   ai_pending: boolean
+  ai_requested: boolean
 }
 
 export function toPublicNoteEntry(row: {
@@ -35,10 +41,13 @@ export function toPublicNoteEntry(row: {
   created_at: string
   ai_processed_at?: string | null
   ai_feedback?: string | null
+  ai_requested?: boolean | null
 }, options?: { expectAi?: boolean }): QuestionNoteEntryPublic {
   const aiFeedback = row.ai_feedback?.trim() || null
   const processed = Boolean(row.ai_processed_at)
-  const expectAi = options?.expectAi ?? true
+  const hasFlag = typeof row.ai_requested === "boolean"
+  const aiRequested = hasFlag ? Boolean(row.ai_requested) : true
+  const expectAi = (options?.expectAi ?? true) && aiRequested
   return {
     id: row.id,
     body: row.body,
@@ -46,6 +55,7 @@ export function toPublicNoteEntry(row: {
     has_ai_response: processed && Boolean(aiFeedback),
     ai_feedback: aiFeedback,
     ai_pending: expectAi && !processed,
+    ai_requested: aiRequested,
   }
 }
 
@@ -53,26 +63,42 @@ export async function insertQuestionNote(
   userId: string,
   questionId: string,
   body: string,
-  options?: { syncOrigin?: "whatsapp" | null }
+  options?: { syncOrigin?: "whatsapp" | null; aiRequested?: boolean }
 ): Promise<QuestionNoteEntryPublic> {
   const trimmed = body.trim()
   if (!trimmed) throw new Error("Escreva algo antes de enviar")
 
+  const aiRequested = Boolean(options?.aiRequested)
+  const now = new Date().toISOString()
   const row: Record<string, unknown> = {
     user_id: userId,
     question_id: questionId,
     body: trimmed,
+    ai_requested: aiRequested,
   }
+  if (!aiRequested) row.ai_processed_at = now
   if (options?.syncOrigin) row.sync_origin = options.syncOrigin
 
-  const { data, error } = await supabaseServer
+  const selectCols = "id, body, created_at, ai_processed_at, ai_feedback, ai_requested"
+  let { data, error } = await supabaseServer
     .from("question_note_entries")
     .insert(row)
-    .select("id, body, created_at, ai_processed_at, ai_feedback")
+    .select(selectCols)
     .single()
 
+  if (error && /ai_requested/i.test(error.message || "")) {
+    delete row.ai_requested
+    const retry = await supabaseServer
+      .from("question_note_entries")
+      .insert(row)
+      .select("id, body, created_at, ai_processed_at, ai_feedback")
+      .single()
+    data = retry.data
+    error = retry.error
+  }
+
   if (error) throw new Error(error.message)
-  return toPublicNoteEntry(data)
+  return toPublicNoteEntry({ ...data, ai_requested: aiRequested })
 }
 
 export async function latestAttemptForQuestion(
@@ -113,14 +139,27 @@ export async function loadNoteEntriesByQuestion(
   const map = new Map<string, QuestionNoteEntryRow[]>()
   if (!questionIds.length) return map
 
-  const { data, error } = await supabaseServer
+  const selectFull =
+    "id, user_id, question_id, body, created_at, ai_processed_at, ai_classify, ai_feedback, ai_audit_zone, ai_model_used, ai_requested"
+  const selectLegacy =
+    "id, user_id, question_id, body, created_at, ai_processed_at, ai_classify, ai_feedback, ai_audit_zone, ai_model_used"
+  let { data, error } = await supabaseServer
     .from("question_note_entries")
-    .select(
-      "id, user_id, question_id, body, created_at, ai_processed_at, ai_classify, ai_feedback, ai_audit_zone, ai_model_used"
-    )
+    .select(selectFull)
     .eq("user_id", userId)
     .in("question_id", questionIds)
     .order("created_at", { ascending: true })
+
+  if (error && /ai_requested/i.test(error.message || "")) {
+    const retry = await supabaseServer
+      .from("question_note_entries")
+      .select(selectLegacy)
+      .eq("user_id", userId)
+      .in("question_id", questionIds)
+      .order("created_at", { ascending: true })
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) throw new Error(error.message)
 

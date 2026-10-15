@@ -28,6 +28,7 @@ export async function POST(
     tags,
     comment,
     note_draft,
+    ai_requested,
     short_id,
     caderno_id,
   } = body
@@ -82,6 +83,7 @@ export async function POST(
     attemptId,
     notebookId: notebook_id,
     noteDraft: String(note_draft ?? comment ?? "").trim() || null,
+    aiRequested: Boolean(ai_requested),
     selectedAnswer: selected_answer,
     confidenceLevel: confidence,
     durationMs: duration_ms ?? null,

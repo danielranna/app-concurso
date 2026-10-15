@@ -194,6 +194,7 @@ export default function ResolverCadernoPage() {
       confidence_level: ConfidenceLevel
       tags?: string[]
       note_draft?: string | null
+      ai_requested?: boolean
     }) => {
       const res = await fetch(`/api/notebooks/${notebookId}/answer`, {
         method: "POST",
