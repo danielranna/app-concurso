@@ -313,7 +313,6 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               weekDays={weekDays}
               days={days}
               events={events}
-              tall={fullPage}
               onOpenDay={openDay}
               onEditEvent={openEvent}
             />

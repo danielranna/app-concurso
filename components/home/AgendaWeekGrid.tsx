@@ -12,13 +12,14 @@ import {
 } from "@/lib/agenda-project"
 import { formatTimeShort, formatWeekdayShort, toDateInputValue } from "@/lib/home-date"
 
-const HOUR_PX = 48
+const HOUR_PX = 52
+const BLOCK_GAP_Y = 6
+const BLOCK_GAP_X = 5
 
 type Props = {
   weekDays: Date[]
   days: AgendaProjectedDay[]
   events: AgendaEvent[]
-  tall?: boolean
   onOpenDay: (date: Date) => void
   onEditEvent: (event: AgendaEvent) => void
 }
@@ -38,7 +39,6 @@ export default function AgendaWeekGrid({
   weekDays,
   days,
   events,
-  tall = false,
   onOpenDay,
   onEditEvent,
 }: Props) {
@@ -89,22 +89,20 @@ export default function AgendaWeekGrid({
   const today = toDateInputValue(new Date())
 
   function topFor(time: string) {
-    return ((timeToMinutes(time) - bounds.startHour * 60) / 60) * HOUR_PX
+    return ((timeToMinutes(time) - bounds.startHour * 60) / 60) * HOUR_PX + BLOCK_GAP_Y / 2
   }
 
   function heightFor(start: string, end: string) {
     const minutes = Math.max(timeToMinutes(end) - timeToMinutes(start), 20)
-    return (minutes / 60) * HOUR_PX
+    return Math.max((minutes / 60) * HOUR_PX - BLOCK_GAP_Y, 20)
   }
 
+  const gridCols = "grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))] gap-x-2"
+
   return (
-    <div
-      className={`overflow-auto rounded-lg border border-slate-200 ${
-        tall ? "max-h-[calc(100svh-280px)] min-h-[560px]" : "max-h-[70vh]"
-      }`}
-    >
-      <div className="min-w-[840px]">
-        <div className="sticky top-0 z-20 grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))] border-b border-slate-200 bg-white">
+    <div className="w-full overflow-visible rounded-lg border border-slate-200">
+      <div className="w-full">
+        <div className={`sticky top-0 z-20 border-b border-slate-200 bg-white ${gridCols}`}>
           <div />
           {columns.map((column) => {
             const isToday = column.key === today
@@ -131,7 +129,7 @@ export default function AgendaWeekGrid({
         </div>
 
         {hasAllDay && (
-          <div className="grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))] border-b border-slate-200 bg-slate-50/80">
+          <div className={`border-b border-slate-200 bg-slate-50/80 ${gridCols}`}>
             <div className="px-1 py-1 text-[10px] text-slate-400">dia</div>
             {columns.map((column) => (
               <div key={column.key} className="space-y-0.5 border-l border-slate-100 p-1">
@@ -151,7 +149,7 @@ export default function AgendaWeekGrid({
           </div>
         )}
 
-        <div className="grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))]">
+        <div className={gridCols}>
           <div className="relative" style={{ height }}>
             {hours.map((hour) => (
               <div
@@ -187,12 +185,12 @@ export default function AgendaWeekGrid({
                       ? onEditEvent(item.event)
                       : onOpenDay(column.date)
                   }
-                  className="absolute overflow-hidden rounded px-1 py-0.5 text-left text-[10px] leading-tight text-white"
+                  className="absolute overflow-hidden rounded-md px-1.5 py-1 text-left text-[11px] leading-tight text-white"
                   style={{
                     top: topFor(item.start_time),
-                    height: Math.max(heightFor(item.start_time, item.end_time), 18),
-                    left: `calc(${(item.lane / item.lanes) * 100}% + 1px)`,
-                    width: `calc(${100 / item.lanes}% - 3px)`,
+                    height: heightFor(item.start_time, item.end_time),
+                    left: `calc(${(item.lane / item.lanes) * 100}% + ${BLOCK_GAP_X}px)`,
+                    width: `calc(${100 / item.lanes}% - ${BLOCK_GAP_X * 2}px)`,
                     backgroundColor: item.color ?? undefined,
                   }}
                   title={`${formatTimeShort(item.start_time)} ${item.title}`}
