@@ -1,6 +1,7 @@
 "use client"
 
 import { Plus, Trash2 } from "lucide-react"
+import { formatAgendaMoney, formatAgendaNumber } from "@/lib/agenda-format"
 import type { AgendaEvent, AgendaEventKind, AgendaFieldType } from "@/lib/agenda-types"
 
 const DEFAULT_EVENT_COLOR = "#3b82f6"
@@ -248,18 +249,23 @@ function KindFieldInput({
   value: string
   onChange: (value: string) => void
 }) {
-  const inputType = type === "date" ? "date" : type === "number" ? "number" : "text"
+  const inputType = type === "date" ? "date" : "text"
+  const shown =
+    type === "number" ? formatAgendaNumber(value) : type === "money" ? value : value
   return (
     <label className="flex flex-col gap-1 text-xs text-slate-600">
       {type === "money" ? `${label} (R$)` : label}
       <input
         type={inputType}
-        inputMode={type === "money" ? "decimal" : undefined}
-        min={type === "number" ? "0" : undefined}
-        step={type === "number" ? "1" : undefined}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={type === "money" ? "0,00" : undefined}
+        inputMode={type === "number" ? "numeric" : type === "money" ? "decimal" : undefined}
+        value={shown}
+        onChange={(e) =>
+          onChange(type === "number" ? formatAgendaNumber(e.target.value) : e.target.value)
+        }
+        onBlur={() => {
+          if (type === "money") onChange(formatAgendaMoney(value))
+        }}
+        placeholder={type === "money" ? "R$ 0,00" : type === "number" ? "0" : undefined}
         className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
       />
     </label>

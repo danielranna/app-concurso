@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Calendar, ChevronLeft, ChevronRight, Download, Maximize2, Plus, Settings2, X } from "lucide-react"
-import type { AgendaMarker, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
+import { Calendar, ChevronLeft, ChevronRight, Download, Info, Maximize2, Pencil, Plus, Settings2, X } from "lucide-react"
+import type { AgendaEvent, AgendaEventKind, AgendaFieldType, AgendaMarker, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
 import AgendaKindEditor from "@/components/home/AgendaKindEditor"
 import AgendaEventForm, {
   blankEventDraft,
@@ -14,7 +14,8 @@ import AgendaMonthGrid from "@/components/home/AgendaMonthGrid"
 import AgendaUpcoming from "@/components/home/AgendaUpcoming"
 import AgendaWeekGrid from "@/components/home/AgendaWeekGrid"
 import HomeAgendaDay from "@/components/home/HomeAgendaDay"
-import { downloadAgendaEventPdf } from "@/lib/agenda-pdf-download"
+import { formatAgendaMoney, formatAgendaNumber } from "@/lib/agenda-format"
+import { downloadAgendaEventPdf, downloadAgendaKindPdf } from "@/lib/agenda-pdf-download"
 import { eventCoversDate } from "@/lib/agenda-project"
 import {
   endOfWeek,
@@ -73,7 +74,9 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
   )
   const [savingEvent, setSavingEvent] = useState(false)
   const [downloadingPdf, setDownloadingPdf] = useState(false)
-  const [eventModal, setEventModal] = useState<"create" | "edit" | "kinds" | null>(null)
+  const [includePast, setIncludePast] = useState(false)
+  const [downloadKindId, setDownloadKindId] = useState("")
+  const [eventModal, setEventModal] = useState<"create" | "edit" | "info" | "kinds" | "download" | null>(null)
   const requestId = useRef(0)
 
   const dayStr = toDateInputValue(anchor)
@@ -178,16 +181,36 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     setEventModal("create")
   }
 
-  function openMarker(marker: AgendaMarker) {
+  function draftFromEvent(event: AgendaEvent): AgendaEventDraft {
+    const next = eventToDraft(event)
+    const kind = (range?.kinds ?? []).find((item) => item.id === event.kind_id)
+    if (!kind) return next
+    const values = { ...next.values }
+    for (const field of kind.fields) {
+      const raw = values[field.id]
+      if (!raw) continue
+      if (field.field_type === "number") values[field.id] = formatAgendaNumber(raw)
+      if (field.field_type === "money") values[field.id] = formatAgendaMoney(raw)
+    }
+    return { ...next, values }
+  }
+
+  function openMarker(marker: AgendaMarker, mode: "info" | "edit") {
     const event = (range?.events ?? []).find((item) => item.id === marker.event_id)
     if (!event) return
-    setDraft(eventToDraft(event))
-    setEventModal("edit")
+    setDraft(draftFromEvent(event))
+    setEventModal(mode)
   }
 
   function openUpcoming(marker: AgendaMarker) {
     setAnchor(parseDateInput(marker.event_date.slice(0, 10)))
-    openMarker(marker)
+    openMarker(marker, "info")
+  }
+
+  function openCompiledDownload() {
+    setIncludePast(false)
+    setDownloadKindId((range?.kinds ?? [])[0]?.id ?? "")
+    setEventModal("download")
   }
 
   async function saveEvent() {
@@ -195,10 +218,14 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     if (!title || (!draft.kind_id && !draft.event_date)) return
     setSavingEvent(true)
     setError(null)
-    const values = Object.entries(draft.values).map(([field_id, value_text]) => ({
-      field_id,
-      value_text: value_text.trim() || null,
-    }))
+    const kindFields = (range?.kinds ?? []).find((item) => item.id === draft.kind_id)?.fields ?? []
+    const values = Object.entries(draft.values).map(([field_id, value_text]) => {
+      const field = kindFields.find((item) => item.id === field_id)
+      let text = value_text.trim()
+      if (field?.field_type === "number") text = formatAgendaNumber(text)
+      if (field?.field_type === "money") text = formatAgendaMoney(text)
+      return { field_id, value_text: text || null }
+    })
     const payload = draft.kind_id
       ? {
           user_id: userId,
@@ -232,6 +259,20 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
     }
     closeEventModal()
     await reload()
+  }
+
+  async function downloadCompiled() {
+    if (!downloadKindId) return
+    setDownloadingPdf(true)
+    setError(null)
+    try {
+      await downloadAgendaKindPdf(userId, downloadKindId, includePast)
+      closeEventModal()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao baixar PDF")
+    } finally {
+      setDownloadingPdf(false)
+    }
   }
 
   async function downloadCurrentEvent() {
@@ -276,8 +317,17 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
       a.title.localeCompare(b.title)
   )
   const openKind = kinds.find((kind) => kind.id === draft.kind_id)
+  const viewed = (range?.events ?? []).find((event) => event.id === draft.id) ?? null
   const modalTitle =
-    eventModal === "kinds" ? "Tipos de evento" : eventModal === "create" ? "Novo evento" : openKind?.name ?? "Evento"
+    eventModal === "kinds"
+      ? "Tipos de evento"
+      : eventModal === "download"
+        ? "Baixar compilado"
+        : eventModal === "create"
+          ? "Novo evento"
+          : eventModal === "edit"
+            ? openKind?.name ?? "Editar evento"
+            : draft.title || "Evento"
 
   const headerLabel =
     tab === "day"
@@ -371,7 +421,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               events={dayMarkers}
               revision={revision}
               onReload={reload}
-              onEditEvent={openMarker}
+              onEditEvent={(marker) => openMarker(marker, "info")}
             />
           ) : tab === "week" ? (
             <AgendaWeekGrid
@@ -379,7 +429,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               days={days}
               events={markers}
               onOpenDay={openDay}
-              onEditEvent={openMarker}
+              onEditEvent={(marker) => openMarker(marker, "info")}
             />
           ) : (
             <AgendaMonthGrid
@@ -388,7 +438,7 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
               days={days}
               events={markers}
               onOpenDay={openDay}
-              onEditEvent={openMarker}
+              onEditEvent={(marker) => openMarker(marker, "info")}
             />
           )}
 
@@ -403,6 +453,14 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
                 >
                   <Plus className="h-4 w-4" />
                   Novo evento
+                </button>
+                <button
+                  type="button"
+                  onClick={openCompiledDownload}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-4 w-4" />
+                  Baixar
                 </button>
                 <button
                   type="button"
@@ -422,11 +480,11 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
                   const when = formatDayMonth(parseDateInput(marker.event_date.slice(0, 10)))
                   const time = marker.start_time ? formatTimeShort(marker.start_time) : "dia inteiro"
                   return (
-                    <li key={marker.id}>
+                    <li key={marker.id} className="flex items-center gap-1 pr-2 hover:bg-slate-50">
                       <button
                         type="button"
-                        onClick={() => openMarker(marker)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                        onClick={() => openMarker(marker, "info")}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
                       >
                         <span
                           className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -439,6 +497,22 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
                           {when}
                           {time ? ` · ${time}` : ""}
                         </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Informações"
+                        onClick={() => openMarker(marker, "info")}
+                        className="rounded-md p-1.5 text-slate-500 hover:bg-white hover:text-slate-800"
+                      >
+                        <Info className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Editar"
+                        onClick={() => openMarker(marker, "edit")}
+                        className="rounded-md p-1.5 text-slate-500 hover:bg-white hover:text-slate-800"
+                      >
+                        <Pencil className="h-4 w-4" />
                       </button>
                     </li>
                   )
@@ -454,21 +528,26 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
           {shownError && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{shownError}</p>
           )}
-          {eventModal === "edit" && draft.id && (
-            <div className="mb-3 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void downloadCurrentEvent()}
-                disabled={downloadingPdf}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              >
-                <Download className="h-4 w-4" />
-                Baixar PDF
-              </button>
-            </div>
-          )}
           {eventModal === "kinds" ? (
             <AgendaKindEditor userId={userId} kinds={kinds} onSaved={reload} onError={setError} />
+          ) : eventModal === "download" ? (
+            <CompiledDownload
+              kinds={kinds}
+              kindId={downloadKindId}
+              includePast={includePast}
+              downloading={downloadingPdf}
+              onKindId={setDownloadKindId}
+              onIncludePast={setIncludePast}
+              onDownload={() => void downloadCompiled()}
+            />
+          ) : eventModal === "info" && viewed ? (
+            <EventInfo
+              event={viewed}
+              kind={openKind ?? null}
+              downloading={downloadingPdf}
+              onEdit={() => setEventModal("edit")}
+              onDownload={() => void downloadCurrentEvent()}
+            />
           ) : (
             <AgendaEventForm
               draft={draft}
@@ -483,6 +562,140 @@ export default function HomeAgenda({ userId, fullPage = false }: Props) {
         </AgendaDialog>
       )}
     </section>
+  )
+}
+
+function formatIsoDate(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split("-")
+  if (!year || !month || !day) return iso
+  return `${day}/${month}/${year}`
+}
+
+function displayFieldValue(type: AgendaFieldType, raw: string | null): string {
+  const text = raw?.trim() ?? ""
+  if (!text) return "—"
+  if (type === "date") return /^\d{4}-\d{2}-\d{2}/.test(text) ? formatIsoDate(text) : text
+  if (type === "number") return formatAgendaNumber(text) || "—"
+  if (type === "money") return formatAgendaMoney(text) || "—"
+  return text
+}
+
+function EventInfo({
+  event,
+  kind,
+  downloading,
+  onEdit,
+  onDownload,
+}: {
+  event: AgendaEvent
+  kind: AgendaEventKind | null
+  downloading: boolean
+  onEdit: () => void
+  onDownload: () => void
+}) {
+  const byField = new Map(event.values.map((value) => [value.field_id, value.value_text]))
+  const rows = kind
+    ? kind.fields.map((field) => ({
+        label: field.label,
+        value: displayFieldValue(field.field_type, byField.get(field.id) ?? null),
+      }))
+    : [
+        { label: "Data", value: event.event_date ? formatIsoDate(event.event_date) : "—" },
+        ...(event.end_date ? [{ label: "Até", value: formatIsoDate(event.end_date) }] : []),
+        ...(event.start_time ? [{ label: "Início", value: event.start_time.slice(0, 5) }] : []),
+        ...(event.end_time ? [{ label: "Fim", value: event.end_time.slice(0, 5) }] : []),
+      ]
+
+  return (
+    <div className="space-y-3 pt-2">
+      <p className="text-sm text-slate-500">{kind?.name ?? "Pontual"}</p>
+      <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">
+            <dt className="text-slate-500">{row.label}</dt>
+            <dd className="text-right font-medium text-slate-800">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {event.notes && <p className="text-sm text-slate-700">Nota: {event.notes}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+        >
+          <Pencil className="h-4 w-4" />
+          Editar
+        </button>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading}
+          className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          <Download className="h-4 w-4" />
+          Baixar PDF
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CompiledDownload({
+  kinds,
+  kindId,
+  includePast,
+  downloading,
+  onKindId,
+  onIncludePast,
+  onDownload,
+}: {
+  kinds: AgendaEventKind[]
+  kindId: string
+  includePast: boolean
+  downloading: boolean
+  onKindId: (id: string) => void
+  onIncludePast: (value: boolean) => void
+  onDownload: () => void
+}) {
+  if (!kinds.length) {
+    return <p className="pt-3 text-sm text-slate-600">Crie um tipo em Config para baixar o compilado.</p>
+  }
+  return (
+    <div className="space-y-3 pt-3">
+      <label className="flex flex-col gap-1 text-xs text-slate-600">
+        Tipo
+        <select
+          value={kindId}
+          onChange={(e) => onKindId(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+        >
+          {kinds.map((kind) => (
+            <option key={kind.id} value={kind.id}>
+              {kind.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={includePast} onChange={(e) => onIncludePast(e.target.checked)} />
+        Incluir passados?
+      </label>
+      <p className="text-xs text-slate-500">
+        Passou quando todas as datas preenchidas são anteriores a hoje.
+      </p>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading || !kindId}
+          className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          <Download className="h-4 w-4" />
+          Baixar PDF
+        </button>
+      </div>
+    </div>
   )
 }
 

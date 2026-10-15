@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getOwnedEvent, listEventKinds, listEventsOfKind } from "@/lib/agenda"
 import { agendaPdfFilename, renderAgendaPdfBuffer, type AgendaPdfField, type AgendaPdfSheet } from "@/lib/agenda-pdf-report"
+import { formatAgendaMoney, formatAgendaNumber } from "@/lib/agenda-format"
 import { sheetIsPast, sheetsForKindReport } from "@/lib/agenda-project"
 import type { AgendaEvent, AgendaEventKind, AgendaEventKindField } from "@/lib/agenda-types"
 
@@ -24,7 +25,8 @@ function fieldValue(field: AgendaEventKindField, raw: string | null): string {
     const iso = text.slice(0, 10)
     return ISO_DATE.test(iso) ? formatIso(iso) : text
   }
-  if (field.field_type === "money") return text.startsWith("R$") ? text : `R$ ${text}`
+  if (field.field_type === "money") return formatAgendaMoney(text) || text
+  if (field.field_type === "number") return formatAgendaNumber(text) || text
   return text
 }
 
