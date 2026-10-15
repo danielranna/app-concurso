@@ -35,7 +35,7 @@ export async function GET(
       .eq("user_id", user_id)
       .eq("question_id", question_id)
       .order("created_at", { ascending: true })
-    data = retry.data
+    data = (retry.data ?? []).map((row) => ({ ...row, ai_requested: null }))
     error = retry.error
   }
 

@@ -93,11 +93,11 @@ export async function insertQuestionNote(
       .insert(row)
       .select("id, body, created_at, ai_processed_at, ai_feedback")
       .single()
-    data = retry.data
+    data = retry.data ? { ...retry.data, ai_requested: aiRequested } : null
     error = retry.error
   }
 
-  if (error) throw new Error(error.message)
+  if (error || !data) throw new Error(error?.message ?? "Falha ao salvar nota")
   return toPublicNoteEntry({ ...data, ai_requested: aiRequested })
 }
 
@@ -157,7 +157,7 @@ export async function loadNoteEntriesByQuestion(
       .eq("user_id", userId)
       .in("question_id", questionIds)
       .order("created_at", { ascending: true })
-    data = retry.data
+    data = (retry.data ?? []).map((row) => ({ ...row, ai_requested: null }))
     error = retry.error
   }
 
