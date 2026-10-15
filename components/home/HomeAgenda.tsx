@@ -1,14 +1,21 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react"
-import type { AgendaEvent } from "@/lib/agenda-types"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Calendar, ChevronLeft, ChevronRight } from "lucide-react"
+import type { AgendaEvent, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
+import AgendaEventForm, {
+  blankEventDraft,
+  eventToDraft,
+  type AgendaEventDraft,
+} from "@/components/home/AgendaEventForm"
+import AgendaMonthGrid from "@/components/home/AgendaMonthGrid"
+import AgendaUpcoming from "@/components/home/AgendaUpcoming"
+import AgendaWeekGrid from "@/components/home/AgendaWeekGrid"
 import HomeAgendaDay from "@/components/home/HomeAgendaDay"
+import { eventCoversDate } from "@/lib/agenda-project"
 import {
-  endOfMonth,
   endOfWeek,
   formatDayMonth,
-  formatWeekdayShort,
   parseDateInput,
   startOfMonth,
   startOfWeek,
@@ -27,85 +34,38 @@ const TABS: { id: AgendaTab; label: string }[] = [
   { id: "month", label: "Mês" },
 ]
 
-const DEFAULT_EVENT_COLOR = "#3b82f6"
-
-const EVENT_COLOR_PRESETS = [
-  "#3b82f6",
-  "#ef4444",
-  "#22c55e",
-  "#f59e0b",
-  "#8b5cf6",
-  "#ec4899",
-  "#0ea5e9",
-  "#64748b",
-]
+function agendaErrorText(error: string | null) {
+  if (!error) return null
+  const missing =
+    error.includes("does not exist") ||
+    error.includes("schema cache") ||
+    error.includes("Could not find")
+  if (!missing) return error
+  if (error.includes("agenda_block_exceptions") || error.includes("start_time")) {
+    return "Execute sql-agenda-schedule.sql no Supabase."
+  }
+  if (error.includes("agenda_weekly")) {
+    return "Execute sql-agenda-block-weekdays.sql no Supabase."
+  }
+  return error
+}
 
 export default function HomeAgenda({ userId }: Props) {
   const [tab, setTab] = useState<AgendaTab>("day")
   const [anchor, setAnchor] = useState(() => new Date())
-  const [events, setEvents] = useState<AgendaEvent[]>([])
-  const [loading, setLoading] = useState(false)
+  const [range, setRange] = useState<AgendaRange | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [eventColor, setEventColor] = useState(DEFAULT_EVENT_COLOR)
+  const [revision, setRevision] = useState(0)
+  const [draft, setDraft] = useState<AgendaEventDraft>(() =>
+    blankEventDraft(toDateInputValue(new Date()))
+  )
+  const [savingEvent, setSavingEvent] = useState(false)
+  const requestId = useRef(0)
 
   const dayStr = toDateInputValue(anchor)
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor])
   const weekEnd = useMemo(() => endOfWeek(anchor), [anchor])
   const monthStart = useMemo(() => startOfMonth(anchor), [anchor])
-  const monthEnd = useMemo(() => endOfMonth(anchor), [anchor])
-
-  const weekFromStr = useMemo(() => toDateInputValue(weekStart), [weekStart])
-  const weekToStr = useMemo(() => toDateInputValue(weekEnd), [weekEnd])
-  const monthFromStr = useMemo(() => toDateInputValue(monthStart), [monthStart])
-  const monthToStr = useMemo(() => toDateInputValue(monthEnd), [monthEnd])
-
-  /** Chave estável — evita loop por objetos Date novos a cada render. */
-  const fetchKey = useMemo(() => {
-    if (tab === "day") return null
-    if (tab === "week") return `week:${weekFromStr}:${weekToStr}`
-    return `month:${monthFromStr}:${monthToStr}`
-  }, [tab, weekFromStr, weekToStr, monthFromStr, monthToStr])
-
-  const reload = useCallback(async () => {
-    setError(null)
-    if (tab === "day") return
-    const from = tab === "week" ? weekFromStr : monthFromStr
-    const to = tab === "week" ? weekToStr : monthToStr
-    const res = await fetch(
-      `/api/agenda/events?user_id=${userId}&from=${from}&to=${to}&_=${Date.now()}`
-    )
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? "Erro ao carregar eventos")
-      return
-    }
-    setEvents(data.events ?? [])
-  }, [userId, tab, weekFromStr, weekToStr, monthFromStr, monthToStr])
-
-  useEffect(() => {
-    if (!fetchKey) return
-    let cancelled = false
-    async function run() {
-      setLoading(true)
-      await reload()
-      if (!cancelled) setLoading(false)
-    }
-    run()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchKey])
-
-  const weekDays = useMemo(() => {
-    const days: Date[] = []
-    const d = new Date(weekStart)
-    for (let i = 0; i < 7; i++) {
-      days.push(new Date(d))
-      d.setDate(d.getDate() + 1)
-    }
-    return days
-  }, [weekStart])
 
   const monthGrid = useMemo(() => {
     const gridStart = new Date(monthStart)
@@ -113,69 +73,153 @@ export default function HomeAgenda({ userId }: Props) {
     gridStart.setDate(gridStart.getDate() - pad)
     const cells: Date[] = []
     for (let i = 0; i < 42; i++) {
-      const c = new Date(gridStart)
-      c.setDate(gridStart.getDate() + i)
-      cells.push(c)
+      const cell = new Date(gridStart)
+      cell.setDate(gridStart.getDate() + i)
+      cells.push(cell)
     }
     return cells
   }, [monthStart])
 
-  function shiftAnchor(delta: number) {
-    const d = new Date(anchor)
-    if (tab === "day") d.setDate(d.getDate() + delta)
-    else if (tab === "week") d.setDate(d.getDate() + delta * 7)
-    else d.setMonth(d.getMonth() + delta)
-    setAnchor(d)
-  }
-
-  async function addEvent(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const fd = new FormData(e.currentTarget)
-    const title = String(fd.get("title")).trim()
-    const event_date = String(fd.get("event_date"))
-    if (!title || !event_date) return
-
-    const res = await fetch("/api/agenda/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        title,
-        event_date,
-        notes: String(fd.get("notes") || "").trim() || null,
-        color: eventColor,
-      }),
-    })
-    if (res.ok) {
-      e.currentTarget.reset()
-      setEventColor(DEFAULT_EVENT_COLOR)
-      await reload()
+  const weekDays = useMemo(() => {
+    const days: Date[] = []
+    const cursor = new Date(weekStart)
+    for (let i = 0; i < 7; i++) {
+      days.push(new Date(cursor))
+      cursor.setDate(cursor.getDate() + 1)
     }
+    return days
+  }, [weekStart])
+
+  const bounds = useMemo(() => {
+    if (tab === "week") {
+      return { from: toDateInputValue(weekStart), to: toDateInputValue(weekEnd) }
+    }
+    if (tab === "month") {
+      return {
+        from: toDateInputValue(monthGrid[0]!),
+        to: toDateInputValue(monthGrid[monthGrid.length - 1]!),
+      }
+    }
+    return { from: dayStr, to: dayStr }
+  }, [tab, weekStart, weekEnd, monthGrid, dayStr])
+
+  const reload = useCallback(async () => {
+    const id = ++requestId.current
+    setError(null)
+    const today = toDateInputValue(new Date())
+    const res = await fetch(
+      `/api/agenda/range?user_id=${userId}&from=${bounds.from}&to=${bounds.to}&today=${today}&_=${Date.now()}`
+    )
+    const data = await res.json()
+    if (id !== requestId.current) return
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao carregar a agenda")
+      setRange({
+        from: bounds.from,
+        to: bounds.to,
+        days: [],
+        events: [],
+        upcoming: [],
+      })
+      return
+    }
+    setRange(data as AgendaRange)
+    setRevision((value) => value + 1)
+  }, [userId, bounds.from, bounds.to])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  useEffect(() => {
+    setDraft((current) => {
+      if (current.id || current.title.trim()) return current
+      if (current.event_date === dayStr) return current
+      return { ...current, event_date: dayStr }
+    })
+  }, [dayStr])
+
+  function shiftAnchor(delta: number) {
+    const next = new Date(anchor)
+    if (tab === "day") next.setDate(next.getDate() + delta)
+    else if (tab === "week") next.setDate(next.getDate() + delta * 7)
+    else next.setMonth(next.getMonth() + delta)
+    setAnchor(next)
   }
 
-  async function removeEvent(id: string) {
-    await fetch(`/api/agenda/events?user_id=${userId}&id=${id}`, { method: "DELETE" })
+  function openDay(date: Date) {
+    setAnchor(date)
+    setTab("day")
+  }
+
+  function openEvent(event: AgendaEvent) {
+    setDraft(eventToDraft(event))
+  }
+
+  function openUpcoming(event: AgendaEvent) {
+    openDay(parseDateInput(event.event_date.slice(0, 10)))
+  }
+
+  async function saveEvent() {
+    const title = draft.title.trim()
+    if (!title || !draft.event_date) return
+    setSavingEvent(true)
+    setError(null)
+    const payload = {
+      user_id: userId,
+      title,
+      event_date: draft.event_date,
+      end_date: draft.end_date || null,
+      start_time: draft.start_time || null,
+      end_time: draft.end_time || null,
+      notes: draft.notes.trim() || null,
+      color: draft.color,
+    }
+    const res = await fetch("/api/agenda/events", {
+      method: draft.id ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft.id ? { ...payload, id: draft.id } : payload),
+    })
+    const data = await res.json()
+    setSavingEvent(false)
+    if (!res.ok) {
+      setError(data.error ?? "Erro ao salvar evento")
+      return
+    }
+    setDraft(blankEventDraft(dayStr))
     await reload()
   }
 
-  function eventsForDay(d: Date) {
-    const key = toDateInputValue(d)
-    return events.filter((ev) => {
-      const end = ev.end_date ?? ev.event_date
-      return key >= ev.event_date && key <= end
+  async function removeEvent() {
+    if (!draft.id) return
+    setSavingEvent(true)
+    const res = await fetch(`/api/agenda/events?user_id=${userId}&id=${draft.id}`, {
+      method: "DELETE",
     })
+    setSavingEvent(false)
+    if (!res.ok) {
+      const data = await res.json()
+      setError(data.error ?? "Erro ao excluir evento")
+      return
+    }
+    setDraft(blankEventDraft(dayStr))
+    await reload()
   }
+
+  const rangeReady = range?.from === bounds.from && range?.to === bounds.to
+  const days: AgendaProjectedDay[] = rangeReady ? (range?.days ?? []) : []
+  const events = rangeReady ? (range?.events ?? []) : []
+  const selected = days.find((day) => day.date === dayStr)
+  const dayEvents = events.filter((event) => eventCoversDate(event, dayStr))
 
   const headerLabel =
     tab === "day"
-      ? anchor.toLocaleDateString("pt-BR", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-        })
+      ? anchor.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })
       : tab === "week"
         ? `${formatDayMonth(weekStart)} – ${formatDayMonth(weekEnd)}`
         : anchor.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })
+
+  const shownError = agendaErrorText(error)
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5">
@@ -185,25 +229,23 @@ export default function HomeAgenda({ userId }: Props) {
           <h2 className="text-lg font-semibold text-slate-900">Agenda</h2>
         </div>
         <div className="flex rounded-lg border border-slate-200 p-0.5">
-          {TABS.map((t) => (
+          {TABS.map((item) => (
             <button
-              key={t.id}
+              key={item.id}
               type="button"
-              onClick={() => setTab(t.id)}
+              onClick={() => setTab(item.id)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                tab === t.id
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50"
+                tab === item.id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {t.label}
+              {item.label}
             </button>
           ))}
         </div>
       </div>
 
-      {tab !== "day" && (
-        <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => shiftAnchor(-1)}
@@ -212,7 +254,6 @@ export default function HomeAgenda({ userId }: Props) {
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <p className="text-sm font-medium capitalize text-slate-800">{headerLabel}</p>
           <button
             type="button"
             onClick={() => shiftAnchor(1)}
@@ -221,256 +262,65 @@ export default function HomeAgenda({ userId }: Props) {
           >
             <ChevronRight className="h-4 w-4" />
           </button>
+          <p className="text-sm font-medium capitalize text-slate-800">{headerLabel}</p>
         </div>
-      )}
-
-      {error && tab !== "day" && (
-        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {error}
-        </p>
-      )}
-
-      {tab === "day" ? (
-        <HomeAgendaDay userId={userId} anchor={anchor} onAnchorChange={setAnchor} />
-      ) : loading ? (
-        <p className="py-6 text-center text-sm text-slate-500">Carregando…</p>
-      ) : tab === "week" ? (
-        <div className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-7">
-            {weekDays.map((d) => {
-              const dayEvents = eventsForDay(d)
-              const isToday = toDateInputValue(d) === toDateInputValue(new Date())
-              return (
-                <div
-                  key={d.toISOString()}
-                  className={`min-h-[100px] rounded-lg border p-2 ${
-                    isToday ? "border-blue-300 bg-blue-50/50" : "border-slate-100 bg-slate-50/50"
-                  }`}
-                >
-                  <p className="text-xs font-semibold text-slate-600">
-                    {formatWeekdayShort(d)} {d.getDate()}
-                  </p>
-                  <ul className="mt-1 space-y-1">
-                    {dayEvents.map((ev) => (
-                      <li
-                        key={ev.id}
-                        className="rounded px-1 py-0.5 text-xs text-white"
-                        style={{ backgroundColor: ev.color }}
-                        title={ev.title}
-                      >
-                        <span className="line-clamp-2">{ev.title}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )
-            })}
-          </div>
-
-          <form onSubmit={addEvent} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4">
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Data
-              <input
-                name="event_date"
-                type="date"
-                required
-                defaultValue={dayStr}
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="min-w-[180px] flex-1 flex-col gap-1 text-xs text-slate-600 sm:flex">
-              Evento
-              <input
-                name="title"
-                type="text"
-                required
-                placeholder="Ex.: Último dia inscrição — concurso X"
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <EventColorPicker value={eventColor} onChange={setEventColor} />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-            >
-              <Plus className="h-4 w-4" />
-              Evento
-            </button>
-          </form>
-
-          {events.length > 0 && (
-            <ul className="space-y-2 border-t border-slate-100 pt-3">
-              {events.map((ev) => (
-                <li
-                  key={ev.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2 text-sm"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-3 w-3 shrink-0 rounded-full border border-black/10"
-                      style={{ backgroundColor: ev.color }}
-                      aria-hidden
-                    />
-                    <span className="min-w-0">
-                      <span className="font-medium text-slate-800">{ev.title}</span>
-                      <span className="ml-2 text-slate-500">
-                        {formatDayMonth(parseDateInput(ev.event_date))}
-                        {ev.end_date && ev.end_date !== ev.event_date
-                          ? ` – ${formatDayMonth(parseDateInput(ev.end_date))}`
-                          : ""}
-                      </span>
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeEvent(ev.id)}
-                    className="text-slate-400 hover:text-red-600"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
-            {["seg", "ter", "qua", "qui", "sex", "sáb", "dom"].map((d) => (
-              <span key={d}>{d}</span>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1.5">
-            {monthGrid.map((d) => {
-              const inMonth = d.getMonth() === anchor.getMonth()
-              const isToday = toDateInputValue(d) === toDateInputValue(new Date())
-              const dayEvents = eventsForDay(d)
-              return (
-                <button
-                  key={d.toISOString()}
-                  type="button"
-                  onClick={() => {
-                    setAnchor(d)
-                    setTab("day")
-                  }}
-                  className={`min-h-[72px] rounded-lg border p-1.5 text-left text-xs transition ${
-                    isToday
-                      ? "border-blue-400 bg-blue-50 shadow-sm ring-1 ring-blue-200 hover:border-blue-500"
-                      : inMonth
-                        ? "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"
-                        : "border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200"
-                  }`}
-                >
-                  <span
-                    className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[13px] font-semibold tabular-nums ${
-                      isToday
-                        ? "bg-blue-600 text-white"
-                        : inMonth
-                          ? "text-slate-800"
-                          : "text-slate-400"
-                    }`}
-                  >
-                    {d.getDate()}
-                  </span>
-                  {dayEvents.slice(0, 2).map((ev) => (
-                    <span
-                      key={ev.id}
-                      className="mt-0.5 block truncate rounded px-0.5 text-[10px] font-medium text-white"
-                      style={{ backgroundColor: ev.color }}
-                    >
-                      {ev.title}
-                    </span>
-                  ))}
-                  {dayEvents.length > 2 && (
-                    <span className="text-[10px] font-medium text-slate-600">
-                      +{dayEvents.length - 2}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          <form onSubmit={addEvent} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4">
-            <label className="flex flex-col gap-1 text-xs text-slate-600">
-              Data
-              <input
-                name="event_date"
-                type="date"
-                required
-                className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="min-w-[180px] flex-1 flex-col gap-1 text-xs text-slate-600 sm:flex">
-              Evento
-              <input
-                name="title"
-                type="text"
-                required
-                placeholder="Prazo, prova, inscrição…"
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <EventColorPicker value={eventColor} onChange={setEventColor} />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-            >
-              <Plus className="h-4 w-4" />
-              Evento
-            </button>
-          </form>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function EventColorPicker({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (color: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-1 text-xs text-slate-600">
-      <span>Cor</span>
-      <div className="flex items-center gap-1.5">
-        {EVENT_COLOR_PRESETS.map((color) => (
-          <button
-            key={color}
-            type="button"
-            onClick={() => onChange(color)}
-            className={`h-7 w-7 rounded-full border-2 transition ${
-              value.toLowerCase() === color.toLowerCase()
-                ? "border-slate-900 scale-110"
-                : "border-transparent hover:scale-105"
-            }`}
-            style={{ backgroundColor: color }}
-            title={color}
-            aria-label={`Cor ${color}`}
-            aria-pressed={value.toLowerCase() === color.toLowerCase()}
-          />
-        ))}
-        <label
-          className="relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-slate-300"
-          title="Cor personalizada"
+        <button
+          type="button"
+          onClick={() => setAnchor(new Date())}
+          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
         >
-          <span
-            className="absolute inset-0"
-            style={{ backgroundColor: value }}
-            aria-hidden
-          />
-          <input
-            type="color"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="absolute inset-0 cursor-pointer opacity-0"
-            aria-label="Escolher cor personalizada"
-          />
-        </label>
+          Hoje
+        </button>
       </div>
-    </div>
+
+      {shownError && (
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{shownError}</p>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="min-w-0 space-y-4">
+          {!rangeReady ? (
+            <p className="py-6 text-center text-sm text-slate-500">Carregando…</p>
+          ) : tab === "day" ? (
+            <HomeAgendaDay
+              userId={userId}
+              anchor={anchor}
+              onAnchorChange={setAnchor}
+              blocks={selected?.blocks ?? []}
+              events={dayEvents}
+              revision={revision}
+              onReload={reload}
+              onEditEvent={openEvent}
+            />
+          ) : tab === "week" ? (
+            <AgendaWeekGrid
+              weekDays={weekDays}
+              days={days}
+              events={events}
+              onOpenDay={openDay}
+              onEditEvent={openEvent}
+            />
+          ) : (
+            <AgendaMonthGrid
+              cells={monthGrid}
+              month={anchor.getMonth()}
+              days={days}
+              events={events}
+              onOpenDay={openDay}
+            />
+          )}
+
+          <AgendaEventForm
+            draft={draft}
+            saving={savingEvent}
+            onChange={setDraft}
+            onSubmit={saveEvent}
+            onDelete={removeEvent}
+            onCancel={() => setDraft(blankEventDraft(dayStr))}
+          />
+        </div>
+        <AgendaUpcoming events={range?.upcoming ?? []} onOpen={openUpcoming} />
+      </div>
+    </section>
   )
 }

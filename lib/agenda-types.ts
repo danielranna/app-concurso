@@ -11,9 +11,30 @@ export type AgendaWeeklyBlock = {
   sort_order: number
 }
 
+export type AgendaBlockExceptionAction = "skip" | "reschedule"
+
+export type AgendaBlockException = {
+  id: string
+  user_id: string
+  weekly_block_id: string
+  agenda_date: string
+  action: AgendaBlockExceptionAction
+  start_time: string | null
+  end_time: string | null
+  title: string | null
+}
+
 export type AgendaDayBlockView = AgendaWeeklyBlock & {
   plan_text: string | null
   plan_id: string | null
+  exception_id: string | null
+  skipped: boolean
+}
+
+export type AgendaProjectedDay = {
+  date: string
+  weekday: IsoWeekday
+  blocks: AgendaDayBlockView[]
 }
 
 export type AgendaEvent = {
@@ -22,8 +43,18 @@ export type AgendaEvent = {
   title: string
   event_date: string
   end_date: string | null
+  start_time: string | null
+  end_time: string | null
   notes: string | null
   color: string
+}
+
+export type AgendaRange = {
+  from: string
+  to: string
+  days: AgendaProjectedDay[]
+  events: AgendaEvent[]
+  upcoming: AgendaEvent[]
 }
 
 /** @deprecated use AgendaWeeklyBlock */

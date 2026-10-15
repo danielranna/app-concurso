@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createEvent, deleteEvent, listEventsInRange } from "@/lib/agenda"
+import { createEvent, deleteEvent, listEventsInRange, updateEvent } from "@/lib/agenda"
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, title, event_date, end_date, notes, color } = body
+  const { user_id, title, event_date, end_date, start_time, end_time, notes, color } = body
 
   if (!user_id || !title || !event_date) {
     return NextResponse.json(
@@ -40,6 +40,38 @@ export async function POST(req: Request) {
       title,
       event_date,
       end_date,
+      start_time,
+      end_time,
+      notes,
+      color,
+    })
+    return NextResponse.json({ event })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function PATCH(req: Request) {
+  const body = await req.json()
+  const { user_id, id, title, event_date, end_date, start_time, end_time, notes, color } = body
+
+  if (!user_id || !id || !title || !event_date) {
+    return NextResponse.json(
+      { error: "user_id, id, title e event_date obrigatórios" },
+      { status: 400 }
+    )
+  }
+
+  try {
+    const event = await updateEvent({
+      id,
+      user_id,
+      title,
+      event_date,
+      end_date,
+      start_time,
+      end_time,
       notes,
       color,
     })

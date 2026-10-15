@@ -5,6 +5,7 @@ import {
   listAllWeeklyBlocks,
   listWeeklyBlocks,
   parseWeekdays,
+  updateWeeklyBlock,
 } from "@/lib/agenda"
 import type { IsoWeekday } from "@/lib/agenda-types"
 
@@ -52,6 +53,37 @@ export async function POST(req: Request) {
 
   try {
     const block = await createWeeklyBlock({
+      user_id,
+      weekdays,
+      start_time,
+      end_time,
+      title,
+    })
+    return NextResponse.json({ block })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro"
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+export async function PATCH(req: Request) {
+  const body = await req.json()
+  const { user_id, id, start_time, end_time, title, weekdays: wd } = body
+  const weekdays = parseWeekdays(wd)
+
+  if (!user_id || !id || !start_time || !end_time || !title || !weekdays.length) {
+    return NextResponse.json(
+      {
+        error:
+          "user_id, id, start_time, end_time, title e weekdays (array 1–7) obrigatórios",
+      },
+      { status: 400 }
+    )
+  }
+
+  try {
+    const block = await updateWeeklyBlock({
+      id,
       user_id,
       weekdays,
       start_time,
