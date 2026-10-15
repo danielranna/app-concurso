@@ -45,3 +45,6 @@ ALTER TABLE agenda_block_exceptions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS agenda_block_exceptions_own ON agenda_block_exceptions;
 CREATE POLICY agenda_block_exceptions_own ON agenda_block_exceptions
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+ALTER TABLE agenda_weekly_blocks
+  ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#1e293b';

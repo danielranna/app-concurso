@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Calendar, ChevronLeft, ChevronRight } from "lucide-react"
+import Link from "next/link"
+import { Calendar, ChevronLeft, ChevronRight, Maximize2 } from "lucide-react"
 import type { AgendaEvent, AgendaProjectedDay, AgendaRange } from "@/lib/agenda-types"
 import AgendaEventForm, {
   blankEventDraft,
@@ -26,6 +27,7 @@ type AgendaTab = "day" | "week" | "month"
 
 type Props = {
   userId: string
+  fullPage?: boolean
 }
 
 const TABS: { id: AgendaTab; label: string }[] = [
@@ -50,7 +52,7 @@ function agendaErrorText(error: string | null) {
   return error
 }
 
-export default function HomeAgenda({ userId }: Props) {
+export default function HomeAgenda({ userId, fullPage = false }: Props) {
   const [tab, setTab] = useState<AgendaTab>("day")
   const [anchor, setAnchor] = useState(() => new Date())
   const [range, setRange] = useState<AgendaRange | null>(null)
@@ -222,11 +224,24 @@ export default function HomeAgenda({ userId }: Props) {
   const shownError = agendaErrorText(error)
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5">
+    <section
+      className={`rounded-xl border border-slate-200 bg-white p-5 ${
+        fullPage ? "min-h-[calc(100svh-3rem)]" : ""
+      }`}
+    >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Calendar className="h-5 w-5 text-slate-600" />
           <h2 className="text-lg font-semibold text-slate-900">Agenda</h2>
+          {!fullPage && (
+            <Link
+              href="/agenda"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Maximize2 className="h-4 w-4" />
+              Abrir agenda
+            </Link>
+          )}
         </div>
         <div className="flex rounded-lg border border-slate-200 p-0.5">
           {TABS.map((item) => (
@@ -277,7 +292,8 @@ export default function HomeAgenda({ userId }: Props) {
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{shownError}</p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+      <div className="space-y-4">
+        <AgendaUpcoming events={range?.upcoming ?? []} onOpen={openUpcoming} />
         <div className="min-w-0 space-y-4">
           {!rangeReady ? (
             <p className="py-6 text-center text-sm text-slate-500">Carregando…</p>
@@ -297,6 +313,7 @@ export default function HomeAgenda({ userId }: Props) {
               weekDays={weekDays}
               days={days}
               events={events}
+              tall={fullPage}
               onOpenDay={openDay}
               onEditEvent={openEvent}
             />
@@ -319,7 +336,6 @@ export default function HomeAgenda({ userId }: Props) {
             onCancel={() => setDraft(blankEventDraft(dayStr))}
           />
         </div>
-        <AgendaUpcoming events={range?.upcoming ?? []} onOpen={openUpcoming} />
       </div>
     </section>
   )

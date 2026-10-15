@@ -1,12 +1,13 @@
 import { supabaseServer } from "./supabase-server"
-import type {
-  AgendaBlockException,
-  AgendaBlockExceptionAction,
-  AgendaDayBlockView,
-  AgendaEvent,
-  AgendaRange,
-  AgendaWeeklyBlock,
-  IsoWeekday,
+import {
+  DEFAULT_BLOCK_COLOR,
+  type AgendaBlockException,
+  type AgendaBlockExceptionAction,
+  type AgendaDayBlockView,
+  type AgendaEvent,
+  type AgendaRange,
+  type AgendaWeeklyBlock,
+  type IsoWeekday,
 } from "./agenda-types"
 import { pickUpcomingEvents, projectAgendaDays } from "./agenda-project"
 import { isoWeekdayFromDate, parseDateInput, toDateInputValue } from "./home-date"
@@ -73,6 +74,7 @@ type BlockRow = {
   start_time: string
   end_time: string
   title: string
+  color?: string | null
   sort_order: number
   agenda_weekly_block_days?: { weekday: number }[] | null
 }
@@ -90,23 +92,41 @@ function mapBlockRow(row: BlockRow): AgendaWeeklyBlock {
     start_time: row.start_time,
     end_time: row.end_time,
     title: row.title,
+    color: row.color || DEFAULT_BLOCK_COLOR,
     sort_order: row.sort_order,
     weekdays,
   }
 }
 
 const blockSelect = `
+  id, user_id, start_time, end_time, title, color, sort_order,
+  agenda_weekly_block_days ( weekday )
+`
+
+const blockSelectLegacy = `
   id, user_id, start_time, end_time, title, sort_order,
   agenda_weekly_block_days ( weekday )
 `
 
+function missingColorColumn(message: string) {
+  return /color/i.test(message) && /column|schema cache|does not exist|Could not find/i.test(message)
+}
+
 export async function listAllWeeklyBlocks(userId: string): Promise<AgendaWeeklyBlock[]> {
-  const { data, error } = await supabaseServer
-    .from("agenda_weekly_blocks")
-    .select(blockSelect)
-    .eq("user_id", userId)
-    .order("start_time", { ascending: true })
-    .order("sort_order", { ascending: true })
+  const query = (columns: string) =>
+    supabaseServer
+      .from("agenda_weekly_blocks")
+      .select(columns)
+      .eq("user_id", userId)
+      .order("start_time", { ascending: true })
+      .order("sort_order", { ascending: true })
+
+  let { data, error } = await query(blockSelect)
+  if (error && missingColorColumn(error.message)) {
+    const legacy = await query(blockSelectLegacy)
+    data = legacy.data
+    error = legacy.error
+  }
 
   if (error) throw new Error(error.message)
   return (data ?? []).map((row) => mapBlockRow(row as BlockRow))
@@ -126,6 +146,7 @@ export async function createWeeklyBlock(input: {
   start_time: string
   end_time: string
   title: string
+  color?: string | null
 }): Promise<AgendaWeeklyBlock> {
   const weekdays = [...new Set(input.weekdays)].sort((a, b) => a - b)
   if (!weekdays.length) {
@@ -148,13 +169,20 @@ export async function createWeeklyBlock(input: {
       start_time: normalizeTime(input.start_time),
       end_time: normalizeTime(input.end_time),
       title: input.title.trim(),
+      color: input.color?.trim() || DEFAULT_BLOCK_COLOR,
       sort_order,
       updated_at: new Date().toISOString(),
     })
-    .select("id, user_id, start_time, end_time, title, sort_order")
+    .select("id, user_id, start_time, end_time, title, color, sort_order")
     .single()
 
-  if (error || !block) throw new Error(error?.message ?? "Falha ao criar bloco")
+  if (error || !block) {
+    const message = error?.message ?? "Falha ao criar bloco"
+    if (missingColorColumn(message)) {
+      throw new Error("Execute de novo sql-agenda-schedule.sql no Supabase para salvar a cor dos blocos.")
+    }
+    throw new Error(message)
+  }
 
   const { error: daysErr } = await supabaseServer.from("agenda_weekly_block_days").insert(
     weekdays.map((weekday) => ({ block_id: block.id, weekday }))
@@ -164,6 +192,7 @@ export async function createWeeklyBlock(input: {
 
   return {
     ...(block as Omit<AgendaWeeklyBlock, "weekdays">),
+    color: (block as { color?: string | null }).color || DEFAULT_BLOCK_COLOR,
     weekdays,
   }
 }
@@ -185,6 +214,7 @@ export async function updateWeeklyBlock(input: {
   start_time: string
   end_time: string
   title: string
+  color?: string | null
 }): Promise<AgendaWeeklyBlock> {
   const weekdays = [...new Set(input.weekdays)].sort((a, b) => a - b)
   if (!weekdays.length) throw new Error("Selecione pelo menos um dia da semana")
@@ -211,12 +241,18 @@ export async function updateWeeklyBlock(input: {
       start_time,
       end_time,
       title: input.title.trim(),
+      color: input.color?.trim() || DEFAULT_BLOCK_COLOR,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.id)
     .eq("user_id", input.user_id)
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (missingColorColumn(error.message)) {
+      throw new Error("Execute de novo sql-agenda-schedule.sql no Supabase para salvar a cor dos blocos.")
+    }
+    throw new Error(error.message)
+  }
 
   const { error: delErr } = await supabaseServer
     .from("agenda_weekly_block_days")

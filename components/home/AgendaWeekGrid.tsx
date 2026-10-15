@@ -18,6 +18,7 @@ type Props = {
   weekDays: Date[]
   days: AgendaProjectedDay[]
   events: AgendaEvent[]
+  tall?: boolean
   onOpenDay: (date: Date) => void
   onEditEvent: (event: AgendaEvent) => void
 }
@@ -37,6 +38,7 @@ export default function AgendaWeekGrid({
   weekDays,
   days,
   events,
+  tall = false,
   onOpenDay,
   onEditEvent,
 }: Props) {
@@ -57,7 +59,7 @@ export default function AgendaWeekGrid({
           end_time: block.end_time,
           title: block.title,
           subtitle: block.plan_text,
-          color: null,
+          color: block.color,
           kind: "block" as const,
         })),
         ...covering
@@ -96,7 +98,11 @@ export default function AgendaWeekGrid({
   }
 
   return (
-    <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200">
+    <div
+      className={`overflow-auto rounded-lg border border-slate-200 ${
+        tall ? "max-h-[calc(100svh-280px)] min-h-[560px]" : "max-h-[70vh]"
+      }`}
+    >
       <div className="min-w-[840px]">
         <div className="sticky top-0 z-20 grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))] border-b border-slate-200 bg-white">
           <div />
@@ -181,9 +187,7 @@ export default function AgendaWeekGrid({
                       ? onEditEvent(item.event)
                       : onOpenDay(column.date)
                   }
-                  className={`absolute overflow-hidden rounded px-1 py-0.5 text-left text-[10px] leading-tight text-white ${
-                    item.kind === "block" ? "bg-slate-800" : ""
-                  }`}
+                  className="absolute overflow-hidden rounded px-1 py-0.5 text-left text-[10px] leading-tight text-white"
                   style={{
                     top: topFor(item.start_time),
                     height: Math.max(heightFor(item.start_time, item.end_time), 18),

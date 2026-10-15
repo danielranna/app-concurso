@@ -1,6 +1,8 @@
 /** 1 = segunda … 7 = domingo (ISO) */
 export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7
 
+export const DEFAULT_BLOCK_COLOR = "#1e293b"
+
 export type AgendaWeeklyBlock = {
   id: string
   user_id: string
@@ -8,6 +10,7 @@ export type AgendaWeeklyBlock = {
   start_time: string
   end_time: string
   title: string
+  color: string
   sort_order: number
 }
 

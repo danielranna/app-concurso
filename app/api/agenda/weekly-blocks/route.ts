@@ -38,7 +38,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { user_id, start_time, end_time, title, weekdays: wd } = body
+  const { user_id, start_time, end_time, title, color, weekdays: wd } = body
   const weekdays = parseWeekdays(wd)
 
   if (!user_id || !start_time || !end_time || !title || !weekdays.length) {
@@ -58,6 +58,7 @@ export async function POST(req: Request) {
       start_time,
       end_time,
       title,
+      color,
     })
     return NextResponse.json({ block })
   } catch (e) {
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   const body = await req.json()
-  const { user_id, id, start_time, end_time, title, weekdays: wd } = body
+  const { user_id, id, start_time, end_time, title, color, weekdays: wd } = body
   const weekdays = parseWeekdays(wd)
 
   if (!user_id || !id || !start_time || !end_time || !title || !weekdays.length) {
@@ -89,6 +90,7 @@ export async function PATCH(req: Request) {
       start_time,
       end_time,
       title,
+      color,
     })
     return NextResponse.json({ block })
   } catch (e) {

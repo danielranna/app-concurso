@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
   BookOpen,
+  Calendar,
   ChevronLeft,
   GraduationCap,
   HelpCircle,
@@ -22,6 +23,7 @@ import SidebarBrand from "@/components/sidebar/SidebarBrand"
 
 const links = [
   { href: "/", label: "Início", icon: Home, exact: true },
+  { href: "/agenda", label: "Agenda", icon: Calendar },
   { href: "/materias", label: "Matérias", icon: Library },
   { href: "/erros", label: "Mapa de erros", icon: BookOpen },
   { href: "/flashcards", label: "Flashcards", icon: Layers },

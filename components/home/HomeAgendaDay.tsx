@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Plus, Settings2, Trash2 } from "lucide-react"
-import type { AgendaDayBlockView, AgendaEvent, AgendaWeeklyBlock, IsoWeekday } from "@/lib/agenda-types"
+import { DEFAULT_BLOCK_COLOR, type AgendaDayBlockView, type AgendaEvent, type AgendaWeeklyBlock, type IsoWeekday } from "@/lib/agenda-types"
+import { AgendaColorPicker } from "@/components/home/AgendaEventForm"
 import { getAgendaNowStatus, isBlockActive, timeToMinutes } from "@/lib/agenda-now"
 import { isAllDayEvent, visibleBlocks } from "@/lib/agenda-project"
 import {
@@ -52,7 +53,7 @@ export default function HomeAgendaDay({
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const structureKey = `${revision}:${blocks
-    .map((block) => `${block.id}:${block.skipped}:${block.exception_id}:${block.start_time}:${block.end_time}:${block.title}`)
+    .map((block) => `${block.id}:${block.skipped}:${block.exception_id}:${block.start_time}:${block.end_time}:${block.title}:${block.color}`)
     .join("|")}`
 
   useEffect(() => {
@@ -122,13 +123,14 @@ export default function HomeAgendaDay({
 
   async function addWeeklyBlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const fd = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const fd = new FormData(form)
     const title = String(fd.get("title")).trim()
-    if (!title) return
+    if (!title) return false
     const weekdays = ALL_WEEKDAYS.filter((day) => fd.get(`wd_${day}`) === "on")
     if (!weekdays.length) {
       setError("Marque pelo menos um dia da semana")
-      return
+      return false
     }
     const res = await fetch("/api/agenda/weekly-blocks", {
       method: "POST",
@@ -139,17 +141,19 @@ export default function HomeAgendaDay({
         start_time: String(fd.get("start_time")),
         end_time: String(fd.get("end_time")),
         title,
+        color: String(fd.get("color") || DEFAULT_BLOCK_COLOR),
       }),
     })
     const data = await res.json()
     if (!res.ok) {
       setError(data.error ?? "Erro ao criar bloco")
-      return
+      return false
     }
-    event.currentTarget.reset()
+    form.reset()
     setDefaultWeekdays(new Set([weekday]))
     await loadAllBlocks()
     await onReload()
+    return true
   }
 
   async function saveWeeklyBlock(input: {
@@ -157,6 +161,7 @@ export default function HomeAgendaDay({
     title: string
     start_time: string
     end_time: string
+    color: string
     weekdays: IsoWeekday[]
   }) {
     const res = await fetch("/api/agenda/weekly-blocks", {
@@ -413,9 +418,10 @@ function DaySchedule({
           return (
             <li
               key={block.id}
-              className={`rounded-lg border bg-white p-3 shadow-sm ${
+              className={`rounded-lg border border-l-4 bg-white p-3 shadow-sm ${
                 active ? "border-blue-300 ring-1 ring-blue-100" : "border-slate-200"
               }`}
+              style={{ borderLeftColor: block.color || DEFAULT_BLOCK_COLOR }}
             >
               <div className="flex flex-wrap items-center gap-2">
                 {active && (
@@ -625,17 +631,19 @@ function RoutineEditor({
   loading: boolean
   defaultWeekdays: Set<IsoWeekday>
   onDefaultWeekdaysChange: (days: Set<IsoWeekday>) => void
-  onAdd: (event: React.FormEvent<HTMLFormElement>) => void
+  onAdd: (event: React.FormEvent<HTMLFormElement>) => Promise<boolean>
   onSave: (input: {
     id: string
     title: string
     start_time: string
     end_time: string
+    color: string
     weekdays: IsoWeekday[]
   }) => Promise<boolean>
   onRemove: (id: string) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [newColor, setNewColor] = useState(DEFAULT_BLOCK_COLOR)
   const sorted = useMemo(
     () => [...blocks].sort((a, b) => a.start_time.localeCompare(b.start_time)),
     [blocks]
@@ -670,7 +678,12 @@ function RoutineEditor({
               ) : (
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs text-slate-500">
+                    <p className="flex items-center text-xs text-slate-500">
+                      <span
+                        className="mr-2 h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: block.color || DEFAULT_BLOCK_COLOR }}
+                        aria-hidden
+                      />
                       {formatTimeShort(block.start_time)} – {formatTimeShort(block.end_time)}
                       <span className="ml-2 font-medium text-slate-900">{block.title}</span>
                     </p>
@@ -700,7 +713,13 @@ function RoutineEditor({
         </ul>
       )}
 
-      <form onSubmit={onAdd} className="space-y-3 border-t border-slate-200 pt-4">
+      <form
+        onSubmit={async (event) => {
+          const ok = await onAdd(event)
+          if (ok) setNewColor(DEFAULT_BLOCK_COLOR)
+        }}
+        className="space-y-3 border-t border-slate-200 pt-4"
+      >
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-slate-600">
             De
@@ -735,6 +754,8 @@ function RoutineEditor({
           defaultWeekdays={defaultWeekdays}
           onDefaultWeekdaysChange={onDefaultWeekdaysChange}
         />
+        <input type="hidden" name="color" value={newColor} />
+        <AgendaColorPicker value={newColor} onChange={setNewColor} />
         <button
           type="submit"
           className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
@@ -757,6 +778,7 @@ function BlockEditForm({
     title: string
     start_time: string
     end_time: string
+    color: string
     weekdays: IsoWeekday[]
   }) => Promise<void>
   onCancel: () => void
@@ -765,6 +787,7 @@ function BlockEditForm({
   const [start, setStart] = useState(block.start_time.slice(0, 5))
   const [end, setEnd] = useState(block.end_time.slice(0, 5))
   const [days, setDays] = useState<Set<IsoWeekday>>(() => new Set(block.weekdays))
+  const [color, setColor] = useState(block.color || DEFAULT_BLOCK_COLOR)
 
   return (
     <form
@@ -775,6 +798,7 @@ function BlockEditForm({
           title,
           start_time: start,
           end_time: end,
+          color,
           weekdays: ALL_WEEKDAYS.filter((day) => days.has(day)),
         })
       }}
@@ -816,6 +840,7 @@ function BlockEditForm({
         onDefaultWeekdaysChange={setDays}
         namePrefix={`edit_${block.id}`}
       />
+      <AgendaColorPicker value={color} onChange={setColor} />
       <div className="flex gap-2">
         <button type="submit" className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white">
           Salvar rotina

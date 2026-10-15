@@ -24,6 +24,7 @@ function weekly(
     start_time: start,
     end_time: end,
     title,
+    color: "#1e293b",
     sort_order: 0,
   }
 }

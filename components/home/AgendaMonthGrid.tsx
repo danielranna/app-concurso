@@ -53,7 +53,11 @@ export default function AgendaMonthGrid({ cells, month, days, events, onOpenDay 
               {blocks.length > 0 && (
                 <span className="mt-1 flex gap-0.5" title={blocks.map((block) => block.title).join(", ")}>
                   {blocks.slice(0, 4).map((block) => (
-                    <span key={block.id} className="h-1 flex-1 rounded-full bg-slate-400" />
+                    <span
+                      key={block.id}
+                      className="h-1 flex-1 rounded-full"
+                      style={{ backgroundColor: block.color }}
+                    />
                   ))}
                 </span>
               )}

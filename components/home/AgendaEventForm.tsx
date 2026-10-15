@@ -144,7 +144,7 @@ export default function AgendaEventForm({
         />
       </label>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <EventColorPicker
+        <AgendaColorPicker
           value={draft.color}
           onChange={(color) => onChange({ ...draft, color })}
         />
@@ -182,7 +182,7 @@ export default function AgendaEventForm({
   )
 }
 
-function EventColorPicker({
+export function AgendaColorPicker({
   value,
   onChange,
 }: {
