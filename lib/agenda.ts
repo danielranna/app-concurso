@@ -98,38 +98,40 @@ function mapBlockRow(row: BlockRow): AgendaWeeklyBlock {
   }
 }
 
-const blockSelect = `
-  id, user_id, start_time, end_time, title, color, sort_order,
-  agenda_weekly_block_days ( weekday )
-`
-
-const blockSelectLegacy = `
-  id, user_id, start_time, end_time, title, sort_order,
-  agenda_weekly_block_days ( weekday )
-`
-
 function missingColorColumn(message: string) {
   return /color/i.test(message) && /column|schema cache|does not exist|Could not find/i.test(message)
 }
 
+function blocksFromRows(rows: unknown): AgendaWeeklyBlock[] {
+  return ((rows ?? []) as BlockRow[]).map((row) => mapBlockRow(row))
+}
+
 export async function listAllWeeklyBlocks(userId: string): Promise<AgendaWeeklyBlock[]> {
-  const query = (columns: string) =>
-    supabaseServer
-      .from("agenda_weekly_blocks")
-      .select(columns)
-      .eq("user_id", userId)
-      .order("start_time", { ascending: true })
-      .order("sort_order", { ascending: true })
+  const ordered = supabaseServer
+    .from("agenda_weekly_blocks")
+    .select(
+      "id, user_id, start_time, end_time, title, color, sort_order, agenda_weekly_block_days(weekday)"
+    )
+    .eq("user_id", userId)
+    .order("start_time", { ascending: true })
+    .order("sort_order", { ascending: true })
 
-  let { data, error } = await query(blockSelect)
-  if (error && missingColorColumn(error.message)) {
-    const legacy = await query(blockSelectLegacy)
-    data = legacy.data
-    error = legacy.error
-  }
+  const first = await ordered
+  if (!first.error) return blocksFromRows(first.data)
 
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((row) => mapBlockRow(row as BlockRow))
+  if (!missingColorColumn(first.error.message)) throw new Error(first.error.message)
+
+  const legacy = await supabaseServer
+    .from("agenda_weekly_blocks")
+    .select(
+      "id, user_id, start_time, end_time, title, sort_order, agenda_weekly_block_days(weekday)"
+    )
+    .eq("user_id", userId)
+    .order("start_time", { ascending: true })
+    .order("sort_order", { ascending: true })
+
+  if (legacy.error) throw new Error(legacy.error.message)
+  return blocksFromRows(legacy.data)
 }
 
 export async function listWeeklyBlocks(
