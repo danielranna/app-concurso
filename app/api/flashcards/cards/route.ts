@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase-server"
 import { ensureCardState } from "@/lib/flashcard-review"
+import { ankiNoteId } from "@/lib/anki-flashcard-sync"
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -43,30 +44,50 @@ export async function POST(req: Request) {
     image_url,
     image_occluded_url,
     image_masks,
+    anki_note_id,
   } = body
 
   if (!user_id || !deck_id || !type) {
     return NextResponse.json({ error: "user_id, deck_id e type são obrigatórios" }, { status: 400 })
   }
 
-  const { data, error } = await supabaseServer
-    .from("flashcards")
-    .insert({
-      user_id,
-      deck_id,
-      type,
-      front_text: front_text ?? null,
-      back_text: back_text ?? null,
-      cloze_text: cloze_text ?? null,
-      image_url: image_url ?? null,
-      image_occluded_url: image_occluded_url ?? null,
-      image_masks: image_masks ?? [],
-    })
-    .select()
-    .single()
+  const noteId = ankiNoteId(anki_note_id)
+  const row: Record<string, unknown> = {
+    user_id,
+    deck_id,
+    type,
+    front_text: front_text ?? null,
+    back_text: back_text ?? null,
+    cloze_text: cloze_text ?? null,
+    image_url: image_url ?? null,
+    image_occluded_url: image_occluded_url ?? null,
+    image_masks: image_masks ?? [],
+  }
+  if (noteId) row.anki_note_id = noteId
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const { data, error } = await supabaseServer.from("flashcards").insert(row).select().single()
+
+  if (error) {
+    if (noteId && /anki_note_id|column|schema cache/i.test(error.message)) {
+      return NextResponse.json(
+        { error: "Rode o SQL do flashcard sincronizado com o Anki." },
+        { status: 500 }
+      )
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   await ensureCardState(user_id, data.id)
+  if (noteId) {
+    await supabaseServer
+      .from("flashcard_states")
+      .update({
+        due_at: new Date().toISOString(),
+        state_data: { scheduler: "anki", anki_pending: false },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user_id)
+      .eq("card_id", data.id)
+  }
   return NextResponse.json(data)
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ankiNoteId } from "@/lib/anki-flashcard-sync"
 import { cardBackPayload, cardFrontPayload } from "@/lib/flashcard-content"
 import { resolveFsrsParams } from "@/lib/flashcard-fsrs-params"
 import { getStudyQueue } from "@/lib/flashcard-queue"
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { rows, limit, totalDue, laterCount, nextDueAt } = await getStudyQueue(user_id, {
+    const { rows, limit, totalDue, laterCount, nextDueAt, ankiWaiting } = await getStudyQueue(user_id, {
       deckId: deck_id,
       subjectId: subject_id,
       deferCardIds: defer_card_ids.length ? defer_card_ids : undefined,
@@ -37,15 +38,17 @@ export async function GET(req: Request) {
         daily_limit: limit,
         later_count: laterCount,
         next_due_at: nextDueAt,
+        anki_waiting: ankiWaiting,
       })
     }
 
     const row = rows[0]
     const fc = row.flashcards
-    const deckParams = await resolveFsrsParams(user_id, fc.deck_id)
-    const fsrsCard = deserializeFsrsCard(row.state_data)
-    const scheduler = buildScheduler(deckParams)
-    const preview = scheduler.repeat(fsrsCard, new Date())
+    const anki = ankiNoteId((fc as { anki_note_id?: unknown }).anki_note_id) > 0
+    const deckParams = anki ? null : await resolveFsrsParams(user_id, fc.deck_id)
+    const preview = anki
+      ? null
+      : previewLabels(buildScheduler(deckParams ?? {}).repeat(deserializeFsrsCard(row.state_data), new Date()))
 
     return NextResponse.json({
       state_id: row.id,
@@ -54,10 +57,12 @@ export async function GET(req: Request) {
         type: fc.type,
         deck_id: fc.deck_id,
         deck_name: fc.flashcard_decks?.name,
+        scheduler: anki ? "anki" : "app",
         front: cardFrontPayload(fc as never, false),
         back: cardBackPayload(fc as never),
       },
-      preview: previewLabels(preview),
+      preview,
+      anki_waiting: ankiWaiting,
       remaining: rows.length - 1,
       total_due: totalDue,
       daily_limit: limit,

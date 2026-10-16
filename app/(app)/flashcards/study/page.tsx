@@ -10,6 +10,7 @@ type StudyCard = {
   id: string
   type: string
   deck_name?: string
+  scheduler?: "app" | "anki"
   front: { text: string | null; image_url: string | null }
   back: { text: string | null; image_url: string | null }
 }
@@ -48,6 +49,7 @@ export default function StudyPage() {
   const [remaining, setRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
+  const [ankiWaiting, setAnkiWaiting] = useState(0)
   const [deferredCardIds, setDeferredCardIds] = useState<string[]>([])
 
   const loadQueue = useCallback(
@@ -62,6 +64,7 @@ export default function StudyPage() {
       const res = await fetch(`/api/flashcards/study/queue?${params}`)
       const data = await res.json()
       setLoading(false)
+      setAnkiWaiting(Number(data.anki_waiting) || 0)
       if (!data.card) {
         setDone(true)
         setCard(null)
@@ -111,7 +114,11 @@ export default function StudyPage() {
   if (done) {
     return (
       <main className="flex min-h-[60vh] flex-col items-center justify-center px-6">
-        <p className="text-xl font-semibold text-slate-800">Parabéns! Fila vazia por hoje.</p>
+        <p className="text-xl font-semibold text-slate-800">
+          {ankiWaiting > 0
+            ? "A resposta foi para o Anki. A próxima data entra quando ele estiver aberto."
+            : "Parabéns! Fila vazia por hoje."}
+        </p>
         <Link href="/flashcards" className="mt-4 text-emerald-600 hover:underline">
           Voltar aos baralhos
         </Link>
@@ -154,8 +161,9 @@ export default function StudyPage() {
           ) : (
             <>
               <p className="mb-3 text-xs text-slate-500">
-                FSRS agenda a próxima revisão pela dificuldade do card. Intervalos menores =
-                mais repetições. Passe o mouse nos botões para dicas.
+                {card.scheduler === "anki"
+                  ? "Este card está sincronizado com o Anki. O botão só registra a resposta. A próxima data é a que o Anki calcular."
+                  : "FSRS agenda a próxima revisão pela dificuldade do card. Intervalos menores = mais repetições. Passe o mouse nos botões para dicas."}
               </p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(

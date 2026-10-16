@@ -101,6 +101,7 @@ export async function fetchDueStates(
         image_occluded_url,
         image_masks,
         source_error_id,
+        anki_note_id,
         flashcard_decks ( name, fsrs_parameters )
       )
     `
@@ -123,7 +124,40 @@ export async function fetchDueStates(
     subjectDeckIds = (subjectDecks ?? []).map((d) => d.id)
   }
 
-  const { data, error } = await query
+  let { data, error } = await query
+  if (error && /anki_note_id|column|schema cache/i.test(error.message)) {
+    const retry = supabaseServer
+      .from("flashcard_states")
+      .select(
+        `
+      id,
+      card_id,
+      due_at,
+      state_data,
+      flashcards!inner (
+        id,
+        user_id,
+        deck_id,
+        type,
+        front_text,
+        back_text,
+        cloze_text,
+        image_url,
+        image_occluded_url,
+        image_masks,
+        source_error_id,
+        flashcard_decks ( name, fsrs_parameters )
+      )
+    `
+      )
+      .eq("user_id", userId)
+      .lte("due_at", before.toISOString())
+      .order("due_at", { ascending: true })
+    const fallback = options?.deckId ? retry.eq("flashcards.deck_id", options.deckId) : retry
+    const again = await fallback
+    data = again.data
+    error = again.error
+  }
   if (error) throw error
 
   let rows = (data ?? []) as unknown as DueRow[]
@@ -201,6 +235,7 @@ export async function getStudyQueue(
   totalDue: number
   laterCount: number
   nextDueAt: string | null
+  ankiWaiting: number
 }> {
   const limits = await getScheduleSettings(userId)
   const limit = getTodayLimit(limits)
@@ -213,7 +248,9 @@ export async function getStudyQueue(
     before: endOfDay(),
     includeErrorReviewDeck: options?.includeErrorReviewDeck,
   })
-  const studyDue = allToday.filter((r) =>
+  const ankiWaiting = allToday.filter((r) => r.state_data?.anki_pending === true).length
+  const available = allToday.filter((r) => r.state_data?.anki_pending !== true)
+  const studyDue = available.filter((r) =>
     isEligibleForStudy(r.due_at, r.state_data, now)
   )
   const shuffled = shuffleStudyQueue(studyDue)
@@ -221,7 +258,7 @@ export async function getStudyQueue(
   const totalDue = studyDue.length
   const capped = limit === null ? ordered : ordered.slice(0, limit)
 
-  const laterToday = allToday.filter(
+  const laterToday = available.filter(
     (r) => !isEligibleForStudy(r.due_at, r.state_data, now)
   )
   const nextDueMs = laterToday.length
@@ -234,6 +271,7 @@ export async function getStudyQueue(
     totalDue,
     laterCount: laterToday.length,
     nextDueAt: nextDueMs ? new Date(nextDueMs).toISOString() : null,
+    ankiWaiting,
   }
 }
 

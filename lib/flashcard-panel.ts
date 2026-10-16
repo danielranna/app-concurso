@@ -24,7 +24,9 @@ type CardRow = {
   front_text: string | null
   cloze_text: string | null
   flashcard_decks: { id: string; name: string; subject_id: string | null } | { id: string; name: string; subject_id: string | null }[]
-  flashcard_states: { due_at: string } | { due_at: string }[]
+  flashcard_states:
+    | { due_at: string; state_data?: { anki_pending?: boolean } }
+    | { due_at: string; state_data?: { anki_pending?: boolean } }[]
 }
 
 function deckOf(row: CardRow) {
@@ -38,6 +40,13 @@ function dueOf(row: CardRow): string | null {
     ? row.flashcard_states[0]
     : row.flashcard_states
   return st?.due_at ?? null
+}
+
+function ankiPending(row: CardRow) {
+  const st = Array.isArray(row.flashcard_states)
+    ? row.flashcard_states[0]
+    : row.flashcard_states
+  return st?.state_data?.anki_pending === true
 }
 
 export async function fetchPanelData(
@@ -58,7 +67,7 @@ export async function fetchPanelData(
       `
       id, deck_id, type, front_text, cloze_text,
       flashcard_decks ( id, name, subject_id ),
-      flashcard_states ( due_at )
+      flashcard_states ( due_at, state_data )
     `
     )
     .eq("user_id", userId)
@@ -75,6 +84,7 @@ export async function fetchPanelData(
     let dueToday = 0
     let overdue = 0
     for (const c of deckCards) {
+      if (ankiPending(c)) continue
       const due = dueOf(c)
       if (!due) continue
       const d = new Date(due)

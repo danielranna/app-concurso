@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { authenticateBot } from "@/lib/bot-auth"
 import { getDeckFsrsParams, submitCardReview } from "@/lib/flashcard-review"
+import { loadFlashcardSchedule, queueAnkiReview } from "@/lib/anki-flashcard-sync"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function POST(
@@ -28,13 +29,20 @@ export async function POST(
     return NextResponse.json({ error: "Dispatch não encontrado" }, { status: 404 })
   }
 
-  const { data: card } = await supabaseServer
-    .from("flashcards")
-    .select("deck_id")
-    .eq("id", dispatch.card_id)
-    .single()
+  const linked = await loadFlashcardSchedule(dispatch.card_id)
+  if (linked.ankiNoteId) {
+    const queued = await queueAnkiReview(auth.userId, dispatch.card_id, linked.ankiNoteId, rating)
+    await supabaseServer
+      .from("flashcard_bot_dispatch")
+      .update({
+        answered_at: new Date().toISOString(),
+        rating,
+      })
+      .eq("id", id)
+    return NextResponse.json(queued)
+  }
 
-  const deckParams = card?.deck_id ? await getDeckFsrsParams(card.deck_id, auth.userId) : {}
+  const deckParams = linked.deckId ? await getDeckFsrsParams(linked.deckId, auth.userId) : {}
   const result = await submitCardReview(auth.userId, dispatch.card_id, rating, deckParams)
 
   await supabaseServer

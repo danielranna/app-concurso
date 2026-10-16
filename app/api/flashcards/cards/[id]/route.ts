@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ankiNoteId } from "@/lib/anki-flashcard-sync"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function GET(
@@ -61,10 +62,29 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const user_id = new URL(req.url).searchParams.get("user_id")
+  const url = new URL(req.url)
+  const user_id = url.searchParams.get("user_id")
+  const fromAnki = url.searchParams.get("from_anki") === "1"
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 })
+  }
+
+  const linked = await supabaseServer
+    .from("flashcards")
+    .select("anki_note_id")
+    .eq("id", id)
+    .eq("user_id", user_id)
+    .maybeSingle()
+  const noteId = linked.error ? 0 : ankiNoteId(linked.data?.anki_note_id)
+  if (noteId) {
+    if (!fromAnki) {
+      await supabaseServer.from("anki_note_tombstones").upsert(
+        { user_id, anki_note_id: noteId },
+        { onConflict: "user_id,anki_note_id" }
+      )
+    }
+    await supabaseServer.from("errors").delete().eq("user_id", user_id).eq("anki_note_id", noteId)
   }
 
   const { error } = await supabaseServer

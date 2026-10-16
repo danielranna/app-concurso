@@ -43,11 +43,18 @@ export async function DELETE(
   }
 
   const noteId = Number((errorData as { anki_note_id?: unknown } | null)?.anki_note_id)
-  if (!fromAnki && errorData?.user_id && Number.isSafeInteger(noteId) && noteId > 0) {
-    await supabaseServer.from("anki_note_tombstones").upsert(
-      { user_id: errorData.user_id, anki_note_id: noteId },
-      { onConflict: "user_id,anki_note_id" }
-    )
+  if (errorData?.user_id && Number.isSafeInteger(noteId) && noteId > 0) {
+    if (!fromAnki) {
+      await supabaseServer.from("anki_note_tombstones").upsert(
+        { user_id: errorData.user_id, anki_note_id: noteId },
+        { onConflict: "user_id,anki_note_id" }
+      )
+    }
+    await supabaseServer
+      .from("flashcards")
+      .delete()
+      .eq("user_id", errorData.user_id)
+      .eq("anki_note_id", noteId)
   }
 
   const { error } = await supabaseServer

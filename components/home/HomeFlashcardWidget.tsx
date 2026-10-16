@@ -9,6 +9,7 @@ type StudyCard = {
   id: string
   type: string
   deck_name?: string
+  scheduler?: "app" | "anki"
   front: { text: string | null; image_url: string | null }
   back: { text: string | null; image_url: string | null }
 }
@@ -27,6 +28,7 @@ export default function HomeFlashcardWidget({ userId }: Props) {
   const [remaining, setRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
+  const [ankiWaiting, setAnkiWaiting] = useState(0)
   const [deferredCardIds, setDeferredCardIds] = useState<string[]>([])
 
   const loadQueue = useCallback(
@@ -50,6 +52,7 @@ export default function HomeFlashcardWidget({ userId }: Props) {
       const res = await fetch(`/api/flashcards/study/queue?${params}`)
       const data = await res.json()
       setLoading(false)
+      setAnkiWaiting(Number(data.anki_waiting) || 0)
       if (!data.card) {
         setDone(true)
         setCard(null)
@@ -109,11 +112,17 @@ export default function HomeFlashcardWidget({ userId }: Props) {
         </div>
       ) : done ? (
         <p className="rounded-lg bg-slate-50 py-6 text-center text-sm text-slate-600">
-          Fila vazia por agora. Volte mais tarde ou revise em{" "}
-          <Link href="/flashcards" className="font-medium text-emerald-700 hover:underline">
-            Flashcards
-          </Link>
-          .
+          {ankiWaiting > 0 ? (
+            "A resposta foi para o Anki. A data atualiza quando ele estiver aberto."
+          ) : (
+            <>
+              Fila vazia por agora. Volte mais tarde ou revise em{" "}
+              <Link href="/flashcards" className="font-medium text-emerald-700 hover:underline">
+                Flashcards
+              </Link>
+              .
+            </>
+          )}
         </p>
       ) : card && display ? (
         <div>
@@ -140,7 +149,12 @@ export default function HomeFlashcardWidget({ userId }: Props) {
               Mostrar resposta
             </button>
           ) : (
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <p className="mb-2 mt-4 text-xs text-slate-500">
+              {card.scheduler === "anki"
+                ? "Sincronizado com o Anki. A próxima data é a do Anki."
+                : "O app calcula a próxima data."}
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {(
                 [
                   ["Again", 1, preview?.again],

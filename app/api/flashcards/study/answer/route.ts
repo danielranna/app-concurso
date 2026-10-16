@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getDeckFsrsParams, submitCardReview } from "@/lib/flashcard-review"
 import { resolveFsrsParams } from "@/lib/flashcard-fsrs-params"
+import { loadFlashcardSchedule, queueAnkiReview } from "@/lib/anki-flashcard-sync"
 import { supabaseServer } from "@/lib/supabase-server"
 
 export async function POST(req: Request) {
@@ -15,15 +16,25 @@ export async function POST(req: Request) {
   }
 
   try {
+    const linked = await loadFlashcardSchedule(card_id)
+    if (linked.ankiNoteId) {
+      const queued = await queueAnkiReview(user_id, card_id, linked.ankiNoteId, rating)
+      return NextResponse.json(queued)
+    }
+
     let deckParams = await resolveFsrsParams(user_id, deck_id ?? null)
     if (!deck_id) {
-      const { data: card } = await supabaseServer
-        .from("flashcards")
-        .select("deck_id")
-        .eq("id", card_id)
-        .single()
-      if (card?.deck_id) {
-        deckParams = await getDeckFsrsParams(card.deck_id, user_id)
+      if (linked.deckId) {
+        deckParams = await getDeckFsrsParams(linked.deckId, user_id)
+      } else {
+        const { data: card } = await supabaseServer
+          .from("flashcards")
+          .select("deck_id")
+          .eq("id", card_id)
+          .single()
+        if (card?.deck_id) {
+          deckParams = await getDeckFsrsParams(card.deck_id, user_id)
+        }
       }
     }
 
