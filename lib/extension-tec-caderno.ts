@@ -26,6 +26,7 @@ export type TecCadernoSyncInput = {
   confidenceLevel?: string
   noteDraft?: string
   aiRequested?: boolean
+  durationMs?: number | null
 }
 
 function notebookName(input: TecCadernoSyncInput) {
@@ -248,7 +249,10 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
         study_session_id: null,
         selected_answer: input.selectedAnswer,
         is_correct: isCorrect,
-        duration_ms: null,
+        duration_ms:
+          input.durationMs != null && input.durationMs > 0
+            ? Math.min(Math.round(input.durationMs), 2 * 60 * 60 * 1000)
+            : null,
         confidence_level: confidence,
       })
       recorded = true
