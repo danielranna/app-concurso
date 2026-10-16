@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { parseTecIds, sanitizeTecHtml, toImportQuestion } from "./extension-tec"
+import { matchSubjectId } from "./tec-subject-match"
 
 {
   const html = sanitizeTecHtml(
@@ -73,4 +74,15 @@ import { parseTecIds, sanitizeTecHtml, toImportQuestion } from "./extension-tec"
 {
   assert.deepEqual(parseTecIds([1, "2", 2, 0, -3]), [1, 2])
   assert.throws(() => parseTecIds(Array.from({ length: 101 }, (_v, i) => i + 1)), /100/)
+}
+
+{
+  const subjects = [
+    { id: "port", name: "Português" },
+    { id: "dir", name: "Direito Administrativo" },
+  ]
+  const mappings = [{ tec_subject: "Direito Administrativo", tec_topic: "", subject_id: "dir" }]
+  assert.equal(matchSubjectId("Língua Portuguesa (Português)", subjects, []), "port")
+  assert.equal(matchSubjectId("Direito Administrativo", subjects, mappings), "dir")
+  assert.equal(matchSubjectId("Química", subjects, mappings), null)
 }
