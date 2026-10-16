@@ -90,6 +90,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: error.message }, { status: 500, headers: cors })
       }
     }
+    if (body.replace === true) {
+      const incoming = new Set(names)
+      const gone = (current.decks || []).map((row) => row.deck_name).filter((name) => !incoming.has(name))
+      if (gone.length) {
+        const { error } = await supabaseServer
+          .from("anki_deck_links")
+          .delete()
+          .eq("user_id", user.userId)
+          .in("deck_name", gone)
+        if (error) {
+          return NextResponse.json({ error: error.message }, { status: 500, headers: cors })
+        }
+      }
+    }
   } else if (body?.deck_name) {
     const deckName = String(body.deck_name).trim()
     const subjectId = body.subject_id ? String(body.subject_id) : null

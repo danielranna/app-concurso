@@ -8,6 +8,7 @@ import {
   FolderTree,
   KeyRound,
   Layers,
+  Library,
   Link2,
   Radio,
   Settings,
@@ -22,6 +23,7 @@ import AnkiDeckMapSettings from "@/components/settings/AnkiDeckMapSettings"
 
 const TABS = [
   { id: "flashcards", label: "Flashcards", icon: Layers },
+  { id: "anki", label: "Integração Anki", icon: Library },
   { id: "integracoes", label: "Integrações", icon: Link2 },
   { id: "api", label: "API IA", icon: KeyRound },
   { id: "materias", label: "Matérias", icon: BookOpen },
@@ -77,7 +79,7 @@ function ConfiguracoesHub() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Configurações</h1>
             <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-300">
-              Flashcards, WhatsApp, chave de IA, matérias e tipos de erro — um só lugar.
+              Flashcards, Anki, WhatsApp, chave de IA, matérias e tipos de erro — um só lugar.
             </p>
           </div>
         </div>
@@ -112,12 +114,8 @@ function ConfiguracoesHub() {
         <p className="mb-5 text-xs font-semibold uppercase tracking-wider text-slate-400">
           {active.label}
         </p>
-        {tab === "flashcards" && (
-          <>
-            {userId && <AnkiDeckMapSettings userId={userId} />}
-            <FlashcardsBotSettings section="flashcards" />
-          </>
-        )}
+        {tab === "flashcards" && <FlashcardsBotSettings section="flashcards" />}
+        {tab === "anki" && userId && <AnkiDeckMapSettings userId={userId} />}
         {tab === "integracoes" && <FlashcardsBotSettings section="integracoes" />}
         {tab === "api" && <CoachAiCredentialsModal embedded open />}
         {tab === "materias" && <MateriasHubManager focus="subjects" />}

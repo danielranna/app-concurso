@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 type DeckLink = { deck_name: string; subject_id: string }
 type Subject = { id: string; name: string }
@@ -10,33 +10,76 @@ export default function AnkiDeckMapSettings({ userId }: { userId: string }) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [ready, setReady] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [message, setMessage] = useState("")
+
+  const load = useCallback(async () => {
+    const [deckRes, subjectRes] = await Promise.all([
+      fetch(`/api/extension/anki/decks?user_id=${userId}`),
+      fetch(`/api/subjects?user_id=${userId}`),
+    ])
+    const deckData = await deckRes.json().catch(() => ({}))
+    const subjectData = await subjectRes.json().catch(() => [])
+    setReady(deckData.ready !== false)
+    const nextDecks = Array.isArray(deckData.decks) ? (deckData.decks as DeckLink[]) : []
+    nextDecks.sort((a, b) => a.deck_name.localeCompare(b.deck_name, "pt-BR", { sensitivity: "base" }))
+    setDecks(nextDecks)
+    const rows = Array.isArray(subjectData) ? subjectData : []
+    setSubjects(
+      rows
+        .map((row: { id?: string; name?: string }) => ({
+          id: String(row.id || ""),
+          name: String(row.name || ""),
+        }))
+        .filter((row: Subject) => row.id && row.name)
+        .sort((a: Subject, b: Subject) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }))
+    )
+    setLoading(false)
+  }, [userId])
 
   useEffect(() => {
     let cancel = false
-    Promise.all([
-      fetch(`/api/extension/anki/decks?user_id=${userId}`).then((res) => res.json()),
-      fetch(`/api/subjects?user_id=${userId}`).then((res) => res.json()),
-    ]).then(([deckData, subjectData]) => {
-      if (cancel) return
-      setReady(deckData.ready !== false)
-      setDecks(Array.isArray(deckData.decks) ? deckData.decks : [])
-      const rows = Array.isArray(subjectData) ? subjectData : []
-      setSubjects(
-        rows
-          .map((row: { id?: string; name?: string }) => ({
-            id: String(row.id || ""),
-            name: String(row.name || ""),
-          }))
-          .filter((row: Subject) => row.id && row.name)
-          .sort((a: Subject, b: Subject) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }))
-      )
-      setLoading(false)
+    load().catch(() => {
+      if (!cancel) setLoading(false)
     })
     return () => {
       cancel = true
     }
-  }, [userId])
+  }, [load])
+
+  async function refreshFromAnki() {
+    setRefreshing(true)
+    setMessage("")
+    const requestId = `${Date.now()}`
+    const reply = await new Promise<{ ok?: boolean; error?: string } | null>((resolve) => {
+      function onMessage(event: MessageEvent) {
+        if (event.source !== window) return
+        const data = event.data
+        if (!data || data.source !== "tec-extension" || data.type !== "anki-decks-refreshed") return
+        if (data.requestId !== requestId) return
+        window.removeEventListener("message", onMessage)
+        resolve(data)
+      }
+      window.addEventListener("message", onMessage)
+      window.setTimeout(() => {
+        window.removeEventListener("message", onMessage)
+        resolve(null)
+      }, 60000)
+      window.postMessage(
+        { source: "tec-app", type: "refresh-anki-decks", requestId },
+        window.location.origin
+      )
+    })
+    await load()
+    if (!reply) {
+      setMessage("A extensão não respondeu. Recarregue ela em chrome://extensions e deixe o Anki aberto.")
+    } else if (!reply.ok) {
+      setMessage(reply.error || "Não atualizei os baralhos.")
+    } else {
+      setMessage("Baralhos atualizados.")
+    }
+    setRefreshing(false)
+  }
 
   async function save(deckName: string, subjectId: string) {
     setMessage("")
@@ -57,24 +100,38 @@ export default function AnkiDeckMapSettings({ userId }: { userId: string }) {
       setMessage(data.error || "Não salvei a associação.")
       return
     }
-    setDecks(Array.isArray(data.decks) ? data.decks : [])
+    const nextDecks = Array.isArray(data.decks) ? (data.decks as DeckLink[]) : []
+    nextDecks.sort((a, b) => a.deck_name.localeCompare(b.deck_name, "pt-BR", { sensitivity: "base" }))
+    setDecks(nextDecks)
     setMessage("Associação salva.")
   }
 
   const used = new Set(decks.map((row) => row.subject_id).filter(Boolean))
   const freeSubjects = subjects.filter((subject) => !used.has(subject.id))
 
-  if (loading) return <p className="mb-6 text-sm text-slate-500">Lendo baralhos…</p>
-
   return (
-    <section className="mb-8 border-b border-slate-100 pb-8">
-      <h2 className="text-base font-semibold text-slate-900">Baralhos do Anki</h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Associe uma vez. Card novo num baralho ligado entra na matéria correspondente, no tema Anki.
-      </p>
-      {!ready || decks.length === 0 ? (
+    <section>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Baralhos e matérias</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Associe uma vez. Vale para o flashcard e para o mapa de erros. Card novo num baralho ligado entra na matéria, no tema Anki.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refreshFromAnki}
+          disabled={refreshing || loading}
+          className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          {refreshing ? "Atualizando…" : "Atualizar"}
+        </button>
+      </div>
+      {loading ? (
+        <p className="mt-4 text-sm text-slate-500">Lendo baralhos…</p>
+      ) : !ready || decks.length === 0 ? (
         <p className="mt-4 rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-600">
-          Ainda não há baralhos aqui. Abra o Anki neste computador, com a extensão, e atualize esta página.
+          Ainda não há baralhos aqui. Abra o Anki neste computador e clique em Atualizar.
           {!ready ? " Rode também o SQL da associação de baralhos." : ""}
         </p>
       ) : (
