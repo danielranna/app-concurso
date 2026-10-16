@@ -17,12 +17,38 @@ export async function DELETE(
     )
   }
 
+  const url = new URL(req.url)
+  const fromAnki = url.searchParams.get("from_anki") === "1"
+  const requestedUser = url.searchParams.get("user_id") || ""
+
   // Busca user_id e subject_id antes de deletar para revalidar o cache
-  const { data: errorData } = await supabaseServer
+  const withNote = await supabaseServer
     .from("errors")
-    .select("user_id, topics!inner(subject_id)")
+    .select("user_id, anki_note_id, topics!inner(subject_id)")
     .eq("id", id)
     .single()
+
+  let errorData = withNote.data
+  if (withNote.error && /anki_note_id|column/i.test(withNote.error.message)) {
+    const fallback = await supabaseServer
+      .from("errors")
+      .select("user_id, topics!inner(subject_id)")
+      .eq("id", id)
+      .single()
+    errorData = fallback.data
+  }
+
+  if (fromAnki && (!errorData?.user_id || errorData.user_id !== requestedUser)) {
+    return NextResponse.json({ error: "Erro de outro usuário." }, { status: 403 })
+  }
+
+  const noteId = Number((errorData as { anki_note_id?: unknown } | null)?.anki_note_id)
+  if (!fromAnki && errorData?.user_id && Number.isSafeInteger(noteId) && noteId > 0) {
+    await supabaseServer.from("anki_note_tombstones").upsert(
+      { user_id: errorData.user_id, anki_note_id: noteId },
+      { onConflict: "user_id,anki_note_id" }
+    )
+  }
 
   const { error } = await supabaseServer
     .from("errors")

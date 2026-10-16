@@ -169,6 +169,7 @@ export async function POST(req: Request) {
     error_type,
     error_status,
     category_id,
+    anki_note_id,
   } = body
 
   if (!user_id || !topic_id || !error_text || !correction_text) {
@@ -195,21 +196,31 @@ export async function POST(req: Request) {
     }
   }
 
-  const { error } = await supabaseServer
-    .from("errors")
-    .insert([
-      {
-        user_id,
-        topic_id,
-        error_text,
-        correction_text,
-        description: description || null,
-        reference_link: reference_link || null,
-        error_type,
-        error_status: error_status || "normal",
-        category_id: resolvedCategoryId || null,
-      }
-    ])
+  const row: Record<string, unknown> = {
+    user_id,
+    topic_id,
+    error_text,
+    correction_text,
+    description: description || null,
+    reference_link: reference_link || null,
+    error_type,
+    error_status: error_status || "normal",
+    category_id: resolvedCategoryId || null,
+  }
+  const noteId = Number(anki_note_id)
+  if (Number.isSafeInteger(noteId) && noteId > 0) row.anki_note_id = noteId
+
+  let inserted = await supabaseServer.from("errors").insert([row]).select("id").single()
+  if (
+    inserted.error &&
+    row.anki_note_id &&
+    /anki_note_id|column|schema cache/i.test(inserted.error.message)
+  ) {
+    delete row.anki_note_id
+    inserted = await supabaseServer.from("errors").insert([row]).select("id").single()
+  }
+  const created = inserted.data
+  const { error } = inserted
 
   if (error) {
     return NextResponse.json(
@@ -228,5 +239,5 @@ export async function POST(req: Request) {
   revalidateTag(`analysis-${user_id}`, "max")
   revalidateTag('analysis-all', "max")
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, id: created?.id || null })
 }
