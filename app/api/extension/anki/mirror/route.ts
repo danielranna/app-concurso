@@ -38,7 +38,7 @@ export async function GET(req: Request) {
 
   const { data: links, error } = await supabaseServer
     .from("errors")
-    .select("id, anki_note_id")
+    .select("id, anki_note_id, error_text, correction_text, topics(subject_id)")
     .eq("user_id", user.userId)
     .not("anki_note_id", "is", null)
 
@@ -67,7 +67,16 @@ export async function GET(req: Request) {
     {
       ready: true,
       links: (links || [])
-        .map((row) => ({ error_id: String(row.id), anki_note_id: noteId(row.anki_note_id) }))
+        .map((row) => {
+          const topic = Array.isArray(row.topics) ? row.topics[0] : row.topics
+          return {
+            error_id: String(row.id),
+            anki_note_id: noteId(row.anki_note_id),
+            error_text: String(row.error_text || ""),
+            correction_text: String(row.correction_text || ""),
+            subject_id: topic?.subject_id ? String(topic.subject_id) : "",
+          }
+        })
         .filter((row) => row.anki_note_id > 0),
       tombstones: (tombstones || [])
         .map((row) => ({ id: String(row.id), anki_note_id: noteId(row.anki_note_id) }))

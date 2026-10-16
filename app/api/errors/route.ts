@@ -188,12 +188,14 @@ export async function POST(req: Request) {
 
   const { getFccCategoryId } = await import("@/lib/error-categories")
   let resolvedCategoryId = category_id as string | null | undefined
-  if (!resolvedCategoryId) {
+  if (category_id === undefined) {
     try {
       resolvedCategoryId = await getFccCategoryId(user_id)
     } catch {
       resolvedCategoryId = null
     }
+  } else {
+    resolvedCategoryId = category_id || null
   }
 
   const row: Record<string, unknown> = {

@@ -18,6 +18,7 @@ import CoachAiCredentialsModal from "@/components/coach/CoachAiCredentialsModal"
 import MateriasHubManager from "@/components/materias/MateriasHubManager"
 import ErrorTaxonomyPanel from "@/components/settings/ErrorTaxonomyPanel"
 import QuizSyncWebhooksPanel from "@/components/settings/QuizSyncWebhooksPanel"
+import AnkiDeckMapSettings from "@/components/settings/AnkiDeckMapSettings"
 
 const TABS = [
   { id: "flashcards", label: "Flashcards", icon: Layers },
@@ -111,7 +112,12 @@ function ConfiguracoesHub() {
         <p className="mb-5 text-xs font-semibold uppercase tracking-wider text-slate-400">
           {active.label}
         </p>
-        {tab === "flashcards" && <FlashcardsBotSettings section="flashcards" />}
+        {tab === "flashcards" && (
+          <>
+            {userId && <AnkiDeckMapSettings userId={userId} />}
+            <FlashcardsBotSettings section="flashcards" />
+          </>
+        )}
         {tab === "integracoes" && <FlashcardsBotSettings section="integracoes" />}
         {tab === "api" && <CoachAiCredentialsModal embedded open />}
         {tab === "materias" && <MateriasHubManager focus="subjects" />}
