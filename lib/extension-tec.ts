@@ -8,6 +8,12 @@ export function isUuid(value: string) {
   return UUID_RE.test(value)
 }
 
+export const extensionCorsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
+}
+
 export function sanitizeTecHtml(html: string): string {
   let out = String(html || "")
   out = out.replace(/<\s*(script|style|iframe|object|embed|form|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
