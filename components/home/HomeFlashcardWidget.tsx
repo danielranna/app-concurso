@@ -149,6 +149,7 @@ export default function HomeFlashcardWidget({ userId }: Props) {
               Mostrar resposta
             </button>
           ) : (
+            <>
             <p className="mb-2 mt-4 text-xs text-slate-500">
               {card.scheduler === "anki"
                 ? "Sincronizado com o Anki. A próxima data é a do Anki."
@@ -174,6 +175,7 @@ export default function HomeFlashcardWidget({ userId }: Props) {
                 </button>
               ))}
             </div>
+            </>
           )}
 
           {remaining > 0 && (

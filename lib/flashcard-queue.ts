@@ -155,7 +155,7 @@ export async function fetchDueStates(
       .order("due_at", { ascending: true })
     const fallback = options?.deckId ? retry.eq("flashcards.deck_id", options.deckId) : retry
     const again = await fallback
-    data = again.data
+    data = again.data as typeof data
     error = again.error
   }
   if (error) throw error

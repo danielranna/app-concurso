@@ -28,7 +28,11 @@ export async function DELETE(
     .eq("id", id)
     .single()
 
-  let errorData = withNote.data
+  let errorData: {
+    user_id?: string
+    anki_note_id?: unknown
+    topics?: { subject_id?: string }[] | { subject_id?: string }
+  } | null = withNote.data
   if (withNote.error && /anki_note_id|column/i.test(withNote.error.message)) {
     const fallback = await supabaseServer
       .from("errors")
