@@ -411,7 +411,8 @@ export default function QuestionSolver({
       const notebookDone =
         mode === "notebook" &&
         pendingForDone === 0 &&
-        statsNext.total > 0
+        statsNext.total > 0 &&
+        statsNext.resolved >= statsNext.total
       if (notebookDone && (!opts?.nav || opts.nav === "unsolved")) {
         setShowNotebookSummary(true)
       } else if (opts?.nav) {

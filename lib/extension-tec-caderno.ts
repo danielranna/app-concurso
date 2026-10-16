@@ -1,7 +1,4 @@
-import { enqueueQuestionResolveAi } from "./ai/question-resolve-ai"
-import { scheduleQuestionAiKick } from "./ai/jobs/kick"
 import { enqueueNotebookReport } from "./ai/notebook-report"
-import { onWrongAttemptForErrorReview } from "./error-from-attempt"
 import { insertQuestionNote } from "./question-notes"
 import {
   loadQuestionForStudy,
@@ -146,7 +143,11 @@ async function updateCopyProgress(
   const answered = new Set((attempts ?? []).map((row) => row.question_id)).size
   const rows = count ?? 0
   const done = rows > 0 && (finish || (tecTotal > 0 && tecResolved >= tecTotal))
-  const questionCount = done ? Math.max(rows, answered) : Math.max(tecTotal, rows)
+  const questionCount = done
+    ? Math.max(rows, answered)
+    : tecTotal > 0
+      ? Math.max(tecTotal, rows, answered + 1)
+      : Math.max(rows, answered) + 1
   const update: Record<string, unknown> = {
     question_count: questionCount,
     answered_count: answered,
@@ -166,7 +167,12 @@ async function updateCopyProgress(
       console.warn("[tec-caderno] relatório:", error instanceof Error ? error.message : error)
     }
   }
-  return { completed: Boolean(done || alreadyCompleted), justCompleted, answered, questionCount }
+  return {
+    completed: done || Boolean(alreadyCompleted),
+    justCompleted,
+    answered,
+    questionCount,
+  }
 }
 
 export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
@@ -198,16 +204,11 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
       .limit(1)
     isCorrect = normalizeAnswer(question.type, input.selectedAnswer, question.correct_answer)
     const confidence = parseConfidenceLevel(input.confidenceLevel)
+    const note = String(input.noteDraft || "").trim()
     if (previous && previous.length) {
       already = true
-      const note = String(input.noteDraft || "").trim()
-      if (note) {
-        await insertQuestionNote(input.userId, input.questionId, note, {
-          aiRequested: Boolean(input.aiRequested),
-        })
-      }
     } else {
-      const { id: attemptId } = await recordAttempt({
+      await recordAttempt({
         user_id: input.userId,
         question_id: input.questionId,
         notebook_id: notebook.id,
@@ -218,34 +219,11 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
         confidence_level: confidence,
       })
       recorded = true
-      if (!isCorrect) {
-        try {
-          await onWrongAttemptForErrorReview({
-            userId: input.userId,
-            questionId: input.questionId,
-            attemptId,
-            selectedAnswer: input.selectedAnswer,
-            notebookId: notebook.id,
-          })
-        } catch (error) {
-          console.warn("[tec-caderno] revisão:", error instanceof Error ? error.message : error)
-        }
-      }
-      await enqueueQuestionResolveAi({
-        userId: input.userId,
-        questionId: input.questionId,
-        attemptId,
-        notebookId: notebook.id,
-        noteDraft: String(input.noteDraft || "").trim() || null,
+    }
+    if (note) {
+      await insertQuestionNote(input.userId, input.questionId, note, {
         aiRequested: Boolean(input.aiRequested),
-        selectedAnswer: input.selectedAnswer,
-        confidenceLevel: confidence,
-        durationMs: null,
-        tags: [],
-        pushWhatsapp: true,
-        cadernoId: Number(input.tecCadernoId) || null,
       })
-      scheduleQuestionAiKick(input.userId)
     }
   }
 
