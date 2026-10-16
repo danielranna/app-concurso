@@ -20,6 +20,7 @@ export type TecCadernoSyncInput = {
   total?: number
   resolved?: number
   finish?: boolean
+  create?: boolean
   questionId?: string
   selectedAnswer?: string
   confidenceLevel?: string
@@ -175,7 +176,39 @@ async function updateCopyProgress(
   }
 }
 
+async function findNotebook(userId: string, tecCadernoId: string) {
+  const shareUrl = "https://www.tecconcursos.com.br/questoes/cadernos/" + tecCadernoId
+  const { data, error } = await supabaseServer
+    .from("notebooks")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("share_url", shareUrl)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+}
+
 export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
+  const found = await findNotebook(input.userId, input.tecCadernoId)
+  if (!found && !input.create) {
+    return {
+      exists: false,
+      notebook_id: "",
+      notebook_name: "",
+      subject_id: null,
+      folder_name: FOLDER_NAME,
+      href: "",
+      recorded: false,
+      already: false,
+      is_correct: null,
+      completed: false,
+      just_completed: false,
+      answered: 0,
+      question_count: 0,
+      materia_matched: false,
+    }
+  }
+
   const { data: subjects } = await supabaseServer
     .from("subjects")
     .select("id, name")
@@ -237,6 +270,7 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
   )
 
   return {
+    exists: true,
     notebook_id: notebook.id,
     notebook_name: notebookName(input),
     subject_id: subjectId,

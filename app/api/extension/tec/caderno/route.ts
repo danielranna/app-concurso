@@ -21,6 +21,7 @@ export async function POST(req: Request) {
       total?: number
       resolved?: number
       finish?: boolean
+      create?: boolean
       question_id?: string
       selected_answer?: string
       confidence_level?: string
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
       total: body.total,
       resolved: body.resolved,
       finish: body.finish,
+      create: body.create === true,
       questionId: body.question_id,
       selectedAnswer: body.selected_answer,
       confidenceLevel: body.confidence_level,
