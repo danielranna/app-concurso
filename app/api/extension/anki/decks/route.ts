@@ -62,6 +62,7 @@ export async function POST(req: Request) {
     decks?: unknown
     deck_name?: string
     subject_id?: string | null
+    replace?: boolean
   } | null
   const user = await requireUser(body?.user_id)
   if ("error" in user) {
