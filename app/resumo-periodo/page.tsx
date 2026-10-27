@@ -16,6 +16,7 @@ type Error = {
   reference_link?: string
   error_status?: string
   error_type?: string
+  category_id?: string | null
   review_count?: number
   needs_intervention?: boolean
   topics: {
@@ -112,6 +113,8 @@ function ResumoPeriodoContent() {
 
   const fromParam = searchParams?.get("from") ?? ""
   const toParam = searchParams?.get("to") ?? ""
+  const categoryId = searchParams?.get("category_id") ?? ""
+  const categoryName = searchParams?.get("category_name") ?? ""
   const [customFrom, setCustomFrom] = useState(fromParam || getDefaultCustomRange().from)
   const [customTo, setCustomTo] = useState(toParam || getDefaultCustomRange().to)
 
@@ -514,8 +517,13 @@ function ResumoPeriodoContent() {
     router.replace(`/resumo-periodo?${params.toString()}`, { scroll: false })
   }
 
+  const scopedErrors = useMemo(() => {
+    if (!categoryId) return errors
+    return errors.filter((error) => error.category_id === categoryId)
+  }, [errors, categoryId])
+
   const periodErrors = useMemo(() => {
-    if (period === "accumulated") return errors
+    if (period === "accumulated") return scopedErrors
 
     const now = new Date()
     const thisWeekStart = getWeekStart(now)
@@ -544,11 +552,11 @@ function ResumoPeriodoContent() {
       rangeEnd.setHours(23, 59, 59, 999)
     }
 
-    return errors.filter(error => {
+    return scopedErrors.filter(error => {
       const errorDate = new Date(error.created_at)
       return errorDate >= rangeStart && errorDate <= rangeEnd
     })
-  }, [errors, period, fromParam, toParam])
+  }, [scopedErrors, period, fromParam, toParam])
 
   const filteredErrors = useMemo(() => {
     let result = periodErrors
@@ -578,21 +586,21 @@ function ResumoPeriodoContent() {
 
   const subjectOptions = useMemo(() => {
     const map = new Map<string, string>()
-    errors.forEach(error => {
+    scopedErrors.forEach(error => {
       if (error.topics?.subjects?.id && error.topics?.subjects?.name) {
         map.set(error.topics.subjects.id, error.topics.subjects.name)
       }
     })
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
-  }, [errors])
+  }, [scopedErrors])
 
   const errorTypeOptions = useMemo(() => {
     const uniqueTypes = new Set<string>()
-    errors.forEach(error => {
+    scopedErrors.forEach(error => {
       if (error.error_type?.trim()) uniqueTypes.add(error.error_type.trim())
     })
     return Array.from(uniqueTypes).sort((a, b) => a.localeCompare(b))
-  }, [errors])
+  }, [scopedErrors])
 
   function filterErrorsByReviewPeriod(source: Error[], selectedPeriod: Period, from?: string, to?: string) {
     if (selectedPeriod === "accumulated") return source
@@ -776,8 +784,9 @@ function ResumoPeriodoContent() {
     if (showAttentionZone) {
       return `Zona de Atenção (${attentionCardIds.size})${suffix}`
     }
-    if (filterType === "total") return `Total de Erros${suffix}`
-    return `Erros: ${filterType}${suffix}`
+    const categorySuffix = categoryName ? ` · ${categoryName}` : ""
+    if (filterType === "total") return `Total de Erros${suffix}${categorySuffix}`
+    return `Erros: ${filterType}${suffix}${categorySuffix}`
   }
 
   const emptyMessage = () => {
@@ -1360,8 +1369,13 @@ function ResumoPeriodoContent() {
                 }}
                 onEdit={() => setEditingError(error)}
                 onDeleted={async () => {
-                  await loadErrors(userId!)
-                  await loadErrorStatuses(userId!)
+                  const res = await fetch(`/api/errors/${error.id}`, { method: "DELETE" })
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({}))
+                    window.alert(data.error || "Não excluí o erro.")
+                    return
+                  }
+                  setErrors((prev) => prev.filter((item) => item.id !== error.id))
                 }}
                 allCardsExpanded={allCardsExpanded}
                 availableStatuses={errorStatuses}

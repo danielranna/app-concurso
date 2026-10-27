@@ -204,8 +204,8 @@ const QuickNote = forwardRef<QuickNoteHandle, Props>(function QuickNote(
             <strong>Shift+Enter</strong> quebra linha.
           </p>
           <p>
-            Inseguro/chute entram na correção do WhatsApp. A IA só comenta se
-            você ligar o botão abaixo.
+            Erradas, chute e o botão Discutir entram na correção do WhatsApp.
+            A IA só comenta se você ligar o botão abaixo.
           </p>
           <p>
             <Link

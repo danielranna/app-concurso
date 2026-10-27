@@ -67,6 +67,7 @@ type Props = {
   subjects: Subject[]
   errorStatuses: ErrorStatus[]
   categoryId?: string | null
+  categoryName?: string | null
 }
 
 const DEFAULT_STATUS_COLOR = "#64748b"
@@ -92,6 +93,7 @@ export default function AnalysisTab({
   subjects,
   errorStatuses,
   categoryId = null,
+  categoryName = null,
 }: Props) {
   const router = useRouter()
   const { getAnalysis, invalidateAnalysis, invalidateErrors } = useDataCache()
@@ -355,7 +357,10 @@ export default function AnalysisTab({
 
   // Iniciar revisão dos cards problemáticos - redireciona para resumo-periodo com ambas zonas selecionadas
   const startProblematicReview = () => {
-    router.push("/resumo-periodo?period=accumulated&critical=true&attention=true")
+    const params = new URLSearchParams("period=accumulated&critical=true&attention=true")
+    if (categoryId) params.set("category_id", categoryId)
+    if (categoryName) params.set("category_name", categoryName)
+    router.push(`/resumo-periodo?${params.toString()}`)
   }
 
   // Tooltip customizado para o gráfico

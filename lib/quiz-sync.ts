@@ -982,21 +982,6 @@ export async function ingestWhatsappAnswer(input: {
     if (!/attempt_tags/i.test(msg)) throw e
   }
 
-  if (!isCorrect && inboundAttemptId) {
-    try {
-      const { onWrongAttemptForErrorReview } = await import("./error-from-attempt")
-      await onWrongAttemptForErrorReview({
-        userId,
-        questionId,
-        attemptId: inboundAttemptId,
-        selectedAnswer: selected,
-        notebookId,
-      })
-    } catch (e) {
-      console.error("[error-review] onWrongAttempt whatsapp", e)
-    }
-  }
-
   if (input.tags?.length) {
     const { data: last } = await supabaseServer
       .from("question_attempts")
@@ -1166,6 +1151,7 @@ export async function pushAnswerToWhatsapp(input: {
   notebookId?: string | null
   cadernoId?: number | null
   shortId?: string | null
+  wantsDiscussion?: boolean
 }) {
   const ident = await resolveWhatsappIdentity(input.userId)
   if (!ident) {
@@ -1227,6 +1213,7 @@ export async function pushAnswerToWhatsapp(input: {
         aiUpdate: Boolean(input.aiUpdate),
         confidenceLevel: input.confidenceLevel,
         durationMs: input.durationMs,
+        wantsDiscussion: input.wantsDiscussion === true,
         tags: input.tags ?? [],
       }),
     },
@@ -1517,6 +1504,7 @@ export async function maybePushNotebookAnswer(input: {
   tags?: string[]
   cadernoId?: number | null
   shortId?: string | null
+  wantsDiscussion?: boolean
 }) {
   const sent = await getSentCadernoForNotebook(input.notebookId)
   const { data: replica } = await supabaseServer
@@ -1535,6 +1523,7 @@ export async function maybePushNotebookAnswer(input: {
     selectedAnswer: input.selectedAnswer,
     confidenceLevel: input.confidenceLevel,
     durationMs: input.durationMs,
+    wantsDiscussion: input.wantsDiscussion,
     comment: input.comment,
     aiComment: input.aiComment,
     aiUpdate: input.aiUpdate,

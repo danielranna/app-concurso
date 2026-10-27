@@ -39,6 +39,7 @@ export type EnqueueQuestionResolveAiInput = {
   idempotencyKey?: string
   shortId?: string | null
   cadernoId?: number | null
+  wantsDiscussion?: boolean
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -188,6 +189,7 @@ async function pushAttemptToWhatsapp(input: {
   aiUpdate?: boolean
   shortId?: string | null
   cadernoId?: number | null
+  wantsDiscussion?: boolean
 }) {
   if (!input.notebookId) {
     const { pushAnswerToWhatsapp } = await import("../quiz-sync")
@@ -203,6 +205,7 @@ async function pushAttemptToWhatsapp(input: {
       tags: input.tags,
       shortId: input.shortId,
       cadernoId: input.cadernoId,
+      wantsDiscussion: input.wantsDiscussion,
     })
   }
   return maybePushNotebookAnswer({
@@ -218,6 +221,7 @@ async function pushAttemptToWhatsapp(input: {
     tags: input.tags,
     shortId: input.shortId,
     cadernoId: input.cadernoId,
+    wantsDiscussion: input.wantsDiscussion,
   })
 }
 
@@ -318,6 +322,7 @@ export async function processQuestionResolveAi(
   const shortId =
     typeof payload.short_id === "string" ? payload.short_id : null
   const cadernoId = parseCadernoId(payload.caderno_id)
+  const wantsDiscussion = payload.wants_discussion === true
 
   if (!questionId || !attemptId) {
     throw new Error("question_id e attempt_id obrigatórios")
@@ -342,6 +347,7 @@ export async function processQuestionResolveAi(
     tags,
     shortId,
     cadernoId,
+    wantsDiscussion,
   }
 
   if (pushWhatsapp && !alreadyPushed) {
@@ -471,6 +477,7 @@ export async function enqueueQuestionResolveAi(input: EnqueueQuestionResolveAiIn
         push_whatsapp: input.pushWhatsapp !== false,
         short_id: input.shortId ?? null,
         caderno_id: input.cadernoId ?? null,
+        wants_discussion: input.wantsDiscussion === true,
       },
       priority: 20,
     })

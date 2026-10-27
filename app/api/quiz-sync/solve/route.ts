@@ -27,6 +27,7 @@ export async function POST(req: Request) {
     ai_requested,
     short_id,
     caderno_id,
+    wants_discussion,
   } = body as {
     user_id?: string
     question_id?: string
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
     ai_requested?: boolean
     short_id?: string | null
     caderno_id?: number | null
+    wants_discussion?: boolean
   }
 
   if (!user_id || !question_id || !selected_answer) {
@@ -86,6 +88,7 @@ export async function POST(req: Request) {
       caderno_id != null && Number.isFinite(Number(caderno_id)) && Number(caderno_id) > 0
         ? Number(caderno_id)
         : null,
+    wantsDiscussion: wants_discussion === true,
   })
   scheduleQuestionAiKick(user_id)
 

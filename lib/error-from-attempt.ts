@@ -314,7 +314,7 @@ export async function upsertErrorFromWrongAttempt(params: {
   }
 }
 
-/** Upsert no caderno + gera C/E (job + processamento imediato). */
+/** Não é chamado ao errar uma questão. O mapa só recebe o erro criado em Adicionar erro. */
 export async function onWrongAttemptForErrorReview(params: {
   userId: string
   questionId: string

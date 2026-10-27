@@ -33,12 +33,21 @@ type Props = {
   subjects: Subject[]
   errorStatuses: ErrorStatus[]
   onSubjectClick: (subjectId: string) => void
+  categoryId?: string | null
+  categoryName?: string | null
 }
 
 const DEFAULT_STATUS_COLOR = "#64748b"
 
-export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClick }: Props) {
+export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClick, categoryId, categoryName }: Props) {
   const router = useRouter()
+
+  function openResumo(query: string) {
+    const params = new URLSearchParams(query)
+    if (categoryId) params.set("category_id", categoryId)
+    if (categoryName) params.set("category_name", categoryName)
+    router.push(`/resumo-periodo?${params.toString()}`)
+  }
 
   // Calcula início da semana atual (Segunda-feira)
   const getWeekStart = (date: Date): Date => {
@@ -134,7 +143,7 @@ export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClic
       {/* CARDS: Total + lista de status com cores */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
-          onClick={() => router.push("/resumo-periodo?period=this_week")}
+          onClick={() => openResumo("period=this_week")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
@@ -147,7 +156,7 @@ export default function WeekTab({ errors, subjects, errorStatuses, onSubjectClic
             <button
               key={id}
               type="button"
-              onClick={() => router.push(`/resumo-periodo?status=${encodeURIComponent(name)}&period=this_week`)}
+              onClick={() => openResumo(`status=${encodeURIComponent(name)}&period=this_week`)}
               className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-[var(--status-color)] cursor-pointer"
               style={{ ['--status-color' as string]: color, borderLeftWidth: 4, borderLeftColor: color }}
             >

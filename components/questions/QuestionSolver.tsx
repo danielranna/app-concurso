@@ -104,6 +104,7 @@ type Props = {
     tec_id: number
     notebook_id?: string
     confidence_level: ConfidenceLevel
+    wants_discussion?: boolean
     tags?: string[]
     note_draft?: string | null
     ai_requested?: boolean
@@ -246,6 +247,7 @@ export default function QuestionSolver({
   const [selected, setSelected] = useState<string | null>(null)
   const [eliminated, setEliminated] = useState<Set<string>>(new Set())
   const [confidence, setConfidence] = useState<ConfidenceLevel>("seguro")
+  const [discuss, setDiscuss] = useState(false)
   const [waTags, setWaTags] = useState<string[]>([])
   const [notesEpoch, setNotesEpoch] = useState(0)
   const [questionMs, setQuestionMs] = useState(0)
@@ -295,11 +297,13 @@ export default function QuestionSolver({
     selected: string | null
     eliminated: string[]
     confidence: ConfidenceLevel
+    discuss: boolean
   }>({
     questionId: null,
     selected: null,
     eliminated: [],
     confidence: "seguro",
+    discuss: false,
   })
 
   const flushQuestionTime = useCallback(
@@ -323,10 +327,12 @@ export default function QuestionSolver({
       selected: draft.selectedAnswer,
       eliminated: draft.eliminated,
       confidence: draft.confidence,
+      discuss: Boolean(draft.discuss),
     }
     setSelected(draft.selectedAnswer)
     setEliminated(new Set(draft.eliminated))
     setConfidence(draft.confidence)
+    setDiscuss(Boolean(draft.discuss))
     setQuestionMs(draft.durationMsAccumulated)
     if (draft.resolved && draft.result) {
       setResult({
@@ -353,6 +359,7 @@ export default function QuestionSolver({
       selectedAnswer: ui ? ui.selected : draft.selectedAnswer,
       eliminated: ui ? ui.eliminated : draft.eliminated,
       confidence: ui ? ui.confidence : draft.confidence,
+      discuss: ui ? ui.discuss : Boolean(draft.discuss),
       durationMsAccumulated:
         getDraft(scopeKey, currentQuestionId.current).durationMsAccumulated,
       resolved: draft.resolved,
@@ -778,6 +785,7 @@ export default function QuestionSolver({
           selected: null,
           eliminated: [],
           confidence: "seguro",
+          discuss: false,
         }
       }
       if (patch.selectedAnswer !== undefined) {
@@ -788,6 +796,9 @@ export default function QuestionSolver({
       }
       if (patch.confidence) {
         uiStateRef.current.confidence = patch.confidence
+      }
+      if (patch.discuss !== undefined) {
+        uiStateRef.current.discuss = patch.discuss
       }
       const draft = getDraft(scopeKey, currentQuestionId.current)
       setDraft(scopeKey, currentQuestionId.current, { ...draft, ...patch })
@@ -843,6 +854,7 @@ export default function QuestionSolver({
 
     const eliminatedNow = uiStateRef.current.eliminated
     const confidenceNow = uiStateRef.current.confidence
+    const discussNow = Boolean(uiStateRef.current.discuss)
     const tagsNow = waTags
     const consumed = quickNoteRef.current?.consumeDraft()
     const noteDraft = consumed?.body || null
@@ -874,6 +886,7 @@ export default function QuestionSolver({
       selectedAnswer,
       eliminated: eliminatedNow,
       confidence: confidenceNow,
+      discuss: discussNow,
       durationMsAccumulated: duration_ms,
       resolved: true,
       result: localResult,
@@ -922,6 +935,7 @@ export default function QuestionSolver({
         tec_id: tecId,
         notebook_id: notebookIdNow,
         confidence_level: confidenceNow,
+        wants_discussion: discussNow,
         tags: tagsNow,
         note_draft: noteDraft,
         ai_requested: aiRequested,
@@ -1029,6 +1043,7 @@ export default function QuestionSolver({
         tec_id: draft.tec_id,
         notebook_id: draft.notebook_id ?? current.notebook_id,
         confidence_level: draft.confidence,
+        wants_discussion: Boolean(draft.discuss),
         short_id: draft.short_id ?? current.short_id ?? null,
         caderno_id: draft.caderno_id ?? current.caderno_id ?? null,
       })
@@ -1424,6 +1439,26 @@ export default function QuestionSolver({
               disabled={locked}
               onChange={handleConfidenceChange}
             />
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => {
+                const next = !discuss
+                setDiscuss(next)
+                persistDraftState({ discuss: next })
+              }}
+              title="Manda a correção ao grupo mesmo se todo mundo acertar, sem marcar chute"
+              className={`mt-3 flex h-9 items-center justify-center rounded border px-3 text-xs font-medium transition ${
+                discuss
+                  ? "border-slate-700 bg-slate-800 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+              } disabled:opacity-50`}
+            >
+              Discutir
+            </button>
+            <p className="mt-1 text-xs text-slate-400">
+              Discutir leva a questão ao grupo sem fingir que foi chute.
+            </p>
             {resolveError && (
               <p className="mb-3 text-sm text-red-600">{resolveError}</p>
             )}

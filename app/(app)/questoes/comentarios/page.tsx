@@ -29,8 +29,8 @@ export default function ComentariosNasQuestoesPage() {
             Depois de resolvida, Enter envia um novo comentário na mesma thread.
           </li>
           <li>
-            Inseguro e chute aparecem na correção do grupo, junto da letra que
-            você marcou.
+            Erradas, chute e o botão Discutir aparecem na correção do grupo.
+            Inseguro fica só no seu registro.
           </li>
         </ul>
       </section>

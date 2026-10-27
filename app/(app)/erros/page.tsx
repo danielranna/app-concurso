@@ -228,6 +228,8 @@ export default function ErrosPage() {
                   errors={errors}
                   subjects={subjects}
                   errorStatuses={errorStatuses}
+                  categoryId={activeCategoryId}
+                  categoryName={categories.find((c) => c.id === activeCategoryId)?.name}
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
                 />
               )
@@ -238,6 +240,8 @@ export default function ErrosPage() {
                 <HistoryTab
                   errors={errors}
                   errorStatuses={errorStatuses}
+                  categoryId={activeCategoryId}
+                  categoryName={categories.find((c) => c.id === activeCategoryId)?.name}
                   onSubjectClick={(subjectId) => router.push(`/subject/${subjectId}`)}
                   savedStatusId={userPreferences.history_chart_statuses?.[0]}
                   onStatusChange={saveHistoryChartStatus}
@@ -251,6 +255,7 @@ export default function ErrosPage() {
                   subjects={subjects}
                   errorStatuses={errorStatuses}
                   categoryId={activeCategoryId}
+                  categoryName={categories.find((c) => c.id === activeCategoryId)?.name}
                 />
               )
             }

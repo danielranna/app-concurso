@@ -4,6 +4,8 @@ export type QuestionDraft = {
   selectedAnswer: string | null
   eliminated: string[]
   confidence: ConfidenceLevel
+  /** Manda a correção ao grupo sem marcar chute. */
+  discuss?: boolean
   durationMsAccumulated: number
   tec_id?: number
   notebook_id?: string

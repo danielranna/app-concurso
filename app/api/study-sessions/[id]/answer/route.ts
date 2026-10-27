@@ -11,7 +11,6 @@ import {
 } from "@/lib/question-study"
 import { enqueueQuestionResolveAi } from "@/lib/ai/question-resolve-ai"
 import { scheduleQuestionAiKick } from "@/lib/ai/jobs/kick"
-import { onWrongAttemptForErrorReview } from "@/lib/error-from-attempt"
 
 export const maxDuration = 120
 
@@ -33,6 +32,7 @@ export async function POST(
     comment,
     note_draft,
     ai_requested,
+    wants_discussion,
   } = body
 
   if (!user_id || !question_id || !selected_answer || tec_id == null) {
@@ -108,20 +108,6 @@ export async function POST(
     attempt_tags: Array.isArray(tags) ? tags : undefined,
   })
 
-  if (!is_correct) {
-    try {
-      await onWrongAttemptForErrorReview({
-        userId: user_id,
-        questionId: question_id,
-        attemptId,
-        selectedAnswer: selected_answer,
-        notebookId: notebook_id ?? null,
-      })
-    } catch (e) {
-      console.error("[error-review] onWrongAttempt", e)
-    }
-  }
-
   await enqueueQuestionResolveAi({
     userId: user_id,
     questionId: question_id,
@@ -134,6 +120,7 @@ export async function POST(
     durationMs: duration_ms ?? null,
     tags: Array.isArray(tags) ? tags : [],
     pushWhatsapp: true,
+    wantsDiscussion: wants_discussion === true,
   })
   scheduleQuestionAiKick(user_id)
 

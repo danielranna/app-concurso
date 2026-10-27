@@ -30,13 +30,22 @@ type Props = {
   onSubjectClick: (subjectId: string) => void
   savedStatusId?: string
   onStatusChange?: (statusId: string) => void
+  categoryId?: string | null
+  categoryName?: string | null
 }
 
 const COLORS = ['#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8']
 const DEFAULT_STATUS_COLOR = "#64748b"
 
-export default function HistoryTab({ errors, errorStatuses, onSubjectClick, savedStatusId, onStatusChange }: Props) {
+export default function HistoryTab({ errors, errorStatuses, onSubjectClick, savedStatusId, onStatusChange, categoryId, categoryName }: Props) {
   const router = useRouter()
+
+  function openResumo(query: string) {
+    const params = new URLSearchParams(query)
+    if (categoryId) params.set("category_id", categoryId)
+    if (categoryName) params.set("category_name", categoryName)
+    router.push(`/resumo-periodo?${params.toString()}`)
+  }
   
   // Estado para o status selecionado no gráfico de matérias por status
   const [selectedStatusId, setSelectedStatusId] = useState<string | null>(null)
@@ -178,7 +187,7 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick, save
       {/* CARDS: Total + lista de status com cores */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button
-          onClick={() => router.push("/resumo-periodo?type=total&all=true")}
+          onClick={() => openResumo("type=total&all=true")}
           className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-slate-300 cursor-pointer"
         >
           <p className="text-sm text-slate-600">Total de Erros</p>
@@ -191,7 +200,7 @@ export default function HistoryTab({ errors, errorStatuses, onSubjectClick, save
             <button
               key={id}
               type="button"
-              onClick={() => router.push(`/resumo-periodo?status=${encodeURIComponent(name)}&all=true`)}
+              onClick={() => openResumo(`status=${encodeURIComponent(name)}&all=true`)}
               className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm text-left transition hover:shadow-md hover:ring-2 hover:ring-[var(--status-color)] cursor-pointer"
               style={{ ['--status-color' as string]: color, borderLeftWidth: 4, borderLeftColor: color }}
             >
