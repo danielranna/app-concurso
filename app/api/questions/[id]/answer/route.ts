@@ -26,6 +26,7 @@ export async function POST(
     comment,
     note_draft,
     ai_requested,
+    explain_requested,
     tags,
     wants_discussion,
   } = body as {
@@ -36,6 +37,7 @@ export async function POST(
     comment?: string | null
     note_draft?: string | null
     ai_requested?: boolean
+    explain_requested?: boolean
     tags?: string[]
     wants_discussion?: boolean
   }
@@ -78,6 +80,7 @@ export async function POST(
     notebookId: null,
     noteDraft: String(note_draft ?? comment ?? "").trim() || null,
     aiRequested: Boolean(ai_requested),
+    explainRequested: explain_requested === true,
     selectedAnswer: selected_answer,
     confidenceLevel: confidence,
     durationMs: duration_ms ?? null,

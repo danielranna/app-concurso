@@ -6,6 +6,7 @@ export type DailyWrongOption = {
 export type DailyWrongNote = {
   body: string
   ai_feedback: string | null
+  ai_pending?: boolean
 }
 
 export type DailyWrongItem = {

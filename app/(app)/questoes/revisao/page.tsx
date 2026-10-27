@@ -35,7 +35,7 @@ export default function QuestoesRevisaoPage() {
     <div className="mx-auto max-w-4xl space-y-6">
       <QuestoesPageHeader
         title="Correções do dia"
-        description="Cada erro entra na hora, mesmo com o caderno pela metade. Enunciado, o que você marcou, gabarito e o comentário da IA."
+        description="Cada erro entra na hora, com o equívoco. A explicação da resposta e o comentário da anotação só aparecem se você pedir na extensão."
         actions={
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-slate-500">Data</span>

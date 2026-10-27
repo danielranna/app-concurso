@@ -345,10 +345,8 @@ export default function DailyWrongReviewList({ userId, date, onCountChange }: Pr
   }, [load])
 
   useEffect(() => {
-    const pendingAi = items.some(
-      (item) =>
-        (item.notes ?? []).some((n) => n.body.trim() && !n.ai_feedback) ||
-        (Boolean(item.notes?.length) && !item.feedback_detailed && !item.misconception)
+    const pendingAi = items.some((item) =>
+      (item.notes ?? []).some((n) => n.ai_pending && !n.ai_feedback)
     )
     if (!pendingAi) return
     const interval = window.setInterval(() => {

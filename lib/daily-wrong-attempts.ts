@@ -214,6 +214,7 @@ export async function listDailyWrongAttempts(
         .map((e) => ({
           body: e.body,
           ai_feedback: e.ai_feedback,
+          ai_pending: e.ai_pending,
         }))
     }
   }

@@ -9,7 +9,6 @@ import { filterReportStructuredForSubject } from "../notebook-subject-split"
 import { generateSubjectDossier } from "../subject-dossier"
 import { ingestErrorNotebookFromReport } from "../error-notebook-ingest"
 import { processQuestionResolveAi } from "../question-resolve-ai"
-import { processErrorReviewQuestionGenerate } from "../error-review-question-job"
 import { claimPendingJobs, completeJob, enqueueJob, type JobType } from "./queue"
 
 export async function processJob(job: {
@@ -52,8 +51,7 @@ export async function processJob(job: {
       }
 
       case "error_review_question_generate": {
-        const result = await processErrorReviewQuestionGenerate(userId, payload)
-        await completeJob(job.id, result)
+        await completeJob(job.id, { skipped: true, reason: "revisao certo/errado desligada" })
         break
       }
 

@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       confidence_level?: string
       note_draft?: string
       ai_requested?: boolean
+      explain_requested?: boolean
       duration_ms?: number | null
     }
     const userId = String(body.user_id || "")
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
       confidenceLevel: body.confidence_level,
       noteDraft: body.note_draft,
       aiRequested: body.ai_requested,
+      explainRequested: body.explain_requested === true,
       durationMs: body.duration_ms,
     })
     return NextResponse.json(result, { headers: extensionCorsHeaders })

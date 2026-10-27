@@ -7,6 +7,7 @@ import {
 } from "../question-notes"
 import { combineNoteBodies } from "../note-entry-utils"
 import { enqueueJob } from "./jobs/queue"
+import { runAgent } from "./run-agent"
 import { classifyNotebookQuestions } from "./error-classifier"
 import {
   persistAuditInsightsToAttempts,
@@ -17,6 +18,11 @@ import { buildAttemptAuditPayload } from "./notebook-audit-payload"
 import { maybePushNotebookAnswer, parseCadernoId } from "../quiz-sync"
 import { splitPublishParts } from "./whatsapp-comment"
 import type { BehavioralAudit } from "../coach-types"
+
+const MISCONCEPTION_PROMPT = `Você nomeia o equívoco de uma questão de concurso em uma frase curta, em português do Brasil.
+Não escreva a explicação completa. Não dê aula. Não repita o enunciado.
+Responda só JSON: {"misconception":"uma frase do equívoco"}
+Se não houver equívoco concreto, misconception deve ser "".`
 
 const QUESTION_AI_TIMEOUT_MS = 50_000
 const LATE_AI_POLL_MS = 3_000
@@ -31,6 +37,7 @@ export type EnqueueQuestionResolveAiInput = {
   notebookId?: string | null
   noteDraft?: string | null
   aiRequested?: boolean
+  explainRequested?: boolean
   selectedAnswer: string
   confidenceLevel?: string | null
   durationMs?: number | null
@@ -243,6 +250,106 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function saveMisconception(attemptId: string, text: string) {
+  const sentence = text.replace(/\s+/g, " ").trim()
+  if (!sentence) return
+  const prev = await readErrorDetail(attemptId)
+  if (String(prev.misconception || "").trim()) return
+  await supabaseServer
+    .from("question_attempts")
+    .update({
+      error_detail: {
+        ...prev,
+        misconception: sentence,
+        specific_mistake: prev.specific_mistake || sentence,
+      },
+    })
+    .eq("id", attemptId)
+}
+
+async function runMisconceptionOnly(input: {
+  userId: string
+  attemptId: string
+  notebookId: string | null
+}) {
+  const payload = await buildAttemptAuditPayload(input.userId, input.attemptId)
+  const question = payload.questions[0]
+  const subjectId = await loadSubjectId(input.notebookId)
+  if (!question || (question.zone !== "red" && question.zone !== "yellow")) {
+    return { usedLlm: false, modelUsed: "rule-based", payload, subjectId }
+  }
+  if (String(question.attempt_feedback || "").trim() || String(question.attempt_misconception || "").trim()) {
+    return { usedLlm: false, modelUsed: "cached", payload, subjectId }
+  }
+  const result = await runAgent({
+    agentType: "question_explain",
+    userId: input.userId,
+    subjectId,
+    systemPrompt: MISCONCEPTION_PROMPT,
+    userContent: JSON.stringify({
+      topic: question.tec_topic,
+      statement: question.statement_excerpt,
+      marked: question.selected_answer,
+      correct: question.correct_answer,
+      note: question.user_note || "",
+    }),
+    jsonMode: true,
+    maxTokens: 180,
+    metadata: { phase: "misconception_only", attempt_id: input.attemptId },
+  })
+  if (result.usedLlm && result.text) {
+    try {
+      const parsed = JSON.parse(result.text) as { misconception?: string }
+      await saveMisconception(input.attemptId, String(parsed.misconception || ""))
+    } catch {
+      /* frase inválida não bloqueia o resto */
+    }
+  }
+  return {
+    usedLlm: result.usedLlm,
+    modelUsed: result.model,
+    payload,
+    subjectId,
+  }
+}
+
+async function runExplainPipeline(input: {
+  userId: string
+  attemptId: string
+  notebookId: string | null
+}) {
+  const payload = await buildAttemptAuditPayload(input.userId, input.attemptId)
+  const subjectId = await loadSubjectId(input.notebookId)
+  const zone = payload.questions[0]?.zone
+  let taxonomyByQuestion = new Map()
+  if (zone === "red" || zone === "yellow") {
+    const classified = await classifyNotebookQuestions(
+      input.userId,
+      payload.notebook_id,
+      subjectId,
+      payload,
+      { skipLlm: false, agentType: "question_explain" }
+    )
+    taxonomyByQuestion = classified.byQuestionId
+  }
+  const auditResult = await runBehavioralAuditAgent({
+    userId: input.userId,
+    subjectId,
+    payload,
+    skipLlm: false,
+    taxonomyByQuestion,
+    ignoreDailyCap: true,
+    agentType: "question_explain",
+  })
+  await persistAuditInsightsToAttempts(auditResult.audit, payload)
+  return {
+    usedLlm: auditResult.usedLlm,
+    modelUsed: auditResult.modelUsed,
+    payload,
+    subjectId,
+  }
+}
+
 async function runNoteReplyPipeline(input: {
   userId: string
   attemptId: string
@@ -265,37 +372,6 @@ async function runNoteReplyPipeline(input: {
     payload,
     subjectId,
   }
-}
-
-async function runAuditExtrasPipeline(input: {
-  userId: string
-  notebookId: string | null
-  payload: Awaited<ReturnType<typeof buildAttemptAuditPayload>>
-  subjectId: string | null
-}) {
-  const zone = input.payload.questions[0]?.zone
-  let taxonomyByQuestion = new Map()
-  if (zone === "red" || zone === "yellow") {
-    const classified = await classifyNotebookQuestions(
-      input.userId,
-      input.payload.notebook_id,
-      input.subjectId,
-      input.payload,
-      { skipLlm: false, agentType: "question_explain" }
-    )
-    taxonomyByQuestion = classified.byQuestionId
-  }
-
-  const auditResult = await runBehavioralAuditAgent({
-    userId: input.userId,
-    subjectId: input.subjectId,
-    payload: input.payload,
-    skipLlm: false,
-    taxonomyByQuestion,
-    ignoreDailyCap: true,
-    agentType: "question_explain",
-  })
-  await persistAuditInsightsToAttempts(auditResult.audit, input.payload)
 }
 
 export async function processQuestionResolveAi(
@@ -336,6 +412,7 @@ export async function processQuestionResolveAi(
     noteEntryIds
   )
   const wantAi = await questionNotesRequestAi(userId, questionId, noteEntryIds)
+  const wantExplain = payload.explain_requested === true
 
   const pushArgs = {
     userId,
@@ -365,22 +442,22 @@ export async function processQuestionResolveAi(
   let usedLlm = false
   let modelUsed = "rule-based"
   let timedOut = false
-  let auditPayload: Awaited<ReturnType<typeof buildAttemptAuditPayload>> | null =
-    null
-  let auditSubjectId: string | null = null
   try {
+    const explain = wantExplain
+      ? await runExplainPipeline({ userId, attemptId, notebookId })
+      : await withTimeout(
+          runMisconceptionOnly({ userId, attemptId, notebookId }),
+          QUESTION_AI_TIMEOUT_MS
+        )
+    usedLlm = explain.usedLlm
+    modelUsed = explain.modelUsed
     if (wantAi) {
       const result = await withTimeout(
         runNoteReplyPipeline({ userId, attemptId, notebookId }),
         QUESTION_AI_TIMEOUT_MS
       )
-      usedLlm = result.usedLlm
-      modelUsed = result.modelUsed
-      auditPayload = result.payload
-      auditSubjectId = result.subjectId
-    } else {
-      auditPayload = await buildAttemptAuditPayload(userId, attemptId)
-      auditSubjectId = await loadSubjectId(notebookId)
+      usedLlm = usedLlm || result.usedLlm
+      if (result.usedLlm) modelUsed = result.modelUsed
     }
   } catch (e) {
     timedOut = e instanceof Error && e.message === "question_ai_timeout"
@@ -412,22 +489,6 @@ export async function processQuestionResolveAi(
       aiUpdate: true,
     })
     await markAiPushed(attemptId)
-  }
-
-  if (auditPayload) {
-    try {
-      await runAuditExtrasPipeline({
-        userId,
-        notebookId,
-        payload: auditPayload,
-        subjectId: auditSubjectId,
-      })
-    } catch (e) {
-      console.warn(
-        "[question-resolve-ai] audit extras:",
-        e instanceof Error ? e.message : e
-      )
-    }
   }
 
   return {
@@ -478,6 +539,7 @@ export async function enqueueQuestionResolveAi(input: EnqueueQuestionResolveAiIn
         short_id: input.shortId ?? null,
         caderno_id: input.cadernoId ?? null,
         wants_discussion: input.wantsDiscussion === true,
+        explain_requested: input.explainRequested === true,
       },
       priority: 20,
     })

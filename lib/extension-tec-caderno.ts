@@ -1,3 +1,5 @@
+import { enqueueQuestionResolveAi } from "./ai/question-resolve-ai"
+import { scheduleQuestionAiKick } from "./ai/jobs/kick"
 import { enqueueNotebookReport } from "./ai/notebook-report"
 import { insertQuestionNote } from "./question-notes"
 import {
@@ -26,6 +28,7 @@ export type TecCadernoSyncInput = {
   confidenceLevel?: string
   noteDraft?: string
   aiRequested?: boolean
+  explainRequested?: boolean
   durationMs?: number | null
 }
 
@@ -239,10 +242,11 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
     isCorrect = normalizeAnswer(question.type, input.selectedAnswer, question.correct_answer)
     const confidence = parseConfidenceLevel(input.confidenceLevel)
     const note = String(input.noteDraft || "").trim()
+    let attemptId = previous?.[0]?.id as string | undefined
     if (previous && previous.length) {
       already = true
     } else {
-      await recordAttempt({
+      const saved = await recordAttempt({
         user_id: input.userId,
         question_id: input.questionId,
         notebook_id: notebook.id,
@@ -255,12 +259,28 @@ export async function syncTecCadernoCopy(input: TecCadernoSyncInput) {
             : null,
         confidence_level: confidence,
       })
+      attemptId = saved.id
       recorded = true
     }
     if (note) {
       await insertQuestionNote(input.userId, input.questionId, note, {
         aiRequested: Boolean(input.aiRequested),
       })
+    }
+    if (attemptId) {
+      await enqueueQuestionResolveAi({
+        userId: input.userId,
+        questionId: input.questionId,
+        attemptId,
+        notebookId: notebook.id,
+        selectedAnswer: input.selectedAnswer,
+        confidenceLevel: confidence,
+        durationMs: input.durationMs,
+        pushWhatsapp: false,
+        explainRequested: input.explainRequested === true,
+        idempotencyKey: `question_ai:${attemptId}`,
+      })
+      scheduleQuestionAiKick(input.userId)
     }
   }
 
