@@ -252,18 +252,25 @@ function sleep(ms: number) {
 
 async function saveMisconception(attemptId: string, text: string) {
   const sentence = text.replace(/\s+/g, " ").trim()
-  if (!sentence) return
   const prev = await readErrorDetail(attemptId)
-  if (String(prev.misconception || "").trim()) return
+  const next: Record<string, unknown> = { ...prev }
+  if (sentence && !String(prev.misconception || "").trim()) {
+    next.misconception = sentence
+    next.specific_mistake = prev.specific_mistake || sentence
+  }
+  if (prev.explain_requested !== true) delete next.feedback_detailed
   await supabaseServer
     .from("question_attempts")
-    .update({
-      error_detail: {
-        ...prev,
-        misconception: sentence,
-        specific_mistake: prev.specific_mistake || sentence,
-      },
-    })
+    .update({ error_detail: next })
+    .eq("id", attemptId)
+}
+
+async function markExplainRequested(attemptId: string) {
+  const prev = await readErrorDetail(attemptId)
+  if (prev.explain_requested === true) return
+  await supabaseServer
+    .from("question_attempts")
+    .update({ error_detail: { ...prev, explain_requested: true } })
     .eq("id", attemptId)
 }
 
@@ -278,7 +285,8 @@ async function runMisconceptionOnly(input: {
   if (!question || (question.zone !== "red" && question.zone !== "yellow")) {
     return { usedLlm: false, modelUsed: "rule-based", payload, subjectId }
   }
-  if (String(question.attempt_feedback || "").trim() || String(question.attempt_misconception || "").trim()) {
+  if (String(question.attempt_misconception || "").trim()) {
+    await saveMisconception(input.attemptId, "")
     return { usedLlm: false, modelUsed: "cached", payload, subjectId }
   }
   const result = await runAgent({
@@ -332,6 +340,7 @@ async function runExplainPipeline(input: {
     )
     taxonomyByQuestion = classified.byQuestionId
   }
+  await markExplainRequested(input.attemptId)
   const auditResult = await runBehavioralAuditAgent({
     userId: input.userId,
     subjectId,

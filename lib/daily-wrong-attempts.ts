@@ -77,6 +77,7 @@ function mapAttemptRow(a: AttemptRow): DailyWrongItem | null {
     content_blocks: null,
     options: [],
     feedback_detailed:
+      a.error_detail?.explain_requested === true &&
       typeof a.error_detail?.feedback_detailed === "string"
         ? a.error_detail.feedback_detailed
         : null,

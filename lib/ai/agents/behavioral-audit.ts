@@ -57,20 +57,21 @@ export async function persistAuditInsightsToAttempts(
       .maybeSingle()
 
     const prev = (existing?.error_detail as Record<string, unknown>) ?? {}
+    const next: Record<string, unknown> = {
+      ...prev,
+      misconception: item.misconception || prev.misconception,
+      specific_mistake: item.misconception ?? prev.specific_mistake,
+    }
+    if (prev.explain_requested === true && item.feedback?.trim()) {
+      next.feedback_detailed = item.feedback
+      next.feedback_source = item.source
+      next.explanation_citations = item.citations
+      next.unified_explain = true
+    }
 
     await supabaseServer
       .from("question_attempts")
-      .update({
-        error_detail: {
-          ...prev,
-          misconception: item.misconception,
-          specific_mistake: item.misconception ?? prev.specific_mistake,
-          feedback_detailed: item.feedback,
-          feedback_source: item.source,
-          explanation_citations: item.citations,
-          unified_explain: true,
-        },
-      })
+      .update({ error_detail: next })
       .eq("id", q.attempt_id)
   }
 }
