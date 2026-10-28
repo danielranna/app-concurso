@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# widget desktop
+/desktop/node_modules
+/desktop/src-tauri/target

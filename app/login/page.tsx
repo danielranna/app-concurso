@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 
+function afterLoginPath(): string {
+  if (typeof window === "undefined") return "/"
+  const next = new URLSearchParams(window.location.search).get("next")
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/"
+  return next
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
@@ -13,10 +20,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    // Verifica se já está logado
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
-        router.push("/")
+        router.push(afterLoginPath())
       }
     })
   }, [router])
@@ -34,7 +40,7 @@ export default function LoginPage() {
     if (error) {
       setMessage(error.message)
     } else {
-      router.push("/")
+      router.push(afterLoginPath())
     }
 
     setLoading(false)

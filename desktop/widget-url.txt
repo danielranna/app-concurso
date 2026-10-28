@@ -1,0 +1,2 @@
+# Origem do app, sem barra no final. A janela abre /widget nessa origem.
+http://127.0.0.1:3000
