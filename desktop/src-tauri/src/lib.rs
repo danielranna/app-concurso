@@ -262,7 +262,7 @@ async fn poll_once(app: &AppHandle, client: &reqwest::Client) {
             && pulse.block_id == block_id
             && pulse.status.as_deref() == Some("next")
             && status.as_deref() == Some("active");
-        if (block_changed || started) {
+        if block_changed || started {
             if let Some(now_block) = now_block {
                 toast(app, "Agenda", &agenda_body(now_block));
             }
@@ -316,9 +316,13 @@ fn set_user(state: State<'_, AppState>, user_id: String) -> Result<(), String> {
             *pulse = Pulse::default();
         }
     }
-    if let Ok(mut persisted) = state.persisted.lock() {
+    let path = state.state_path.clone();
+    let snapshot = state.persisted.lock().ok().map(|mut persisted| {
         persisted.user_id = Some(user_id);
-        write_persisted(&state.state_path, &persisted);
+        persisted.clone()
+    });
+    if let Some(snapshot) = snapshot {
+        write_persisted(&path, &snapshot);
     }
     state.wake.notify_one();
     Ok(())
@@ -348,9 +352,13 @@ fn toggle_always_on_top(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_always_on_top(next);
     }
-    if let Ok(mut persisted) = state.persisted.lock() {
+    let path = state.state_path.clone();
+    let snapshot = state.persisted.lock().ok().map(|mut persisted| {
         persisted.always_on_top = next;
-        write_persisted(&state.state_path, &persisted);
+        persisted.clone()
+    });
+    if let Some(snapshot) = snapshot {
+        write_persisted(&path, &snapshot);
     }
 }
 
@@ -410,9 +418,14 @@ pub fn run() {
 
             if first_run {
                 let _ = app.autolaunch().enable();
-                let state = app.state::<AppState>();
-                if let Ok(persisted) = state.persisted.lock() {
-                    write_persisted(&state_path, &persisted);
+                let snapshot = app
+                    .state::<AppState>()
+                    .persisted
+                    .lock()
+                    .ok()
+                    .map(|persisted| persisted.clone());
+                if let Some(snapshot) = snapshot {
+                    write_persisted(&state_path, &snapshot);
                 }
             }
 

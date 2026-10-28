@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-set-user"
+description = "Grava o usuário logado para o widget consultar a API."
+commands.allow = ["set_user"]
+
+[[permission]]
+identifier = "allow-show-widget"
+description = "Mostra a janela do widget."
+commands.allow = ["show_widget"]
+
+[[permission]]
+identifier = "allow-open-external"
+description = "Abre o TEC ou o app no navegador."
+commands.allow = ["open_external"]
