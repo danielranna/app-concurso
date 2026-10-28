@@ -12,3 +12,13 @@ commands.allow = ["show_widget"]
 identifier = "allow-open-external"
 description = "Abre o TEC ou o app no navegador."
 commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-screen-position"
+description = "Lê a posição da janela na tela para arrastar o widget."
+commands.allow = ["screen_position"]
+
+[[permission]]
+identifier = "allow-set-screen-position"
+description = "Move o widget pela área de trabalho."
+commands.allow = ["set_screen_position"]

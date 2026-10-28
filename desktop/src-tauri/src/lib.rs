@@ -14,6 +14,9 @@ use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Notify;
 use url::Url;
 
+#[cfg(windows)]
+mod desktop_layer;
+
 const DEFAULT_ORIGIN: &str = "http://127.0.0.1:3000";
 const POLL_SECS: u64 = 60;
 
@@ -156,10 +159,40 @@ fn write_persisted(path: &Path, value: &Persisted) {
     }
 }
 
+fn wants_desktop(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .persisted
+        .lock()
+        .ok()
+        .map(|persisted| !persisted.always_on_top)
+        .unwrap_or(true)
+}
+
+fn sync_desktop_layer(window: &tauri::WebviewWindow, on_desktop: bool) {
+    #[cfg(windows)]
+    {
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        if on_desktop {
+            let _ = desktop_layer::attach(hwnd);
+        } else {
+            desktop_layer::detach(hwnd);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, on_desktop);
+    }
+}
+
 fn reveal(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
+        if wants_desktop(app) {
+            sync_desktop_layer(&window, true);
+        }
         let _ = window.set_focus();
     }
 }
@@ -334,6 +367,44 @@ fn show_widget(app: AppHandle) {
 }
 
 #[tauri::command]
+fn screen_position(app: AppHandle) -> Result<(i32, i32), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("janela principal ausente")?;
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().map_err(|err| err.to_string())?;
+        return desktop_layer::screen_origin(hwnd).ok_or_else(|| "posição indisponível".into());
+    }
+    #[cfg(not(windows))]
+    {
+        window
+            .outer_position()
+            .map(|position| (position.x, position.y))
+            .map_err(|err| err.to_string())
+    }
+}
+
+#[tauri::command]
+fn set_screen_position(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("janela principal ausente")?;
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().map_err(|err| err.to_string())?;
+        desktop_layer::move_to_screen(hwnd, x, y);
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        window
+            .set_position(tauri::PhysicalPosition::new(x, y))
+            .map_err(|err| err.to_string())
+    }
+}
+
+#[tauri::command]
 fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     let origin = app.state::<AppState>().origin.clone();
     if !allowed_url(&url, &origin) {
@@ -350,7 +421,13 @@ fn toggle_always_on_top(app: &AppHandle) {
     let next = !items.always_on_top.is_checked().unwrap_or(false);
     let _ = items.always_on_top.set_checked(next);
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_always_on_top(next);
+        if next {
+            sync_desktop_layer(&window, false);
+            let _ = window.set_always_on_top(true);
+        } else {
+            let _ = window.set_always_on_top(false);
+            sync_desktop_layer(&window, true);
+        }
     }
     let path = state.state_path.clone();
     let snapshot = state.persisted.lock().ok().map(|mut persisted| {
@@ -387,7 +464,13 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .invoke_handler(tauri::generate_handler![set_user, show_widget, open_external])
+        .invoke_handler(tauri::generate_handler![
+            set_user,
+            show_widget,
+            open_external,
+            screen_position,
+            set_screen_position
+        ])
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;
             let _ = fs::create_dir_all(&app_data);
@@ -482,13 +565,19 @@ pub fn run() {
             let window = app.get_webview_window("main").ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::Other, "janela principal ausente")
             })?;
+            let saved_position = app
+                .state::<AppState>()
+                .persisted
+                .lock()
+                .ok()
+                .and_then(|persisted| Some((persisted.x?, persisted.y?)));
+            if let Some((x, y)) = saved_position {
+                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+            }
             if always_on_top {
                 let _ = window.set_always_on_top(true);
-            }
-            if let Ok(persisted) = app.state::<AppState>().persisted.lock() {
-                if let (Some(x), Some(y)) = (persisted.x, persisted.y) {
-                    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-                }
+            } else {
+                sync_desktop_layer(&window, true);
             }
 
             let page = format!("{origin}/widget");
@@ -502,11 +591,37 @@ pub fn run() {
                     let _ = hide_window.hide();
                 }
                 WindowEvent::Moved(position) => {
+                    let _ = position;
                     let path = move_app.state::<AppState>().state_path.clone();
-                    if let Ok(mut persisted) = move_app.state::<AppState>().persisted.lock() {
-                        persisted.x = Some(position.x);
-                        persisted.y = Some(position.y);
-                        write_persisted(&path, &persisted);
+                    let point = {
+                        #[cfg(windows)]
+                        {
+                            hide_window
+                                .hwnd()
+                                .ok()
+                                .and_then(desktop_layer::screen_origin)
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            let _ = &hide_window;
+                            Some((position.x, position.y))
+                        }
+                    };
+                    let Some((x, y)) = point else {
+                        return;
+                    };
+                    let snapshot = move_app
+                        .state::<AppState>()
+                        .persisted
+                        .lock()
+                        .ok()
+                        .map(|mut persisted| {
+                            persisted.x = Some(x);
+                            persisted.y = Some(y);
+                            persisted.clone()
+                        });
+                    if let Some(snapshot) = snapshot {
+                        write_persisted(&path, &snapshot);
                     }
                 }
                 _ => {}
@@ -520,6 +635,26 @@ pub fn run() {
                 let app_for_thread = click_app.clone();
                 let _ = click_app.run_on_main_thread(move || reveal(&app_for_thread));
             })?;
+
+            let watch = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                let watch = watch.clone();
+                let posted = watch.clone();
+                if posted
+                    .run_on_main_thread(move || {
+                        if !wants_desktop(&watch) {
+                            return;
+                        }
+                        if let Some(window) = watch.get_webview_window("main") {
+                            sync_desktop_layer(&window, true);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            });
 
             spawn_poll(app.handle().clone());
             Ok(())

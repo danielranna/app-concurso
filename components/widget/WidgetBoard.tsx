@@ -15,7 +15,7 @@ import {
 import { Check, Loader2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { toDateInputValue } from "@/lib/home-date"
-import { openWidgetLink } from "@/lib/widget-bridge"
+import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink } from "@/lib/widget-bridge"
 import {
   WIDGET_PERIOD_LABELS,
   WIDGET_PERIODS,
@@ -120,15 +120,26 @@ export default function WidgetBoard({ userId }: Props) {
   return (
     <main className="flex h-screen flex-col gap-3 overflow-hidden bg-slate-100 p-3 text-slate-900">
       <header
-        data-tauri-drag-region
-        className="flex shrink-0 cursor-grab items-baseline justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 active:cursor-grabbing"
+        className="flex shrink-0 cursor-grab select-none items-baseline justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 touch-none active:cursor-grabbing"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          event.preventDefault()
+          event.currentTarget.setPointerCapture(event.pointerId)
+          beginWidgetDrag(event.screenX, event.screenY)
+        }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+          moveWidgetDrag(event.screenX, event.screenY)
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          endWidgetDrag()
+        }}
       >
-        <p data-tauri-drag-region className="text-lg font-semibold tabular-nums">
-          {agenda?.date_label ?? "—"}
-        </p>
-        <p data-tauri-drag-region className="text-sm text-slate-500">
-          {agenda?.weekday_label ?? ""}
-        </p>
+        <p className="text-lg font-semibold tabular-nums">{agenda?.date_label ?? "—"}</p>
+        <p className="text-sm text-slate-500">{agenda?.weekday_label ?? ""}</p>
       </header>
 
       {error && (

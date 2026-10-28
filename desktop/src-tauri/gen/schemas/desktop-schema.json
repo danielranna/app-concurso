@@ -351,6 +351,18 @@
           "markdownDescription": "Abre o TEC ou o app no navegador."
         },
         {
+          "description": "Lê a posição da janela na tela para arrastar o widget.",
+          "type": "string",
+          "const": "allow-screen-position",
+          "markdownDescription": "Lê a posição da janela na tela para arrastar o widget."
+        },
+        {
+          "description": "Move o widget pela área de trabalho.",
+          "type": "string",
+          "const": "allow-set-screen-position",
+          "markdownDescription": "Move o widget pela área de trabalho."
+        },
+        {
           "description": "Grava o usuário logado para o widget consultar a API.",
           "type": "string",
           "const": "allow-set-user",

@@ -28,6 +28,8 @@
     "autostart:allow-is-enabled",
     "allow-set-user",
     "allow-show-widget",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-screen-position",
+    "allow-set-screen-position"
   ]
 }
