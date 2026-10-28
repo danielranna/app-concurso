@@ -11,6 +11,11 @@ export default function WidgetPage() {
   const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
+    document.documentElement.classList.add("widget-glass")
+    return () => document.documentElement.classList.remove("widget-glass")
+  }, [])
+
+  useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
         router.replace("/login?next=/widget")
@@ -22,7 +27,7 @@ export default function WidgetPage() {
   }, [router])
 
   if (!userId) {
-    return <p className="p-8 text-slate-500">Carregando…</p>
+    return <p className="p-8 text-sm text-slate-600">Carregando…</p>
   }
 
   return <WidgetBoard userId={userId} />

@@ -5,14 +5,15 @@ import type { AgendaDayBlockView } from "./agenda-types"
 import { fetchPanelData } from "./flashcard-panel"
 import { formatStudyDuration } from "./format-study-duration"
 import { formatTimeShort, isoWeekdayFromDate, isoWeekdayLabel, parseDateInput } from "./home-date"
-import { fetchQuestionStatistics, type StatsPeriod } from "./question-statistics"
-import { getTotalStudyMs } from "./study-hours"
+import { fetchQuestionStatistics } from "./question-statistics"
+import { getQuestionStudyMs } from "./study-hours"
 import { getQueueState } from "./study-cycle-queue"
 import { loadCycleWithQueue, realignQueuePositionsDb } from "./study-cycle-queue-db"
 import {
   WIDGET_TEC_URL,
   type WidgetCycle,
   type WidgetNow,
+  type WidgetPeriod,
   type WidgetSummary,
 } from "./widget-types"
 
@@ -81,12 +82,13 @@ async function loadCycle(userId: string): Promise<WidgetCycle | null> {
 
 export async function buildWidgetSummary(input: {
   userId: string
-  period: StatsPeriod
+  period: WidgetPeriod
+  since: string | null
   today: string
   clock: Date
   appOrigin: string
 }): Promise<WidgetSummary> {
-  const { userId, period, today, clock, appOrigin } = input
+  const { userId, period, since, today, clock, appOrigin } = input
   const weekday = isoWeekdayLabel(isoWeekdayFromDate(parseDateInput(today)))
 
   const [dayPlan, range, panel, cycle, stats, studyMs] = await Promise.all([
@@ -94,8 +96,8 @@ export async function buildWidgetSummary(input: {
     getAgendaRange(userId, today, today, today),
     fetchPanelData(userId, { filter: "due_today" }),
     loadCycle(userId),
-    fetchQuestionStatistics(userId, { period }),
-    getTotalStudyMs(userId),
+    fetchQuestionStatistics(userId, { since }),
+    getQuestionStudyMs(userId, since),
   ])
 
   const origin = appOrigin.replace(/\/$/, "")

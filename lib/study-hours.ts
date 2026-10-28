@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { fetchAllPages } from "./supabase-pages"
 
 export { formatStudyDuration } from "./format-study-duration"
 
@@ -20,4 +21,21 @@ export async function getTotalStudyMs(userId: string): Promise<number> {
     total += Number(row.study_elapsed_ms ?? 0)
   }
   return total
+}
+
+/** Soma duration_ms das questões respondidas desde `since`. Sem data, soma todas. */
+export async function getQuestionStudyMs(userId: string, since: string | null): Promise<number> {
+  const rows = await fetchAllPages<{ duration_ms: number | null }>((from, to) => {
+    let query = supabaseServer
+      .from("question_attempts")
+      .select("id, duration_ms")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+    if (since) query = query.gte("created_at", since)
+    return query
+  })
+
+  return rows.reduce((sum, row) => sum + Math.max(0, Number(row.duration_ms ?? 0)), 0)
 }

@@ -12,7 +12,7 @@ import {
   Radar,
   Tooltip,
 } from "recharts"
-import { Check, Loader2 } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { toDateInputValue } from "@/lib/home-date"
 import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink } from "@/lib/widget-bridge"
@@ -25,6 +25,18 @@ import {
 
 type Props = {
   userId: string
+}
+
+function periodSince(period: WidgetPeriod): string | null {
+  if (period === "all") return null
+  const start = new Date()
+  if (period === "hoje") {
+    start.setHours(0, 0, 0, 0)
+  } else {
+    const days = period === "7d" ? 7 : period === "30d" ? 30 : 90
+    start.setDate(start.getDate() - days)
+  }
+  return start.toISOString()
 }
 
 function localClock(): { today: string; now: string } {
@@ -48,6 +60,8 @@ export default function WidgetBoard({ userId }: Props) {
         today: clock.today,
         now: clock.now,
       })
+      const since = periodSince(nextPeriod)
+      if (since) params.set("since", since)
       const res = await fetch(`/api/widget/summary?${params}`)
       const body = await res.json()
       if (!res.ok) {
@@ -94,6 +108,23 @@ export default function WidgetBoard({ userId }: Props) {
     ]
   }, [data])
 
+  const upcomingKey = (data?.agenda.upcoming ?? []).map((event) => event.id).join("|")
+  const upcomingCount = data?.agenda.upcoming.length ?? 0
+  const [eventIndex, setEventIndex] = useState(0)
+  const [carouselEpoch, setCarouselEpoch] = useState(0)
+
+  useEffect(() => {
+    setEventIndex(0)
+  }, [upcomingKey])
+
+  useEffect(() => {
+    if (upcomingCount < 2) return
+    const id = window.setInterval(() => {
+      setEventIndex((current) => (current + 1) % upcomingCount)
+    }, 5000)
+    return () => window.clearInterval(id)
+  }, [upcomingCount, carouselEpoch, upcomingKey])
+
   const radarData = useMemo(
     () =>
       (data?.stats.by_subject ?? []).map((row) => ({
@@ -106,8 +137,8 @@ export default function WidgetBoard({ userId }: Props) {
 
   if (initialLoading && !data) {
     return (
-      <div className="flex h-screen items-center justify-center gap-2 bg-slate-100 text-slate-500">
-        <Loader2 className="h-5 w-5 animate-spin" />
+      <div className="flex h-screen items-center justify-center gap-2 text-slate-600">
+        <Loader2 className="h-4 w-4 animate-spin" />
         Carregando…
       </div>
     )
@@ -118,9 +149,12 @@ export default function WidgetBoard({ userId }: Props) {
   const stats = data?.stats
 
   return (
-    <main className="flex h-screen flex-col gap-3 overflow-hidden bg-slate-100 p-3 text-slate-900">
+    <main
+      className="flex h-screen flex-col gap-2 overflow-y-auto rounded-2xl border border-white/70 p-2.5 text-slate-900 shadow-xl backdrop-blur-2xl"
+      style={{ backgroundColor: "rgba(255,255,255,0.68)" }}
+    >
       <header
-        className="flex shrink-0 cursor-grab select-none items-baseline justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 touch-none active:cursor-grabbing"
+        className="flex shrink-0 cursor-grab select-none items-baseline justify-between touch-none active:cursor-grabbing"
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.preventDefault()
@@ -138,104 +172,105 @@ export default function WidgetBoard({ userId }: Props) {
           endWidgetDrag()
         }}
       >
-        <p className="text-lg font-semibold tabular-nums">{agenda?.date_label ?? "—"}</p>
-        <p className="text-sm text-slate-500">{agenda?.weekday_label ?? ""}</p>
+        <p className="text-sm font-semibold tabular-nums">{agenda?.date_label ?? "—"}</p>
+        <p className="text-xs text-slate-500">{agenda?.weekday_label ?? ""}</p>
       </header>
 
       {error && (
-        <p className="shrink-0 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        <p className="shrink-0 rounded-lg bg-red-50/90 px-2.5 py-1.5 text-xs text-red-700">{error}</p>
       )}
 
-      <section className="grid min-h-0 shrink-0 grid-cols-[1.3fr_0.9fr] gap-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Agora</p>
-          {agenda?.now ? (
-            <div className="mt-2">
-              {agenda.now.status === "next" && (
-                <p className="text-xs font-medium text-teal-700">A seguir</p>
-              )}
-              <p className="text-lg font-semibold leading-snug">{agenda.now.title}</p>
-              <p className="mt-1 text-sm tabular-nums text-slate-500">
-                {agenda.now.start_time} – {agenda.now.end_time}
-              </p>
-              {agenda.now.plan_text && (
-                <p className="mt-2 line-clamp-3 text-sm text-slate-600">{agenda.now.plan_text}</p>
-              )}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">Nada na agenda agora.</p>
-          )}
-        </div>
-
-        <div className="flex max-h-40 flex-col rounded-xl border border-slate-200 bg-white p-4">
-          <p className="shrink-0 text-xs font-medium uppercase tracking-wide text-slate-400">
-            Próximos eventos
-          </p>
-          {agenda && agenda.upcoming.length > 0 ? (
-            <ol className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
-              {agenda.upcoming.map((event, index) => (
-                <li key={event.id} className="flex items-start gap-2 text-sm">
-                  <span className="w-4 shrink-0 tabular-nums text-slate-400">{index + 1}.</span>
-                  <span
-                    className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: event.color }}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{event.title}</span>
-                    <span className="text-xs text-slate-500">
-                      {event.date_label}
-                      {event.start_time ? ` · ${event.start_time}` : ""}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">Nenhum evento a partir de hoje.</p>
-          )}
-        </div>
+      <section className="rounded-xl border border-white/90 bg-white/85 p-2.5 shadow-sm">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Agora</p>
+        {agenda?.now ? (
+          <div className="mt-1">
+            {agenda.now.status === "next" && (
+              <p className="text-[11px] font-medium text-teal-700">A seguir</p>
+            )}
+            <p className="text-sm font-semibold leading-snug">{agenda.now.title}</p>
+            <p className="text-xs tabular-nums text-slate-500">
+              {agenda.now.start_time} – {agenda.now.end_time}
+            </p>
+            {agenda.now.plan_text && (
+              <p className="mt-1 line-clamp-2 text-xs text-slate-600">{agenda.now.plan_text}</p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">Nada na agenda agora.</p>
+        )}
       </section>
 
-      <section className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="w-28">
-          <p className="text-3xl font-bold tabular-nums leading-none">
-            {study?.flashcards_due ?? 0}
-          </p>
-          <p className="mt-1 text-xs leading-snug text-slate-500">flashcards pendentes</p>
-        </div>
-
-        <div className="min-w-0 border-l border-slate-100 pl-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Fila de estudo
-          </p>
-          {study?.cycle ? (
-            <div className="mt-1">
-              <p className="truncate text-sm font-semibold">
-                {study.cycle.subject ?? (study.cycle.total > 0 && study.cycle.completed === study.cycle.total
-                  ? "Ciclo concluído"
-                  : "Matéria")}
-              </p>
-              {study.cycle.detail && (
-                <p className="truncate text-xs text-slate-500">{study.cycle.detail}</p>
-              )}
-              <div className="mt-2 flex items-center gap-2">
-                <Progress value={study.cycle.progress_pct} className="flex-1" />
-                <span className="shrink-0 text-xs tabular-nums text-slate-500">
-                  {study.cycle.completed} de {study.cycle.total}
-                </span>
+      <section className="rounded-xl border border-white/90 bg-white/85 p-2.5 shadow-sm">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+          Próximos eventos
+        </p>
+        {agenda && agenda.upcoming.length > 0 ? (
+          <div className="mt-1.5 flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Evento anterior"
+              disabled={agenda.upcoming.length < 2}
+              onClick={() => {
+                const total = agenda.upcoming.length
+                setCarouselEpoch((value) => value + 1)
+                setEventIndex((current) => (current - 1 + total) % total)
+              }}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div
+                className="flex transition-transform duration-500 ease-out"
+                style={{ transform: `translateX(-${(eventIndex % agenda.upcoming.length) * 100}%)` }}
+              >
+                {agenda.upcoming.map((event) => (
+                  <div key={event.id} className="w-full shrink-0">
+                    <p className="flex items-center gap-1.5 truncate text-xs font-medium">
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: event.color }}
+                      />
+                      {event.title}
+                    </p>
+                    <p className="mt-0.5 pl-3 text-[11px] text-slate-500">
+                      {event.date_label}
+                      {event.start_time ? ` · ${event.start_time}` : ""}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
-          ) : (
-            <p className="mt-2 text-sm text-slate-500">Nenhum ciclo ativo.</p>
-          )}
-        </div>
+            <button
+              type="button"
+              aria-label="Próximo evento"
+              disabled={agenda.upcoming.length < 2}
+              onClick={() => {
+                const total = agenda.upcoming.length
+                setCarouselEpoch((value) => value + 1)
+                setEventIndex((current) => (current + 1) % total)
+              }}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white disabled:opacity-30"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">Nenhum evento a partir de hoje.</p>
+        )}
+      </section>
 
-        <div className="flex gap-2">
+      <section className="rounded-xl border border-white/90 bg-white/85 p-2.5 shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-2xl font-bold tabular-nums leading-none">{study?.flashcards_due ?? 0}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">flashcards pendentes</p>
+          </div>
           <button
             type="button"
             title="Abrir TEC"
             onClick={() => void openWidgetLink(data?.links.tec ?? "https://www.tecconcursos.com.br")}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/90 bg-white/70 text-xs font-semibold text-slate-700 hover:bg-white"
           >
             T
           </button>
@@ -243,24 +278,48 @@ export default function WidgetBoard({ userId }: Props) {
             type="button"
             title="Abrir o app"
             onClick={() => void openWidgetLink(`${window.location.origin}/`)}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/90 bg-white/70 text-slate-700 hover:bg-white"
           >
-            <Check className="h-5 w-5" />
+            <Check className="h-4 w-4" />
           </button>
+        </div>
+        <div className="mt-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Fila de estudo</p>
+          {study?.cycle ? (
+            <div className="mt-1">
+              <p className="truncate text-xs font-semibold">
+                {study.cycle.subject ??
+                  (study.cycle.total > 0 && study.cycle.completed === study.cycle.total
+                    ? "Ciclo concluído"
+                    : "Matéria")}
+              </p>
+              {study.cycle.detail && (
+                <p className="truncate text-[11px] text-slate-500">{study.cycle.detail}</p>
+              )}
+              <div className="mt-1.5 flex items-center gap-2">
+                <Progress value={study.cycle.progress_pct} className="flex-1" />
+                <span className="shrink-0 text-[11px] tabular-nums text-slate-500">
+                  {study.cycle.completed} de {study.cycle.total}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-slate-500">Nenhum ciclo ativo.</p>
+          )}
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex shrink-0 gap-1">
+      <section className="rounded-xl border border-white/90 bg-white/85 p-2.5 shadow-sm">
+        <div className="flex gap-1">
           {WIDGET_PERIODS.map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setPeriod(item)}
-              className={`rounded-lg px-3 py-1.5 text-sm ${
+              className={`flex-1 rounded-md px-0.5 py-1 text-[10px] ${
                 period === item
                   ? "bg-slate-900 font-medium text-white"
-                  : "text-slate-600 hover:bg-slate-100"
+                  : "text-slate-600 hover:bg-white/70"
               }`}
             >
               {WIDGET_PERIOD_LABELS[item]}
@@ -269,47 +328,48 @@ export default function WidgetBoard({ userId }: Props) {
         </div>
 
         {stats && stats.summary.total_attempts > 0 ? (
-          <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 min-[800px]:grid-cols-[minmax(0,1fr)_168px_minmax(0,1.15fr)]">
-            <div className="grid grid-cols-2 content-start gap-3">
+          <div className="mt-2">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
               <div>
-                <p className="text-xs text-slate-500">Questões resolvidas</p>
-                <p className="text-2xl font-bold tabular-nums">{stats.summary.total_attempts}</p>
+                <p className="text-[11px] text-slate-500">Questões</p>
+                <p className="text-lg font-bold tabular-nums leading-none">{stats.summary.total_attempts}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Total de matérias</p>
-                <p className="text-2xl font-bold tabular-nums">{stats.summary.subject_count}</p>
+                <p className="text-[11px] text-slate-500">Matérias</p>
+                <p className="text-lg font-bold tabular-nums leading-none">{stats.summary.subject_count}</p>
               </div>
               <div>
-                <p className="text-xs text-green-700">Acertos</p>
-                <p className="text-2xl font-bold tabular-nums text-green-600">{stats.summary.correct}</p>
-              </div>
-              <div>
-                <p className="text-xs text-red-600">Erros</p>
-                <p className="text-2xl font-bold tabular-nums text-red-600">{stats.summary.wrong}</p>
-              </div>
-              <div className="col-span-2 border-t border-slate-100 pt-2">
-                <p className="text-xs text-slate-500">Horas estudadas</p>
-                <p className="text-xl font-bold tabular-nums text-indigo-700">
-                  {stats.study_hours_label}
+                <p className="text-[11px] text-green-700">Acertos</p>
+                <p className="text-lg font-bold tabular-nums leading-none text-green-600">
+                  {stats.summary.correct}
                 </p>
-                <p className="text-xs text-slate-400">
-                  Total dos cronômetros de cadernos e sessões
+              </div>
+              <div>
+                <p className="text-[11px] text-red-600">Erros</p>
+                <p className="text-lg font-bold tabular-nums leading-none text-red-600">
+                  {stats.summary.wrong}
                 </p>
               </div>
             </div>
-
-            <div className="flex flex-col items-center justify-center">
-              <p className="mb-1 text-xs font-medium text-slate-600">Taxa de acerto</p>
-              <div className="relative h-36 w-36">
+            <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-200/80 pt-2">
+              <div>
+                <p className="text-[11px] text-slate-500">Horas estudadas</p>
+                <p className="text-base font-bold tabular-nums text-indigo-700">{stats.study_hours_label}</p>
+                <p className="text-[10px] leading-snug text-slate-400">
+                  Tempo nas questões deste período
+                </p>
+              </div>
+              <div className="relative h-16 w-16 shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={pieData}
                       dataKey="value"
-                      innerRadius={44}
-                      outerRadius={60}
+                      innerRadius={20}
+                      outerRadius={28}
                       startAngle={90}
                       endAngle={-270}
+                      stroke="none"
                     >
                       {pieData.map((entry, index) => (
                         <Cell key={index} fill={entry.color} />
@@ -318,25 +378,18 @@ export default function WidgetBoard({ userId }: Props) {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <span className="text-lg font-bold">{stats.summary.correct_pct}%</span>
+                  <span className="text-[10px] font-bold">{stats.summary.correct_pct}%</span>
                 </div>
               </div>
             </div>
-
-            <div className="min-h-[160px] min-w-0">
-              <p className="mb-1 text-xs font-medium text-slate-600">Por matéria (% acerto)</p>
+            <div className="mt-1">
+              <p className="text-[11px] font-medium text-slate-500">Por matéria</p>
               {radarData.length >= 3 ? (
-                <ResponsiveContainer width="100%" height={180}>
-                  <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="68%">
+                <ResponsiveContainer width="100%" height={128}>
+                  <RadarChart data={radarData} cx="50%" cy="52%" outerRadius="62%">
                     <PolarGrid />
-                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10 }} />
-                    <Radar
-                      name="Acerto"
-                      dataKey="pct"
-                      stroke="#3b82f6"
-                      fill="#3b82f6"
-                      fillOpacity={0.35}
-                    />
+                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9 }} />
+                    <Radar name="Acerto" dataKey="pct" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.35} />
                     <Tooltip
                       formatter={(value) => [`${value ?? 0}%`, "Acerto"]}
                       labelFormatter={(_, payload) =>
@@ -346,21 +399,19 @@ export default function WidgetBoard({ userId }: Props) {
                   </RadarChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="py-8 text-center text-sm text-slate-400">
+                <p className="py-3 text-center text-[11px] text-slate-400">
                   Resolva questões em pelo menos 3 matérias para ver o radar.
                 </p>
               )}
             </div>
           </div>
         ) : (
-          <div className="py-8 text-center">
-            <p className="text-sm text-slate-500">Nenhuma questão respondida neste período.</p>
+          <div className="py-4 text-center">
+            <p className="text-xs text-slate-500">Nenhuma questão respondida neste período.</p>
             {stats && (
-              <p className="mt-3 text-sm text-slate-600">
-                Horas estudadas{" "}
-                <span className="font-semibold tabular-nums text-indigo-700">
-                  {stats.study_hours_label}
-                </span>
+              <p className="mt-2 text-xs text-slate-600">
+                Horas neste período{" "}
+                <span className="font-semibold tabular-nums text-indigo-700">{stats.study_hours_label}</span>
               </p>
             )}
           </div>

@@ -35,6 +35,27 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "period inválido" }, { status: 400 })
   }
 
+  let since: string | null = null
+  if (periodParam !== "all") {
+    const sinceParam = url.searchParams.get("since")
+    if (sinceParam) {
+      const parsed = Date.parse(sinceParam)
+      if (Number.isNaN(parsed)) {
+        return NextResponse.json({ error: "since inválido" }, { status: 400 })
+      }
+      since = new Date(parsed).toISOString()
+    } else if (periodParam === "hoje") {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      since = start.toISOString()
+    } else {
+      const days = periodParam === "7d" ? 7 : periodParam === "30d" ? 30 : 90
+      const start = new Date()
+      start.setDate(start.getDate() - days)
+      since = start.toISOString()
+    }
+  }
+
   const todayParam = url.searchParams.get("today")
   const nowParam = url.searchParams.get("now")
   if (Boolean(todayParam) !== Boolean(nowParam)) {
@@ -62,6 +83,7 @@ export async function GET(req: Request) {
     const summary = await buildWidgetSummary({
       userId,
       period: periodParam,
+      since,
       today,
       clock: clockFrom(now),
       appOrigin: url.origin,

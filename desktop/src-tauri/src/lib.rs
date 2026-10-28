@@ -38,12 +38,18 @@ impl Default for Pulse {
     }
 }
 
+const RAIL_LAYOUT: u8 = 2;
+const RAIL_WIDTH: f64 = 380.0;
+const RAIL_HEIGHT: f64 = 700.0;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Persisted {
     user_id: Option<String>,
     x: Option<i32>,
     y: Option<i32>,
     always_on_top: bool,
+    #[serde(default)]
+    layout: u8,
 }
 
 impl Default for Persisted {
@@ -53,6 +59,7 @@ impl Default for Persisted {
             x: None,
             y: None,
             always_on_top: false,
+            layout: 0,
         }
     }
 }
@@ -183,6 +190,60 @@ fn sync_desktop_layer(window: &tauri::WebviewWindow, on_desktop: bool) {
     #[cfg(not(windows))]
     {
         let _ = (window, on_desktop);
+    }
+}
+
+fn dock_top_right(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
+    let monitor = window.primary_monitor().ok().flatten()?;
+    let work = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let margin = (16.0 * scale).round() as i32;
+    let width = (RAIL_WIDTH * scale).round() as i32;
+    let x = work.position.x + work.size.width as i32 - width - margin;
+    let y = work.position.y + margin;
+    Some((x, y))
+}
+
+fn place_rail(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let layout = app
+        .state::<AppState>()
+        .persisted
+        .lock()
+        .ok()
+        .map(|persisted| persisted.layout)
+        .unwrap_or(0);
+    if layout == RAIL_LAYOUT {
+        let saved = app
+            .state::<AppState>()
+            .persisted
+            .lock()
+            .ok()
+            .and_then(|persisted| Some((persisted.x?, persisted.y?)));
+        if let Some((x, y)) = saved {
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+        return;
+    }
+
+    let _ = window.set_size(tauri::LogicalSize::new(RAIL_WIDTH, RAIL_HEIGHT));
+    let Some((x, y)) = dock_top_right(window) else {
+        return;
+    };
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let path = app.state::<AppState>().state_path.clone();
+    let snapshot = app
+        .state::<AppState>()
+        .persisted
+        .lock()
+        .ok()
+        .map(|mut persisted| {
+            persisted.x = Some(x);
+            persisted.y = Some(y);
+            persisted.layout = RAIL_LAYOUT;
+            persisted.clone()
+        });
+    if let Some(snapshot) = snapshot {
+        write_persisted(&path, &snapshot);
     }
 }
 
@@ -565,15 +626,7 @@ pub fn run() {
             let window = app.get_webview_window("main").ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::Other, "janela principal ausente")
             })?;
-            let saved_position = app
-                .state::<AppState>()
-                .persisted
-                .lock()
-                .ok()
-                .and_then(|persisted| Some((persisted.x?, persisted.y?)));
-            if let Some((x, y)) = saved_position {
-                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-            }
+            place_rail(app.handle(), &window);
             if always_on_top {
                 let _ = window.set_always_on_top(true);
             } else {

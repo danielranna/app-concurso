@@ -16,17 +16,19 @@
       {
         "label": "main",
         "title": "Via Aprovação",
-        "width": 920,
-        "height": 740,
-        "minWidth": 760,
-        "minHeight": 640,
+        "width": 380,
+        "height": 700,
+        "minWidth": 320,
+        "minHeight": 520,
         "resizable": true,
         "decorations": false,
+        "transparent": true,
+        "shadow": false,
         "skipTaskbar": true,
         "alwaysOnTop": false,
         "visible": true,
-        "center": true,
-        "backgroundColor": "#f1f5f9"
+        "center": false,
+        "backgroundColor": "#00000000"
       }
     ]
   },

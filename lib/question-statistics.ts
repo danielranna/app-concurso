@@ -138,7 +138,7 @@ function buildSubjectRow(
 
 export async function fetchQuestionStatistics(
   userId: string,
-  opts: { period?: StatsPeriod; subjectIds?: string[] } = {}
+  opts: { period?: StatsPeriod; since?: string | null; subjectIds?: string[] } = {}
 ): Promise<QuestionStatisticsResult> {
   const period = opts.period ?? "all"
   const filterSubjectIds =
@@ -146,7 +146,7 @@ export async function fetchQuestionStatistics(
       ? new Set(opts.subjectIds)
       : null
 
-  const since = periodStart(period)
+  const since = opts.since !== undefined ? opts.since : periodStart(period)
 
   const [{ data: subjects }, mappings] = await Promise.all([
     supabaseServer.from("subjects").select("id, name").eq("user_id", userId).order("name"),

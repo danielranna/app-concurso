@@ -1,15 +1,14 @@
-import type { StatsPeriod } from "./question-statistics"
-
 export const WIDGET_TEC_URL = "https://www.tecconcursos.com.br"
 
-export const WIDGET_PERIODS = ["7d", "30d", "90d", "all"] as const
+export const WIDGET_PERIODS = ["hoje", "7d", "30d", "90d", "all"] as const
 
 export type WidgetPeriod = (typeof WIDGET_PERIODS)[number]
 
 export const WIDGET_PERIOD_LABELS: Record<WidgetPeriod, string> = {
-  "7d": "7 dias",
-  "30d": "30 dias",
-  "90d": "90 dias",
+  hoje: "Hoje",
+  "7d": "7d",
+  "30d": "30d",
+  "90d": "90d",
   all: "Tudo",
 }
 
@@ -51,7 +50,7 @@ export type WidgetSubjectStat = {
 }
 
 export type WidgetSummary = {
-  period: StatsPeriod
+  period: WidgetPeriod
   agenda: {
     date: string
     date_label: string
