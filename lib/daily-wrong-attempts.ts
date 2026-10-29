@@ -2,7 +2,7 @@ import "server-only"
 
 import { supabaseServer } from "./supabase-server"
 import type { DailyWrongItem, DailyWrongOption } from "./daily-wrong-attempts-types"
-import { loadNoteEntriesByQuestion } from "./question-notes"
+import { loadNoteEntriesByQuestion, toPublicNoteEntry } from "./question-notes"
 import {
   dayBounds,
   dedupeDailyWrongAttempts,
@@ -212,11 +212,14 @@ export async function listDailyWrongAttempts(
           : raw
       item.notes = (notesByQuestion.get(item.question_id) ?? [])
         .filter((e) => e.body.trim())
-        .map((e) => ({
-          body: e.body,
-          ai_feedback: e.ai_feedback,
-          ai_pending: e.ai_pending,
-        }))
+        .map((e) => {
+          const note = toPublicNoteEntry(e)
+          return {
+            body: note.body,
+            ai_feedback: note.ai_feedback,
+            ai_pending: note.ai_pending,
+          }
+        })
     }
   }
 
