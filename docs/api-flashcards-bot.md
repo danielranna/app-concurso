@@ -76,6 +76,12 @@ async function morningReminder() {
     headers: { Authorization: `Bearer ${KEY}` },
   }).then((r) => r.json())
 
+  if (!pending.should_remind && !pending.events_message) return
+
+  if (pending.events_message) {
+    await sendWhatsApp(pending.events_message)
+  }
+
   if (!pending.should_remind) return
 
   // Enviar WhatsApp com pending.message_template
@@ -159,7 +165,7 @@ await fetch(`${BASE}/api/flashcards/bot/dispatch/${dispatchId}/answer`, {
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| GET | `/api/flashcards/bot/pending` | Cards pendentes + `message_template` |
+| GET | `/api/flashcards/bot/pending` | Cards pendentes + `message_template`. Se houver evento no dia, também `events_message` (mensagem separada, só no job da manhã) |
 | POST | `/api/flashcards/bot/sessions` | Cria sessão `pending_confirm` |
 | GET | `/api/flashcards/bot/sessions/active` | Sessão ativa (recuperar após restart) |
 | POST | `/api/flashcards/bot/sessions/:id/confirm` | Usuário disse SIM → agenda dispatch |

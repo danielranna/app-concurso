@@ -12,7 +12,20 @@ export default function WidgetPage() {
 
   useEffect(() => {
     document.documentElement.classList.add("widget-glass")
-    return () => document.documentElement.classList.remove("widget-glass")
+    const hideNextMark = () => {
+      document.querySelectorAll("nextjs-portal").forEach((node) => {
+        if (node instanceof HTMLElement) {
+          node.style.setProperty("display", "none", "important")
+        }
+      })
+    }
+    hideNextMark()
+    const observer = new MutationObserver(hideNextMark)
+    observer.observe(document.documentElement, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      document.documentElement.classList.remove("widget-glass")
+    }
   }, [])
 
   useEffect(() => {

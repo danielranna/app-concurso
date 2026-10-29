@@ -57,6 +57,7 @@ export type WidgetSummary = {
     weekday_label: string
     now: WidgetNow | null
     upcoming: WidgetUpcoming[]
+    today_events: WidgetUpcoming[]
   }
   study: {
     flashcards_due: number

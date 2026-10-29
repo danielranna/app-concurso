@@ -117,6 +117,20 @@ export async function buildWidgetSummary(input: {
         start_time: marker.start_time ? formatTimeShort(marker.start_time) : null,
         color: marker.color,
       })),
+      today_events: [...range.markers]
+        .sort(
+          (a, b) =>
+            (a.start_time ?? "99:99").localeCompare(b.start_time ?? "99:99") ||
+            a.title.localeCompare(b.title)
+        )
+        .map((marker) => ({
+          id: marker.id,
+          title: marker.title,
+          event_date: marker.event_date,
+          date_label: dayMonthLabel(marker.event_date),
+          start_time: marker.start_time ? formatTimeShort(marker.start_time) : null,
+          color: marker.color,
+        })),
     },
     study: {
       flashcards_due: panel.totals.due_today,

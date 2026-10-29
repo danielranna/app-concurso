@@ -32,6 +32,10 @@ html.widget-glass body {
   height: 100%;
 }
 
+html.widget-glass nextjs-portal {
+  display: none !important;
+}
+
 select,
 option,
 .ui-select {

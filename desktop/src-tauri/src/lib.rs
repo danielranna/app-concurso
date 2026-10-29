@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::Local;
+use chrono::{Local, Timelike};
 use serde::{Deserialize, Serialize};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -40,7 +40,7 @@ impl Default for Pulse {
 
 const RAIL_LAYOUT: u8 = 2;
 const RAIL_WIDTH: f64 = 380.0;
-const RAIL_HEIGHT: f64 = 700.0;
+const RAIL_HEIGHT: f64 = 800.0;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Persisted {
@@ -50,6 +50,12 @@ struct Persisted {
     always_on_top: bool,
     #[serde(default)]
     layout: u8,
+    #[serde(default)]
+    reminders_date: String,
+    #[serde(default)]
+    reminded_morning: bool,
+    #[serde(default)]
+    reminded_afternoon: bool,
 }
 
 impl Default for Persisted {
@@ -60,6 +66,9 @@ impl Default for Persisted {
             y: None,
             always_on_top: false,
             layout: 0,
+            reminders_date: String::new(),
+            reminded_morning: false,
+            reminded_afternoon: false,
         }
     }
 }
@@ -87,6 +96,15 @@ struct PulseBody {
 #[derive(Deserialize)]
 struct PulseAgenda {
     now: Option<PulseNow>,
+    #[serde(default)]
+    today_events: Vec<PulseEvent>,
+}
+
+#[derive(Deserialize)]
+struct PulseEvent {
+    title: String,
+    #[serde(default)]
+    start_time: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -205,6 +223,7 @@ fn dock_top_right(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
 }
 
 fn place_rail(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let _ = window.set_size(tauri::LogicalSize::new(RAIL_WIDTH, RAIL_HEIGHT));
     let layout = app
         .state::<AppState>()
         .persisted
@@ -225,7 +244,6 @@ fn place_rail(app: &AppHandle, window: &tauri::WebviewWindow) {
         return;
     }
 
-    let _ = window.set_size(tauri::LogicalSize::new(RAIL_WIDTH, RAIL_HEIGHT));
     let Some((x, y)) = dock_top_right(window) else {
         return;
     };
@@ -300,8 +318,45 @@ fn snapshot_from(body: &PulseBody) -> (Option<String>, Option<String>, i64, Opti
 }
 
 fn agenda_body(now: &PulseNow) -> String {
-    let label = if now.status == "next" { "A seguir" } else { "Agora" };
-    format!("{label}: {} ({}–{})", now.title, now.start_time, now.end_time)
+    format!("Troque para {} ({}–{})", now.title, now.start_time, now.end_time)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ReminderSlot {
+    Morning,
+    Afternoon,
+}
+
+fn reminder_slot(hour: u32) -> Option<ReminderSlot> {
+    match hour {
+        8..=11 => Some(ReminderSlot::Morning),
+        14..=18 => Some(ReminderSlot::Afternoon),
+        _ => None,
+    }
+}
+
+fn should_notify_switch(
+    primed: bool,
+    previous_id: &Option<String>,
+    previous_status: &Option<String>,
+    next_id: &Option<String>,
+    next_status: Option<&str>,
+) -> bool {
+    primed
+        && next_id.is_some()
+        && next_status == Some("active")
+        && (previous_id != next_id || previous_status.as_deref() != Some("active"))
+}
+
+fn events_body(events: &[PulseEvent]) -> String {
+    events
+        .iter()
+        .map(|event| match event.start_time.as_deref() {
+            Some(time) if !time.is_empty() => format!("{} · {}", event.title, time),
+            _ => event.title.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 async fn poll_once(app: &AppHandle, client: &reqwest::Client) {
@@ -319,7 +374,8 @@ async fn poll_once(app: &AppHandle, client: &reqwest::Client) {
     }
 
     let now = Local::now();
-    let today = now.format("%Y-%m-%d");
+    let today = now.format("%Y-%m-%d").to_string();
+    let hour = now.hour();
     let hhmm = now.format("%H:%M");
     let url = format!(
         "{origin}/api/widget/summary?user_id={user_id}&period=7d&today={today}&now={hhmm}"
@@ -350,31 +406,72 @@ async fn poll_once(app: &AppHandle, client: &reqwest::Client) {
         Err(_) => return,
     };
 
-    if pulse.primed {
-        let block_changed = pulse.block_id != block_id && block_id.is_some();
-        let started = pulse.block_id.is_some()
-            && pulse.block_id == block_id
-            && pulse.status.as_deref() == Some("next")
-            && status.as_deref() == Some("active");
-        if block_changed || started {
-            if let Some(now_block) = now_block {
-                toast(app, "Agenda", &agenda_body(now_block));
-            }
+    if should_notify_switch(
+        pulse.primed,
+        &pulse.block_id,
+        &pulse.status,
+        &block_id,
+        status.as_deref(),
+    ) {
+        if let Some(now_block) = now_block {
+            toast(app, "Hora de trocar", &agenda_body(now_block));
         }
-        if due > pulse.due {
-            let label = if due == 1 {
-                "1 flashcard pendente".to_string()
-            } else {
-                format!("{due} flashcards pendentes")
-            };
-            toast(app, "Flashcards", &label);
-        }
+    }
+    if pulse.primed && due > pulse.due {
+        let label = if due == 1 {
+            "1 flashcard pendente".to_string()
+        } else {
+            format!("{due} flashcards pendentes")
+        };
+        toast(app, "Flashcards", &label);
     }
 
     pulse.primed = true;
     pulse.block_id = block_id;
     pulse.status = status;
     pulse.due = due;
+    drop(pulse);
+    remind_today_events(app, &today, hour, &body.agenda.today_events);
+}
+
+fn remind_today_events(app: &AppHandle, today: &str, hour: u32, events: &[PulseEvent]) {
+    if events.is_empty() {
+        return;
+    }
+    let Some(slot) = reminder_slot(hour) else {
+        return;
+    };
+    let state = app.state::<AppState>();
+    let path = state.state_path.clone();
+    let snapshot = {
+        let mut persisted = match state.persisted.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        if persisted.reminders_date != today {
+            persisted.reminders_date = today.to_string();
+            persisted.reminded_morning = false;
+            persisted.reminded_afternoon = false;
+        }
+        let already = match slot {
+            ReminderSlot::Morning => persisted.reminded_morning,
+            ReminderSlot::Afternoon => persisted.reminded_afternoon,
+        };
+        if already {
+            return;
+        }
+        match slot {
+            ReminderSlot::Morning => persisted.reminded_morning = true,
+            ReminderSlot::Afternoon => persisted.reminded_afternoon = true,
+        }
+        persisted.clone()
+    };
+    write_persisted(&path, &snapshot);
+    let title = match slot {
+        ReminderSlot::Morning => "Lembrete da manhã",
+        ReminderSlot::Afternoon => "Lembrete da tarde",
+    };
+    toast(app, title, &events_body(events));
 }
 
 fn spawn_poll(app: AppHandle) {
@@ -714,4 +811,34 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("erro ao abrir o widget");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_notify_switch, ReminderSlot, reminder_slot};
+
+    #[test]
+    fn switch_only_when_a_block_becomes_active() {
+        let academia = Some("a".to_string());
+        let direito = Some("b".to_string());
+        let active = Some("active".to_string());
+        let next = Some("next".to_string());
+        assert!(!should_notify_switch(false, &None, &None, &academia, Some("active")));
+        assert!(!should_notify_switch(true, &academia, &active, &academia, Some("active")));
+        assert!(should_notify_switch(true, &academia, &active, &direito, Some("active")));
+        assert!(should_notify_switch(true, &academia, &next, &academia, Some("active")));
+        assert!(!should_notify_switch(true, &academia, &active, &direito, Some("next")));
+        assert!(!should_notify_switch(true, &academia, &active, &None, None));
+    }
+
+    #[test]
+    fn reminders_fall_in_morning_and_afternoon() {
+        assert_eq!(reminder_slot(7), None);
+        assert_eq!(reminder_slot(8), Some(ReminderSlot::Morning));
+        assert_eq!(reminder_slot(11), Some(ReminderSlot::Morning));
+        assert_eq!(reminder_slot(12), None);
+        assert_eq!(reminder_slot(14), Some(ReminderSlot::Afternoon));
+        assert_eq!(reminder_slot(18), Some(ReminderSlot::Afternoon));
+        assert_eq!(reminder_slot(19), None);
+    }
 }
