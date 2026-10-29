@@ -14,6 +14,7 @@ import {
   Tooltip,
 } from "recharts"
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
+import { startOfLocalDayIso } from "@/lib/home-date"
 import { supabase } from "@/lib/supabase"
 import PerformanceStackBar from "@/components/questions/PerformanceStackBar"
 import StatisticsAnalysisTab from "@/components/questions/StatisticsAnalysisTab"
@@ -30,10 +31,11 @@ type SortMode = "index" | "strong" | "weak"
 type StatsTab = "overview" | "analysis"
 
 const PERIOD_OPTIONS: { value: StatsPeriod; label: string }[] = [
-  { value: "all", label: "Acumulado" },
+  { value: "hoje", label: "Hoje" },
   { value: "7d", label: "Últimos 7 dias" },
   { value: "30d", label: "Últimos 30 dias" },
   { value: "90d", label: "Últimos 90 dias" },
+  { value: "all", label: "Acumulado" },
 ]
 
 function sortSubjects(rows: SubjectStatRow[], mode: SortMode): SubjectStatRow[] {
@@ -157,6 +159,7 @@ export default function QuestoesEstatisticasPage() {
     async (uid: string, p: StatsPeriod, subjectFilter: Set<string>) => {
       setLoading(true)
       const params = new URLSearchParams({ user_id: uid, period: p })
+      if (p === "hoje") params.set("since", startOfLocalDayIso())
       if (
         allSubjects.length > 0 &&
         subjectFilter.size > 0 &&

@@ -24,8 +24,12 @@ function stripHtml(html: string): string {
 
 function periodStart(period: StatsPeriod): string | null {
   if (period === "all") return null
-  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90
   const d = new Date()
+  if (period === "hoje") {
+    d.setHours(0, 0, 0, 0)
+    return d.toISOString()
+  }
+  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90
   d.setDate(d.getDate() - days)
   return d.toISOString()
 }
@@ -134,7 +138,7 @@ type ResolvedAttempt = {
 }
 
 function bucketKey(date: Date, period: StatsPeriod): string {
-  if (period === "7d" || period === "30d") {
+  if (period === "hoje" || period === "7d" || period === "30d") {
     return date.toISOString().slice(0, 10)
   }
   // weekly: Monday of week
@@ -166,7 +170,7 @@ function dominantKey(counts: Map<string, number>): string | null {
 
 export async function fetchQuestionStatisticsAnalysis(
   userId: string,
-  opts: { period?: StatsPeriod; subjectIds?: string[] } = {}
+  opts: { period?: StatsPeriod; since?: string | null; subjectIds?: string[] } = {}
 ): Promise<QuestionStatisticsAnalysisResult> {
   const period = opts.period ?? "all"
   const filterSubjectIds =
@@ -174,7 +178,7 @@ export async function fetchQuestionStatisticsAnalysis(
       ? new Set(opts.subjectIds)
       : null
 
-  const since = periodStart(period)
+  const since = opts.since !== undefined ? opts.since : periodStart(period)
 
   const [{ data: subjects }, mappings] = await Promise.all([
     supabaseServer.from("subjects").select("id, name").eq("user_id", userId).order("name"),

@@ -2,6 +2,12 @@ export function isTodayDate(dayStr: string, now = new Date()): boolean {
   return dayStr === toDateInputValue(now)
 }
 
+export function startOfLocalDayIso(now = new Date()): string {
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  return start.toISOString()
+}
+
 export function toDateInputValue(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")

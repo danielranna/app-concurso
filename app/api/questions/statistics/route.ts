@@ -4,7 +4,7 @@ import {
   type StatsPeriod,
 } from "@/lib/question-statistics"
 
-const VALID_PERIODS: StatsPeriod[] = ["all", "7d", "30d", "90d"]
+const VALID_PERIODS: StatsPeriod[] = ["all", "hoje", "7d", "30d", "90d"]
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -21,8 +21,24 @@ export async function GET(req: Request) {
     ? subjectIds.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined
 
+  let since: string | undefined
+  if (period === "hoje") {
+    const sinceParam = url.searchParams.get("since")
+    if (sinceParam) {
+      const parsed = Date.parse(sinceParam)
+      if (Number.isNaN(parsed)) {
+        return NextResponse.json({ error: "since inválido" }, { status: 400 })
+      }
+      since = new Date(parsed).toISOString()
+    }
+  }
+
   try {
-    const data = await fetchQuestionStatistics(user_id, { period, subjectIds: subject_ids })
+    const data = await fetchQuestionStatistics(user_id, {
+      period,
+      since,
+      subjectIds: subject_ids,
+    })
     return NextResponse.json(data)
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro"

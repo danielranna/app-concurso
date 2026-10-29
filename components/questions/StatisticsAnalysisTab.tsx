@@ -9,6 +9,7 @@ import StatsTrendChart from "@/components/questions/StatsTrendChart"
 import ErrorMetaCharts from "@/components/questions/ErrorMetaCharts"
 import AnalysisQuestionPanel from "@/components/questions/AnalysisQuestionPanel"
 import { SequencePatternBadge } from "@/components/questions/SequencePatternBadge"
+import { startOfLocalDayIso } from "@/lib/home-date"
 import { cn } from "@/lib/utils"
 import type { StatsPeriod } from "@/lib/question-statistics"
 import type {
@@ -78,6 +79,7 @@ export default function StatisticsAnalysisTab({
     setLoading(true)
     setError(null)
     const params = new URLSearchParams({ user_id: userId, period })
+    if (period === "hoje") params.set("since", startOfLocalDayIso())
     if (
       allSubjects.length > 0 &&
       selectedSubjects.size > 0 &&

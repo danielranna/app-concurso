@@ -6,7 +6,7 @@ function normKey(s: string) {
   return (s ?? "").trim()
 }
 
-export type StatsPeriod = "all" | "7d" | "30d" | "90d"
+export type StatsPeriod = "all" | "hoje" | "7d" | "30d" | "90d"
 
 export type TopicStatRow = {
   name: string
@@ -68,8 +68,12 @@ function unwrapQ(
 
 function periodStart(period: StatsPeriod): string | null {
   if (period === "all") return null
-  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90
   const d = new Date()
+  if (period === "hoje") {
+    d.setHours(0, 0, 0, 0)
+    return d.toISOString()
+  }
+  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90
   d.setDate(d.getDate() - days)
   return d.toISOString()
 }
