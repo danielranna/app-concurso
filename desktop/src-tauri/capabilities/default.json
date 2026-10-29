@@ -30,6 +30,7 @@
     "allow-show-widget",
     "allow-open-external",
     "allow-screen-position",
-    "allow-set-screen-position"
+    "allow-set-screen-position",
+    "allow-test-notification"
   ]
 }

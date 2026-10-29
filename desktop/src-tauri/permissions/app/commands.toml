@@ -22,3 +22,8 @@ commands.allow = ["screen_position"]
 identifier = "allow-set-screen-position"
 description = "Move o widget pela área de trabalho."
 commands.allow = ["set_screen_position"]
+
+[[permission]]
+identifier = "allow-test-notification"
+description = "Envia uma notificação de teste do Windows."
+commands.allow = ["test_notification"]

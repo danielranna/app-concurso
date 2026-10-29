@@ -375,6 +375,12 @@
           "markdownDescription": "Mostra a janela do widget."
         },
         {
+          "description": "Envia uma notificação de teste do Windows.",
+          "type": "string",
+          "const": "allow-test-notification",
+          "markdownDescription": "Envia uma notificação de teste do Windows."
+        },
+        {
           "description": "This permission set configures if your\napplication can enable or disable auto\nstarting the application on boot.\n\n#### Granted Permissions\n\nIt allows all to check, enable and\ndisable the automatic start on boot.\n\n\n#### This default permission set includes:\n\n- `allow-enable`\n- `allow-disable`\n- `allow-is-enabled`",
           "type": "string",
           "const": "autostart:default",

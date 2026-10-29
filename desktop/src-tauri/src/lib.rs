@@ -276,8 +276,17 @@ fn reveal(app: &AppHandle) {
     }
 }
 
-fn toast(app: &AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
+fn toast(_app: &AppHandle, title: &str, body: &str) {
+    let _ = show_windows_toast(title, body);
+}
+
+fn show_windows_toast(title: &str, body: &str) -> Result<(), String> {
+    notify_rust::Notification::new()
+        .summary(title)
+        .body(body)
+        .show()
+        .map(|_| ())
+        .map_err(|err| err.to_string())
 }
 
 fn allowed_url(raw: &str, origin: &str) -> bool {
@@ -520,6 +529,14 @@ fn set_user(state: State<'_, AppState>, user_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn test_notification() -> Result<(), String> {
+    show_windows_toast(
+        "Teste do widget",
+        "Se esta notificação apareceu, o Windows está recebendo os avisos.",
+    )
+}
+
+#[tauri::command]
 fn show_widget(app: AppHandle) {
     reveal(&app);
 }
@@ -627,7 +644,8 @@ pub fn run() {
             show_widget,
             open_external,
             screen_position,
-            set_screen_position
+            set_screen_position,
+            test_notification
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;

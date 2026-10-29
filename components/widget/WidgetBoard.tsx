@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   PieChart,
   Pie,
@@ -15,7 +15,15 @@ import {
 import { Check, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { toDateInputValue } from "@/lib/home-date"
-import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink } from "@/lib/widget-bridge"
+import { supabase } from "@/lib/supabase"
+import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink, sendTestNotification, widgetRunningInShell } from "@/lib/widget-bridge"
+import { widgetQuestionTopic } from "@/lib/widget-question-live"
+import {
+  attemptInPeriod,
+  bumpQuestionStats,
+  reconcileQuestionStats,
+  type LiveAttempt,
+} from "@/lib/widget-question-live"
 import {
   WIDGET_PERIOD_LABELS,
   WIDGET_PERIODS,
@@ -45,11 +53,36 @@ function localClock(): { today: string; now: string } {
   return { today: toDateInputValue(current), now }
 }
 
+function TestNotificationButton() {
+  const [note, setNote] = useState<string | null>(null)
+  if (!widgetRunningInShell()) return null
+  return (
+    <div className="shrink-0">
+      <button
+        type="button"
+        className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white"
+        onClick={() => {
+          setNote("Enviando…")
+          void sendTestNotification()
+            .then(() => setNote("Pedido enviado. Olhe o canto da tela."))
+            .catch((err: unknown) => setNote(err instanceof Error ? err.message : "Não foi possível enviar."))
+        }}
+      >
+        Testar notificação
+      </button>
+      {note && <p className="mt-1 text-[11px] text-slate-600">{note}</p>}
+    </div>
+  )
+}
+
 export default function WidgetBoard({ userId }: Props) {
   const [period, setPeriod] = useState<WidgetPeriod>("7d")
   const [data, setData] = useState<WidgetSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
+  const lateRef = useRef<LiveAttempt[]>([])
+  const seenRef = useRef(new Set<string>())
+  const foldedRef = useRef(new Set<string>())
 
   const load = useCallback(
     async (nextPeriod: WidgetPeriod) => {
@@ -62,12 +95,18 @@ export default function WidgetBoard({ userId }: Props) {
       })
       const since = periodSince(nextPeriod)
       if (since) params.set("since", since)
+      const started = Date.now()
       const res = await fetch(`/api/widget/summary?${params}`)
       const body = await res.json()
       if (!res.ok) {
         throw new Error(typeof body.error === "string" ? body.error : "Erro ao carregar")
       }
-      setData(body as WidgetSummary)
+      const summary = body as WidgetSummary
+      const late = lateRef.current.filter((attempt) => attempt.receivedAt >= started)
+      lateRef.current = []
+      for (const attempt of late) foldedRef.current.add(attempt.id)
+      summary.stats = reconcileQuestionStats(summary.stats, late)
+      setData(summary)
       setError(null)
     },
     [userId]
@@ -75,12 +114,16 @@ export default function WidgetBoard({ userId }: Props) {
 
   useEffect(() => {
     let cancelled = false
+    let running = false
     async function run() {
+      if (running) return
+      running = true
       try {
         await load(period)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Erro ao carregar")
       } finally {
+        running = false
         if (!cancelled) setInitialLoading(false)
       }
     }
@@ -98,6 +141,39 @@ export default function WidgetBoard({ userId }: Props) {
       document.removeEventListener("visibilitychange", onVisible)
     }
   }, [load, period])
+
+  useEffect(() => {
+    const since = periodSince(period)
+    const channel = supabase.channel(widgetQuestionTopic(userId))
+    channel.on("broadcast", { event: "attempt" }, (message) => {
+      const payload = message.payload as {
+        id?: string
+        is_correct?: boolean
+        duration_ms?: number
+        created_at?: string
+      }
+      if (!payload?.id || typeof payload.created_at !== "string") return
+      if (seenRef.current.has(payload.id)) return
+      if (!attemptInPeriod(payload.created_at, since)) return
+      const attempt: LiveAttempt = {
+        id: payload.id,
+        isCorrect: Boolean(payload.is_correct),
+        durationMs: Math.max(0, Number(payload.duration_ms) || 0),
+        createdAt: payload.created_at,
+        receivedAt: Date.now(),
+      }
+      seenRef.current.add(attempt.id)
+      lateRef.current.push(attempt)
+      setData((current) => {
+        if (!current || foldedRef.current.has(attempt.id)) return current
+        return { ...current, stats: bumpQuestionStats(current.stats, attempt) }
+      })
+    })
+    void channel.subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [userId, period])
 
   const pieData = useMemo(() => {
     const summary = data?.stats.summary
@@ -175,6 +251,8 @@ export default function WidgetBoard({ userId }: Props) {
         <p className="text-sm font-semibold tabular-nums">{agenda?.date_label ?? "—"}</p>
         <p className="text-xs text-slate-500">{agenda?.weekday_label ?? ""}</p>
       </header>
+
+      <TestNotificationButton />
 
       {error && (
         <p className="shrink-0 rounded-lg bg-red-50/90 px-2.5 py-1.5 text-xs text-red-700">{error}</p>

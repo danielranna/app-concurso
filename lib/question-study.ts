@@ -1,4 +1,5 @@
 import { supabaseServer } from "./supabase-server"
+import { notifyWidgetAttempt } from "./widget-attempt-broadcast"
 import { fetchAllPages, mapPool } from "./supabase-pages"
 import { loadSharedBlocksForQuestion } from "./shared-assets-server"
 import type { ResolvedSharedBlock } from "./shared-assets-types"
@@ -232,9 +233,21 @@ export async function recordAttempt(params: {
     delete payload.attempt_tags
     const retry = await supabaseServer.from("question_attempts").insert(payload).select("id").single()
     if (retry.error) throw new Error(retry.error.message)
+    notifyWidgetAttempt(params.user_id, {
+      id: retry.data.id as string,
+      is_correct: params.is_correct,
+      duration_ms: payload.duration_ms == null ? 0 : Number(payload.duration_ms),
+      created_at: new Date().toISOString(),
+    })
     return { id: retry.data.id as string }
   }
   if (error) throw new Error(error.message)
+  notifyWidgetAttempt(params.user_id, {
+    id: data!.id as string,
+    is_correct: params.is_correct,
+    duration_ms: payload.duration_ms == null ? 0 : Number(payload.duration_ms),
+    created_at: new Date().toISOString(),
+  })
   return { id: data!.id as string }
 }
 
