@@ -72,11 +72,3 @@ export function endWidgetDrag(): void {
   dragActive = false
   dragSession = null
 }
-
-export async function sendTestNotification(): Promise<void> {
-  const invoke = tauriInvoke()
-  if (!invoke) {
-    throw new Error("Abra pelo widget da área de trabalho.")
-  }
-  await invoke("test_notification")
-}

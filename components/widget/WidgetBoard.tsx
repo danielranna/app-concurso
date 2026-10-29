@@ -16,7 +16,7 @@ import { Check, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { toDateInputValue } from "@/lib/home-date"
 import { supabase } from "@/lib/supabase"
-import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink, sendTestNotification, widgetRunningInShell } from "@/lib/widget-bridge"
+import { beginWidgetDrag, endWidgetDrag, moveWidgetDrag, openWidgetLink } from "@/lib/widget-bridge"
 import { widgetQuestionTopic } from "@/lib/widget-question-live"
 import {
   attemptInPeriod,
@@ -51,28 +51,6 @@ function localClock(): { today: string; now: string } {
   const current = new Date()
   const now = `${String(current.getHours()).padStart(2, "0")}:${String(current.getMinutes()).padStart(2, "0")}`
   return { today: toDateInputValue(current), now }
-}
-
-function TestNotificationButton() {
-  const [note, setNote] = useState<string | null>(null)
-  if (!widgetRunningInShell()) return null
-  return (
-    <div className="shrink-0">
-      <button
-        type="button"
-        className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-white"
-        onClick={() => {
-          setNote("Enviando…")
-          void sendTestNotification()
-            .then(() => setNote("Pedido enviado. Olhe o canto da tela."))
-            .catch((err: unknown) => setNote(err instanceof Error ? err.message : "Não foi possível enviar."))
-        }}
-      >
-        Testar notificação
-      </button>
-      {note && <p className="mt-1 text-[11px] text-slate-600">{note}</p>}
-    </div>
-  )
 }
 
 export default function WidgetBoard({ userId }: Props) {
@@ -251,8 +229,6 @@ export default function WidgetBoard({ userId }: Props) {
         <p className="text-sm font-semibold tabular-nums">{agenda?.date_label ?? "—"}</p>
         <p className="text-xs text-slate-500">{agenda?.weekday_label ?? ""}</p>
       </header>
-
-      <TestNotificationButton />
 
       {error && (
         <p className="shrink-0 rounded-lg bg-red-50/90 px-2.5 py-1.5 text-xs text-red-700">{error}</p>
